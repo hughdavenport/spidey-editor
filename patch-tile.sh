@@ -2,6 +2,7 @@
 
 set -o errexit
 tile=$1
+offset=${2:-0}
 y=21
 room=0
 
@@ -25,6 +26,7 @@ for x in {24..30}; do
     ./a.out patch $room tile[$x][$((y-1))] $tile
     ./a.out patch $room tile[$x][$y] $((tile+64))
 done
+./a.out patch $room tile_offset $offset
 ./a.out display $room
-./a.out find_tile $tile
+./a.out find_tile $tile $offset
 ./play.sh

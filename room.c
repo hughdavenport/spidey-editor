@@ -891,6 +891,8 @@ int main(int argc, char **argv) {
                     fprintf(stderr, "Usage: %s find_tile tile_id [tile_offset]\n", program);
                     return 1;
                 }
+                argv ++;
+                argc --;
             }
         } else if (strcmp(argv[0], "help") == 0) {
             fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
