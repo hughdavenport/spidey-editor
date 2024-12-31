@@ -6,7 +6,7 @@ cd $SPIDEY_DIR
 ls
 dosbox SPIDEY.EXE &
 db=$!
-sleep 2
+sleep 3
 # xdotool key Alt+Return
 sleep .2
 xdotool type 1

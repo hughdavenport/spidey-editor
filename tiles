@@ -1,0 +1,214 @@
+tiles cycle every 64 (really in chunks of 4, the game only uses tile offset 0 4 8 16 20 24 28)
+offset 0 used in room 0, 1, 2, 3, 5, 6, 7, 15, 23, 21, 47, 55, 62, 63
+first set of 64 0-0x3f - fall through
+second set 0x40-0x7f - solid
+third set 0x80-0xbf - magnetic (can't stick web to it)
+fourth set 0xc0-0xff- slippery (won't hurt)
+
+tiles show on screen 32 wide, 22 high
+
+tileset 0-4
+tile 0x00 - invisible
+tile 0x01 - red square, hurts (not when slippery) NOT USED
+tile 0x02 - horizontal blue wall girder thing
+tile 0x03 - vertical blue wall girder thing
+tile 0x04 - yellow topped floor
+tile 0x05 - yellow topped floor with triangle missing on left
+tile 0x06 - yellow topped floor with triangle missing on right
+tile 0x07 - yellow slimey floor (only slippery in fourth set of 64, ie 0xc7)
+tile 0x08 - blue cylinder used in vertical blue wall girder thing
+tile 0x09 - thinner blue cylinder used as gate at bottom of midnight (as 0x49)
+tile 0x0a - blue part underneath helipad, also right of cabinet thing you climb over at bottom right of midnight
+tile 0x0b - blue beam with black gap in it horizontal, bottom of the wide blue couch thing in foyer on the right side (bottom and mid level)
+tile 0x0c - vertical dial thing shown on the cabinet thing bottom right of midnight
+tile 0x0d - diagonal dial thing shown on the cabinet thing bottom right of midnight
+tile 0x0e - weird, it shows up in "Way Out" as 0x4e, but in the water channel. does not show as what it does in room 0 test, so likely something to do with unknown data
+tile 0x0f - middle of cabinet thing bot right of midnight
+tile 0x10 - red button thing you have to press in cave of midnight on left wall
+tile 0x11 - green button thing after it's pressed (NOT USED IN FILES)
+tile 0x12 - yellow button thing hanging from roof that you toggle in foyer
+tile 0x13 - grey button thing hanging from roof (after toggled) (NOT USED IN FILES)
+tile 0x14 - green button thing in floor
+tile 0x15 - red button thing in floor
+tile 0x16 - green traffic light circle
+tile 0x17 - black traffic light circle
+tile 0x18 - full purple tile, NOT USED
+tile 0x19 - full purple tile, again, NOT USED
+tile 0x1a - full purple tile, again, NOT USED
+tile 0x1b - full purple tile, again, NOT USED
+tile 0x1c - electric field thing, hurts (just not when slippery)
+tile 0x1d - electric field thing, hurts (just not when slippery) (NOT USED)
+tile 0x1e - electric field thing, hurts (just not when slippery)
+tile 0x1f - electric field thing, hurts (just not when slippery)
+tile 0x20 - orange traffic light circle (NOT USED)
+tile 0x21 - purple traffic light circle
+tile 0x22 - light blue tile with white outlines, NOT USED
+tile 0x23 - light blue tile with white outlines, NOT USED
+tile 0x24 - solid light blue tile, NOT USED
+tile 0x25 - filing cabinet thing by r2d2
+tile 0x26 - top of seat thing by r2d2
+tile 0x27 - bottom of seat thing by r2d2
+tile 0x28 - white floor tile under starting spot
+tile 0x29 - thin white bar at top of black tile, NOT USED
+tile 0x2a - thin white/blue bar at top with white rock like thing below. NOT USED
+tile 0x2b - rotor of helicopter
+tile 0x2c - tail end of rotor of helicopter
+tile 0x2d - tail of helicopter
+tile 0x2e - front end of landing gear of helicoptor
+tile 0x2f - tail end of landing gear of helicoptor
+tile 0x30 - white/grey diagonal line with hole in middle, maybe swivel after the TAKE comes down? NOT USED IN FILES
+tile 0x31 - white/grey diagonal line with hole in middle, used in all the TAKES as the swivel point
+tile 0x32 - white/grey diagonal line, maybe the top bar of TAKE after comes down? NOT USED IN FILES
+tile 0x33 - white/grey diagonal line, the top bar of TAKE before comes down?
+tile 0x34 - grey block with white line at bottom, used in TAKE as second row down before it comes down (third after?)
+tile 0x35 - grey block, bottom of TAKE thingy
+tile 0x36 - first curly block of signature on TAKE thingy
+tile 0x37 - remainder of signature (repeated) in TAKE thingy
+tile 0x38 - static shown in mysterio's end
+tile 0x39 - top right hand corner of static in mysterio's end
+tile 0x3a - more static, NOT USED
+tile 0x3b - more static, NOT USED
+tile 0x3c - blue healing thing from TAKE's, but hurts by default
+tile 0x3d - blue healing thing, but hurts, but also NOT USED
+tile 0x3e - blue healing thing, but hurts, but also NOT USED
+tile 0x3f - blue healing thing, but hurts, but also NOT USED
+
+offset 4 used in room 8, 9, 10, 11, 12, 13
+tile 0x00 - blank tile
+tile 0x01 - the underwater white floor tile in basement areas
+tile 0x02 - normal white floor tile in basement areas
+tile 0x03 - white wall in basement
+tile 0x04 - green slime tile (but only slimey if 0xc4)
+tile 0x05 - chain tile (used in storage room)
+tile 0x06 - blue hinge thing used in great drain robbery and wot no turtles
+tile 0x07 - top left of crates on left wall in basement
+tile 0x08 - bottom left of crates on left wall in basement
+tile 0x09 - top right of crates on left wall in basement
+tile 0x0a - bottom right of crates on left wall in basement
+tile 0x0b - grey tile with flat top and stripey bottom. NOT USED
+tile 0x0c - grey tile with flat bottom and stripey top. NOT USED
+tile 0x0d - rock tile used in basement sewer  area. not the same as rocks used under the soil (0x76 offset 8)
+tile 0x0e - double rock tile used in basement sewer  area. not the same as rocks used under the soil (0x77 offset 8)
+tile 0x0f - another double rock tile
+tile 0x10 - tile with triangle switch thing
+tile 0x11 - tile with triangle switch thing that is switched? (it's in way out by the rat, but doesn't look switched there so may be some magic in the unknown bytes)
+tile 0x12 - slime with triangle switch thing underneath
+tile 0x13 - slime with triangle switch thing underneath, switched, already in storage room (not switched there, so must be magic)
+tile 0x14 - white tile with black '<' and grey dithering, NOT USED
+tile 0x15 - three grey horizontal lines (grey hamburger), NOT USED
+tile 0x16 - hook holding the platforms in sewer and drain
+tile 0x17 - chain like thing, but NOT USED
+tile 0x18 - green flashing tile, NOT USED
+tile 0x19 - green flashing tile again, NOT USED
+tile 0x1a - green flashing tile again, NOT USED
+tile 0x1b - green flashing tile again, NOT USED
+tile 0x1c - fire tiles in storage room/way out, hurts
+tile 0x1d - fire tiles, hurts NOT USED
+tile 0x1e - fire tiles, hurts NOT USED
+tile 0x1f - fire tiles, hurts NOT USED
+tile 0x20 - chain turning corner bottom to right in great drain robbery, hurts
+tile 0x21 - sideways chain in great drain, hurts
+tile 0x22 - white tile on roof of water chanel in basement
+tile 0x23 - vertical white tile that falls down into water chanel in basement
+tile 0x24 - white "corner piece" of the roof of water channel. curving from bottom to right
+tile 0x25 - white "corner piece" of the roof of water channel. curving from left to bottom
+tile 0x26 - white "corner piece" of the roof of water channel. curving from top to right
+tile 0x27 - white "corner piece" of the roof of water channel. curving from left to top
+tile 0x28 - slimey white tiles in sewer
+tile 0x29 - chain turning corner left to bottom in great drain robbery, does not hurts
+tile 0x2a - veritcal grey gate in sewer blocking path until you get on platform
+tile 0x2b - similar vertical grey tile, but has water behind it (right at bottom of into the sewer)
+tile 0x2c - brown/red slimey tiles in sewer
+tile 0x2d - brown/red slimey tiles on left edge of platforms in sewer
+tile 0x2e - brown/red tiles without slime
+tile 0x2f - brown/red slimey tiles on right edge of platforms in sewer
+tile 0x30 - white tile with red button/switch in bottom
+tile 0x31 - white tile with green button/switch in bottom, NOT USED IN FILES
+tile 0x32 - white tile with red button/switch in bottom
+tile 0x33 - white tile with green button/switch in bottom, NOT USED IN FILES
+tile 0x34 - white tile with red button/switch in right side
+tile 0x35 - white tile with green button/switch in right side, NOT USED IN FILES
+tile 0x36 - white tile with red button/switch in left side
+tile 0x37 - white tile with green button/switch in left side, NOT USED IN FILES
+tile 0x38 - water tile, doesn't hurt
+tile 0x39 - water tile, used at bottom of turtles, and right most tile in drain, doesn't hurt
+tile 0x3a - water tile, used just to the left of pile of rocks at bottom of sewer, doesn't hurt
+tile 0x3b - water tile, used in middle of pile of rocks at bottom of sewer, doesn't hurt
+tile 0x3c - vertical water, hurts, NOT USED
+tile 0x3d - vertical water used in drain and storage, hurts
+tile 0x3e - vertical water, hurts, NOT USED
+tile 0x3f - vertical water, hurts, NOT USED
+
+
+16
+  Tile offset: 8
+17
+  Tile offset: 8
+18
+  Tile offset: 8
+19
+  Tile offset: 8
+20
+  Tile offset: 8
+21
+  Tile offset: 8
+22
+  Tile offset: 8
+24
+  Tile offset: 12
+25
+  Tile offset: 12
+26
+  Tile offset: 12
+27
+  Tile offset: 12
+28
+  Tile offset: 12
+29
+  Tile offset: 12
+30
+  Tile offset: 12
+32
+  Tile offset: 16
+33
+  Tile offset: 16
+34
+  Tile offset: 16
+35
+  Tile offset: 16
+40
+  Tile offset: 20
+41
+  Tile offset: 20
+42
+  Tile offset: 20
+43
+  Tile offset: 20
+44
+  Tile offset: 20
+45
+  Tile offset: 20
+46
+  Tile offset: 20
+48
+  Tile offset: 24
+49
+  Tile offset: 24
+50
+  Tile offset: 24
+51
+  Tile offset: 24
+52
+  Tile offset: 24
+53
+  Tile offset: 24
+56
+  Tile offset: 28
+57
+  Tile offset: 28
+58
+  Tile offset: 28
+59
+  Tile offset: 28
+60
+  Tile offset: 28
