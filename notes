@@ -1,0 +1,122 @@
+if (UNKNOWN2[1] != 0) {
+    for 0..UNKNOWN2[1] {
+        *(dst_p++) = di
+        di[3-4] = bx (0x150 + 3 * UNKNOWN2[0])
+        ah = si[0]
+        al = si[1]
+        si += 2
+        di[0] = ah
+        if (ah & 0x80 == 0) {
+            ... same as above
+        } else {
+//            call fun_1000_4200
+            *0x9293++; (started at 1)
+            bp += 0x32 (50)
+            // bp was 0x92ba
+            di[5-6] = bp
+//bx=0x150 + 3*UNKNOWN2[0]
+            bp[0x1e] = bx (+30)
+            bp[5] = 0x5f
+            tmp_ax = ax & 0x1f1f  (first two bytes)
+            di[1-2] = tmp_ax
+            tmp_ax += bx[0-1]
+            dl = (first & 0x1f) * 8
+            tmp_ax = tmp_al sign extended
+            tmp_ax *= 8
+            bl = bx[2] & 0x7
+            bp[4] = bl
+            bl *= 2
+            bh = 0
+            bx += 0xa9e3
+            cx = *bx
+            dl += ch
+            dl -= 0xa (10)
+            bp[3] = dl
+            ch = 0
+            tmp_ax += cx
+            tmp_ax -= 0xa
+            bp[1-2] = tmp_ax
+            bp[0] = 0x4
+            ax = orig_ax & 0x60e0
+            ax >>= 2
+            ah = 0
+            bx = 0xa9f3 + ax
+            ax = bx[2-3]
+            bp[0x2f] =bx[3]
+            bp[0x30] =bx[2]
+            bp[0x31] =0x0
+            bx = *bx
+            al = bx[0]
+            bp[0x10] = bx[0]
+            bx ++
+//            call fun_1000_3ed4
+            bp[0x29]-0x2a] = bx
+            bp[0x2b-0x2c] = bp[1-2]
+            bp[0x2d] = bp[3]
+            bp[0x2e] = bp[4]
+            do {
+                al = *(bx++)
+            } while (al * 0x80 != 0)
+// end fun_1000_3ed4
+//            call fun_1000_3ef8
+            bp[0x14-0x15] = bx[0-1]
+            bx += 2;
+            if bp[0x10] & 0x 2 != 0 {
+                *0x9382 = bx[0-1]
+                bx += 2;
+            }
+            cx = bx[0-1]
+            al = bp[4]
+//            call fun_1000_41af
+if al & 0x1 != 0 {
+    xchg ch, cl (cl now is bx[0] and ch is bx[1])
+    neg ch (ch = -bx[1], cl = bx[0])
+}
+if al & 0x2 != 0 {
+    neg cl (cl = -bx[1], ch = bx[0]  or cl = -bx[0], ch = bx[1])
+}
+if al & 0x4 != 0 {
+    neg ch
+}
+cx could -first second (if al has 0x4), or first -second (if al has 0x2), or -second first (if al is odd), or -second -first (0x3), or second first (0x5), or second -first (0x7), or just first second
+// end fun_1000_41af
+            if bp[0x10] & 0x1 != 0 {
+                cx += bp[0x18]
+            }
+            bp[0x18] = cx
+            bx += 2
+            bp[0x12] = bx
+            if (bp[0x10] & 0x1 == 0) {
+                bx = 0xa9e3 + (bp[4] * 2) & 0xff
+                cx = bx[0-1]
+                al = (bp[3] + 0xa) & 0xf8
+                al += ch (bx[0])
+                al -= 0xa
+                bp[3] = al
+                ax = (bp[1-2] + 0xa) & 0xf8
+                ax += cx
+                ax -= 0xa
+                bp[1-2] = ax
+            }
+// end fun_1000_3ef8
+            bx =bp[0x1e-0x1f]
+            al =bp[0x2f]
+            if bx[2] & 0x80 == 0 {
+                al = 0
+            }
+            bp[0x26] = al
+            di += 0x7
+            reset bx and cx
+// end fun_1000_4200
+        }
+        bx += 3;
+    }
+}
+
+// look at byte 716 of decompressed room (UNKNOWN2[2]) / 4
+cl = *0x1d12
+if (UNKNOWN2[2] / 4 != 0) {
+
+} else {
+
+}
