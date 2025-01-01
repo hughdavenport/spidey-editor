@@ -6,7 +6,9 @@ cd $SPIDEY_DIR
 ls
 dosbox SPIDEY.EXE &
 db=$!
-sleep 3
+# Wait for window to open
+i3-msg -m -t subscribe '[ "window" ]' | grep -q DOSBOX
+#sleep 5
 # xdotool key Alt+Return
 sleep .2
 xdotool type 1
