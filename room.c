@@ -111,7 +111,11 @@ void dumpRoom(Room *room) {
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.tiles); i ++) {
         if (i % WIDTH_TILES == 0) fprintf(stderr, "\n    ");
         if ((i % WIDTH_TILES) != 0) fprintf(stderr, " ");
-        fprintf(stderr, "%02x", room->data.tiles[i]);
+        if (room->data.tiles[i] == 0) {
+            fprintf(stderr, "  ");
+        } else {
+            fprintf(stderr, "%02x", room->data.tiles[i]);
+        }
     }
     fprintf(stderr, "\n");
 

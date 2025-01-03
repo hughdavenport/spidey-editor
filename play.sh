@@ -4,7 +4,7 @@ SPIDEY_DIR=${SPIDEY_DIR:-Spider}
 cp ROOMS.SPL $SPIDEY_DIR
 cd $SPIDEY_DIR
 ls
-dosbox SPIDEY.EXE &
+dosbox-x SPIDEY.EXE &
 db=$!
 # Wait for window to open
 i3-msg -m -t subscribe '[ "window" ]' | grep -q DOSBOX
