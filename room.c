@@ -696,6 +696,7 @@ typedef struct {
 } PatchInstruction;
 
 #define ROOMS_FILE "ROOMS.SPL"
+int editor_main();
 int main(int argc, char **argv) {
     char *fileName = ROOMS_FILE;
     RoomFile file = {0};
@@ -898,6 +899,8 @@ int main(int argc, char **argv) {
                 argv ++;
                 argc --;
             }
+        } else if (strcmp(argv[0], "editor") == 0) {
+            return editor_main();
         } else if (strcmp(argv[0], "help") == 0) {
             fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
             fprintf(stderr, "Subcommands:\n");
@@ -921,6 +924,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "    recompress                           - No changes to underlying data, just recompress\n");
         fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
         fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
+        fprintf(stderr, "    editor                               - Start an editor\n");
         fprintf(stderr, "    help                                 - Display this message\n");
         return 1;
     }
