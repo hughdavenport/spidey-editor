@@ -9,40 +9,10 @@
 
 #include <arpa/inet.h>
 
-#include "array.h"
 #define IO_IMPLEMENTATION
 #include "io.h"
 
-#define WIDTH_TILES 32
-#define HEIGHT_TILES 22
-struct DecompresssedRoom {
-    uint8_t tiles[WIDTH_TILES * HEIGHT_TILES];
-    uint8_t tile_offset;
-    uint8_t background;
-    uint8_t room_north;
-    uint8_t room_east;
-    uint8_t room_south;
-    uint8_t room_west;
-    uint8_t UNKNOWN;
-    uint8_t gravity_vertical;
-    uint8_t gravity_horizontal;
-    uint8_t UNKNOWN2[5];
-    char name[24];
-};
-
-typedef struct {
-    uint8_t index;
-    uint16_t address;
-    bool valid;
-    struct DecompresssedRoom data;
-    ARRAY(uint8_t) rest;
-    ARRAY(uint8_t) compressed;
-    ARRAY(uint8_t) decompressed;
-} Room;
-
-typedef struct {
-    Room rooms[64];
-} RoomFile;
+#include "room.h"
 
 // header of ROOMS.SPL (and BACKS.SPL also)
 typedef struct {
@@ -687,6 +657,18 @@ bool writeFile(RoomFile *file, FILE *fp) {
     if (fseek(fp, 0, SEEK_SET) == -1) return false;
     if (fwrite(&head, sizeof(Header), 1, fp) != 1) return false;
     return true;
+}
+
+bool readRooms(RoomFile *file) {
+    char *fileName = "ROOMS.SPL";
+    FILE *fp = fopen(fileName, "rb");
+    if (fp == NULL) {
+        fprintf(stderr, "Could not open %s for reading.\n", fileName);
+        return false;
+    }
+    bool ret = readFile(file, fp);
+    fclose(fp);
+    return ret;
 }
 
 typedef struct {

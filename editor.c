@@ -6,6 +6,8 @@
 
 #include <poll.h>
 
+#include <signal.h>
+
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -24,7 +26,7 @@
 
 #define UNREACHABLE() do { fprintf(stderr, "%s:%d: UNREACHABLE\n", __FILE__, __LINE__); exit(1); } while (false)
 
-#define LIBRARY_BUILD_CMD "cc -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared -o"
+#define LIBRARY_BUILD_CMD "cc -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c -o"
 
 #define SAVE_CURSOR "\x1b" "7"
 #define RESTORE_CURSOR "\x1b" "8"
@@ -77,6 +79,8 @@
 #define F11  "\x1b[23~"
 #define F12  "\x1b[24~"
 
+#include "room.h"
+
 typedef struct {
     int x;
     int y;
@@ -86,6 +90,8 @@ typedef struct {
     v2 player;
     v2 screen_dimensions;
     struct termios original_termios;
+    RoomFile rooms;
+    bool resized;
 } game_state;
 game_state *state = NULL;
 
@@ -93,6 +99,7 @@ void end() {
     printf(RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
     if (state != NULL) {
         assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
+        freeRoomFile(&state->rooms);
         free(state);
     }
     exit(0);
@@ -179,6 +186,15 @@ void redraw() {
     GOTO(1, 1);
     printf(RESET_GFX_MODE CLEAR_SCREEN);
 
+    if (state->screen_dimensions.x < WIDTH_TILES || state->screen_dimensions.y < HEIGHT_TILES) {
+        char *message = NULL;
+        assert(asprintf(&message, "Required screen dimension is %dx%d", WIDTH_TILES, HEIGHT_TILES) >= 0);
+        GOTO(state->screen_dimensions.x / 2 - (int)strlen(message) / 2, state->screen_dimensions.y / 2);
+        printf("%s", message);
+        fflush(stdout);
+        return;
+    }
+
     assert(state->player.x >= 1);
     assert(state->player.y >= 1);
     assert(state->player.x < state->screen_dimensions.x);
@@ -189,15 +205,19 @@ void redraw() {
     fflush(stdout);
 }
 
-void refresh_state() {
+void get_screen_dimensions() {
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
 
     state->screen_dimensions.x = w.ws_col;
     state->screen_dimensions.y = w.ws_row;
+}
 
-    state->player.x = state->screen_dimensions.x / 2;
-    state->player.y = state->screen_dimensions.y - 2;
+void sigwinch_handler(int arg) {
+    assert(arg == SIGWINCH);
+    if (state != NULL) {
+        state->resized = true;
+    }
 }
 
 void setup() {
@@ -212,6 +232,15 @@ void setup() {
     struct termios new = state->original_termios;
     new.c_lflag &= ~(ICANON | ECHO);
     assert(tcsetattr(STDIN_FILENO, TCSANOW, &new) == 0);
+
+    signal(SIGWINCH, sigwinch_handler);
+
+    get_screen_dimensions();
+
+    state->player.x = state->screen_dimensions.x / 2;
+    state->player.y = state->screen_dimensions.y - 2;
+
+    assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
 }
 
 typedef void *(*main_fn)(char *library, void *call_state);
@@ -221,7 +250,7 @@ void *loop_main(char *library, void *call_state) {
 
     state = call_state;
     if (state == NULL) setup();
-    refresh_state();
+    else get_screen_dimensions();
     while (true) {
         struct stat file_stat;
         if (stat(__FILE__, &file_stat) == 0) {
@@ -236,6 +265,10 @@ void *loop_main(char *library, void *call_state) {
             }
         }
 
+        if (state->resized) {
+            get_screen_dimensions();
+            state->resized = false;
+        }
         process_input();
         update();
         redraw();
