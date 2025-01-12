@@ -9,6 +9,8 @@
 
 #include "array.h"
 
+#define BLANK_TILE 0x00
+
 struct DecompresssedRoom {
     uint8_t tiles[WIDTH_TILES * HEIGHT_TILES];
     uint8_t tile_offset;

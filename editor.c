@@ -41,7 +41,7 @@
 
 #define RESET_GFX_MODE "\x1b[0m"
 #define CLEAR_SCREEN   "\x1b[0J"
-#define GOTO(x, y)     printf("\x1b[%d;%dH", (y), (x))
+#define GOTO(x, y)     printf("\x1b[%d;%dH", (y) + 1, (x) + 1)
 
 #define UP    "\x1b[A"
 #define DOWN  "\x1b[B"
@@ -92,6 +92,7 @@ typedef struct {
     struct termios original_termios;
     RoomFile rooms;
     bool resized;
+    size_t level;
 } game_state;
 game_state *state = NULL;
 
@@ -126,23 +127,27 @@ void process_input() {
                 UNREACHABLE();
             } else if (KEY_MATCHES("a") || KEY_MATCHES(LEFT)) {
                 state->player.x --;
-                if (state->player.x <= 0) {
-                    state->player.x = 1;
+                if (state->player.x < 0) {
+                    state->level = state->rooms.rooms[state->level].data.room_west;
+                    state->player.x = WIDTH_TILES - 1;
                 }
             } else if (KEY_MATCHES("d") || KEY_MATCHES(RIGHT)) {
                 state->player.x ++;
-                if (state->player.x > state->screen_dimensions.x) {
-                    state->player.x = state->screen_dimensions.x;
+                if (state->player.x >= WIDTH_TILES) {
+                    state->level = state->rooms.rooms[state->level].data.room_east;
+                    state->player.x = 0;
                 }
             } else if (KEY_MATCHES("w") || KEY_MATCHES(UP)) {
                 state->player.y --;
-                if (state->player.y <= 0) {
-                    state->player.y = 1;
+                if (state->player.y < 0) {
+                    state->level = state->rooms.rooms[state->level].data.room_north;
+                    state->player.y = HEIGHT_TILES - 1;
                 }
             } else if (KEY_MATCHES("s") || KEY_MATCHES(DOWN)) {
                 state->player.y ++;
-                if (state->player.y > state->screen_dimensions.y) {
-                    state->player.y = state->screen_dimensions.y;
+                if (state->player.y >= HEIGHT_TILES) {
+                    state->level = state->rooms.rooms[state->level].data.room_south;
+                    state->player.y = 0;
                 }
             }
 
@@ -182,25 +187,64 @@ void update() {
 
 }
 
+void dumpRoom(struct DecompresssedRoom *room);
 void redraw() {
-    GOTO(1, 1);
+    GOTO(0, 0);
     printf(RESET_GFX_MODE CLEAR_SCREEN);
 
-    if (state->screen_dimensions.x < WIDTH_TILES || state->screen_dimensions.y < HEIGHT_TILES) {
+    if (state->screen_dimensions.x < 2 * WIDTH_TILES || state->screen_dimensions.y < HEIGHT_TILES + 1) {
         char *message = NULL;
-        assert(asprintf(&message, "Required screen dimension is %dx%d", WIDTH_TILES, HEIGHT_TILES) >= 0);
+        assert(asprintf(&message,
+                    "Required screen dimension is %dx%d. Currently %dx%d",
+                    2 * WIDTH_TILES,
+                    HEIGHT_TILES + 1,
+                    state->screen_dimensions.x,
+                    state->screen_dimensions.y
+        ) >= 0);
         GOTO(state->screen_dimensions.x / 2 - (int)strlen(message) / 2, state->screen_dimensions.y / 2);
         printf("%s", message);
+        free(message);
         fflush(stdout);
         return;
     }
 
-    assert(state->player.x >= 1);
-    assert(state->player.y >= 1);
-    assert(state->player.x < state->screen_dimensions.x);
-    assert(state->player.y < state->screen_dimensions.y);
-    GOTO(state->player.x, state->player.y);
-    printf("@");
+    assert(state->screen_dimensions.x >= 2 * WIDTH_TILES);
+    assert(state->screen_dimensions.y >= HEIGHT_TILES + 1);
+
+    struct DecompresssedRoom room = state->rooms.rooms[state->level].data;
+    GOTO(16, 0);
+    /* char name[24]; */
+    /* printf("%24s", room.name); */
+    for (size_t i = 0; i < C_ARRAY_LEN(room.name); i ++) {
+        printf("%c", room.name[i]);
+    }
+
+    for (int y = 0; y < HEIGHT_TILES; y ++) {
+        for (int x = 0; x < WIDTH_TILES; x ++) {
+            uint8_t tile = room.tiles[y * WIDTH_TILES + x];
+            if (tile != BLANK_TILE) {
+                GOTO(2 * x, y + 1);
+                printf("%02X", tile);
+            }
+        }
+    }
+
+    assert(state->player.x >= 0);
+    assert(state->player.y >= 0);
+    assert(state->player.x < WIDTH_TILES);
+    assert(state->player.y < HEIGHT_TILES);
+    if (state->player.y - 2 >= 0) {
+        GOTO(2 * state->player.x, state->player.y - 1);
+        printf("@@");
+    }
+    if (state->player.y - 1 >= 0) {
+        GOTO(2 * state->player.x, state->player.y);
+        printf("@@");
+    }
+    if (state->player.y >= 0) {
+        GOTO(2 * state->player.x, state->player.y + 1);
+        printf("@@");
+    }
 
     fflush(stdout);
 }
@@ -235,12 +279,16 @@ void setup() {
 
     signal(SIGWINCH, sigwinch_handler);
 
+    signal(SIGINT, end);
+
     get_screen_dimensions();
 
-    state->player.x = state->screen_dimensions.x / 2;
-    state->player.y = state->screen_dimensions.y - 2;
+    state->player.x = 3;
+    state->player.y = HEIGHT_TILES - 2;
 
     assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+
+    state->level = 1;
 }
 
 typedef void *(*main_fn)(char *library, void *call_state);
@@ -272,7 +320,7 @@ void *loop_main(char *library, void *call_state) {
         process_input();
         update();
         redraw();
-        usleep(1000);
+        usleep(50000);
     }
     UNREACHABLE();
     return NULL;
