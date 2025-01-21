@@ -751,13 +751,13 @@ int main(int argc, char **argv) {
                         addr = offsetof(struct DecompresssedRoom, room_south);
                     } else if (strcmp(argv[0], "room_west") == 0) {
                         addr = offsetof(struct DecompresssedRoom, room_west);
-                    } else if (strcmp(argv[0], "UNKNOWN") == 0) {
+                    } else if (strcasecmp(argv[0], "UNKNOWN") == 0) {
                         addr = offsetof(struct DecompresssedRoom, UNKNOWN);
                     } else if (strcmp(argv[0], "gravity_vertical") == 0) {
                         addr = offsetof(struct DecompresssedRoom, gravity_vertical);
                     } else if (strcmp(argv[0], "gravity_horizontal") == 0) {
                         addr = offsetof(struct DecompresssedRoom, gravity_horizontal);
-                    } else if (strncmp(argv[0], "UNKNOWN2[", 9) == 0 && isdigit(argv[0][9])) {
+                    } else if (strncasecmp(argv[0], "UNKNOWN2[", 9) == 0 && isdigit(argv[0][9])) {
                         long idx = strtol(argv[0] + 9, &end, 0);
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid UNKNOWN2 address: %s\n", argv[0]);
@@ -783,6 +783,14 @@ int main(int argc, char **argv) {
                         argv += 2;
                         argc -= 2;
                         break;
+                    } else if (strncmp(argv[0], "rest[", 5) == 0 && isdigit(argv[0][5])) {
+                        long idx = strtol(argv[0] + 9, &end, 0);
+                        if (errno == EINVAL || *end != ']') {
+                            fprintf(stderr, "Invalid rest address: %s\n", argv[0]);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+                        addr = sizeof(struct DecompresssedRoom) + idx;
                     }
                     if (addr == -1) {
                         fprintf(stderr, "Invalid address: %s\n", argv[0]);

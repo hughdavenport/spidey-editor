@@ -1,111 +1,191 @@
+fun_1000_4d55:
+*0x968e = SI (room pointer)
+*0x1d12 = unknown2[2] / 4
+*0x9690 = (unknown2[3] << 8) | (unknown2[3] & 0x3)
+*0x1c8b = 0x00
+*0x9293 = 0x0001
+*0x1c89 = 0x1b39 (uint16_t *dst_p)
+bx = 0x150 + 3 * UNKNOWN2[0]
+SI += 0x2e6 (now points at "rest")
+
 if (UNKNOWN2[1] != 0) {
+    di = 0x1b49 // 0x10 (16) bytes after *dst_p
     for 0..UNKNOWN2[1] {
         *(dst_p++) = di
         di[3-4] = bx (0x150 + 3 * UNKNOWN2[0])
-        ah = si[0]
+        ah = si[0] (rest_p)
         al = si[1]
         si += 2
         di[0] = ah
+        /*
+        by here DI (0x10 after dst_p) has the following
+        0 - rest[0]
+        1-2 - nothing
+        3-4 - bx (0x150 + 3 * UNKNOWN2[0])
+        ah = rest[0]
+        al = rest[1]
+        */
         if (ah & 0x80 == 0) {
-            ... same as above
+            di[1-2] = ax & 0x1f1f (first two bytes)
+            *0x1c8b ++ (started at 0x00)
+            dx = (ax & 0x60e0) >> 5
+            dl ++;
+            dh ++;
+            // basically (((rest[0] >> 5) & 0x3) + 1) and (((rest[1] >> 5) & 0x7) + 1)
+            // or bits 5 and 6 of rest[0] and 5-7 of rest[1]
+            di[5-6] = dx
+            di += 7
+            /* by here we have di as
+            0 - rest[0]
+            1 - rest[0] & 0x1f
+            2 - rest[1] & 0x1f
+            3-4 - bx (0x150 + 3 * UNKNOWN2[0])
+            5 - ((rest[0] >> 5) & 0x3) + 1
+            6 - ((rest[1] >> 5) & 0x7) + 1
+            */
+            tmp_bx = orig room pointer (*0x968e)
+            tmp_bx += al (rest[1] & 0x1f)
+            al = 0
+            ax >> 3
+            // so ax = (rest[0] & 0x1f) << 5 ((rest[0]&0x1f) * 32)
+            tmp_bx += ax
+            // so tmp_bx = room pointer + rest[1] & 0x1f + 32 * (rest[0]&0x1f)
+            ah = 0 // it wouldn't have been used anyway with the masks above)
+            for 0..dh (((rest[0] >> 5) & 0x3) + 1) {
+                for 0..dl (rest[1] / 32 & 0x7 + 1) {
+                    al = *(u8*)tmp_bx // bx is room + 32 * (rest[0]&0x1f) + rest[1]&0x1f
+                    *(di++) = al
+                    *(tmp_bx++) = ah // cleared before loop
+                }
+                tmp_bx += 0x20 (32 (1 << 5)4-0x15)
+            }
         } else {
 //            call fun_1000_4200
-            *0x9293++; (started at 1)
-            bp += 0x32 (50)
+            *0x9293++; (started at 0x0001)
+            bp += 0x32 (50) (stack frame?)
             // bp was 0x92ba
-            di[5-6] = bp
+            di[5-6] = bp (vars)
 //bx=0x150 + 3*UNKNOWN2[0]
-            bp[0x1e] = bx (+30)
-            bp[5] = 0x5f
+            vars[0x1e] = bx (goes up +3 each time, starts at 0x150 + 3 * UNKNOWN2[0])
+            vars[5] = 0x5f
             tmp_ax = ax & 0x1f1f  (first two bytes)
             di[1-2] = tmp_ax
-            tmp_ax += bx[0-1]
-            dl = (first & 0x1f) * 8
-            tmp_ax = tmp_al sign extended
-            tmp_ax *= 8
-            bl = bx[2] & 0x7
-            bp[4] = bl
-            bl *= 2
-            bh = 0
-            bx += 0xa9e3
-            cx = *bx
+            /*
+            by here DI (0x10 after dst_p) has the following
+            0 - rest[0]
+            1 - rest[0] & 0x1f
+            2 - rest[1] & 0x1f
+            3-4 - bx (0x150 + 3 * UNKNOWN2[0])
+            5-6 - bp (maybe 0x92ba?)
+            */
+            tmp_ax = (rest[1]&0x1f + bx[1]) << 3
+            vars[4] = bx[2] & 0x7
+            tmp_bx = 0xa9e3 + (bx[2] & 0x7) * 2
+            // where is this? vga ram? (starts at a000)
+            cx = *tmp_bx
             dl += ch
             dl -= 0xa (10)
-            bp[3] = dl
+            vars[3] = dl
             ch = 0
-            tmp_ax += cx
+            tmp_ax += cl
             tmp_ax -= 0xa
-            bp[1-2] = tmp_ax
-            bp[0] = 0x4
-            ax = orig_ax & 0x60e0
-            ax >>= 2
-            ah = 0
-            bx = 0xa9f3 + ax
-            ax = bx[2-3]
-            bp[0x2f] =bx[3]
-            bp[0x30] =bx[2]
-            bp[0x31] =0x0
-            bx = *bx
-            al = bx[0]
-            bp[0x10] = bx[0]
-            bx ++
+            // tmp_ax = (rest[1]&0x1f + bx[1]) << 3 + tmp_bx[1] - 0xa
+            vars[1-2] = tmp_ax
+            vars[0] = 0x4
+            ax = (((rest[0] / 8) & 0xc) | ((rest[1] / 2) & 0x70))
+            tmp_bx = 0xa9f3 + ax // vga ram again?
+            // pointer to structure, first elem is a pointer
+            ax = tmp_bx[2-3]
+            vars[0x2f] =tmp_bx[3]
+            vars[0x30] =tmp_bx[2]
+            vars[0x31] =0x0 // is it a string?
+            tmp_bx = *tmp_bx
+            al = tmp_bx[0]
+            vars[0x10] = tmp_bx[0]
+            tmp_bx ++
 //            call fun_1000_3ed4
-            bp[0x29]-0x2a] = bx
-            bp[0x2b-0x2c] = bp[1-2]
-            bp[0x2d] = bp[3]
-            bp[0x2e] = bp[4]
-            do {
-                al = *(bx++)
-            } while (al * 0x80 != 0)
+            vars[0x29-0x2a] = tmp_bx
+            vars[0x2b-0x2c] = vars[1-2]
+            vars[0x2d] = vars[3]
+            vars[0x2e] = vars[4]
+            while (*(tmp_bx++) != 0x80) {}
 // end fun_1000_3ed4
 //            call fun_1000_3ef8
-            bp[0x14-0x15] = bx[0-1]
-            bx += 2;
-            if bp[0x10] & 0x 2 != 0 {
-                *0x9382 = bx[0-1]
-                bx += 2;
+            // tmp_bx is pointing one byte after 0x80
+            vars[0x14-0x15] = tmp_bx[0-1]
+            tmp_bx += 2;
+            if vars[0x10] & 0x2 != 0 {
+                *0x9382 = tmp_bx[0-1]
+                tmp_bx += 2;
             }
-            cx = bx[0-1]
-            al = bp[4]
+            cx = tmp_bx[0-1]
+            al = vars[4]
 //            call fun_1000_41af
 if al & 0x1 != 0 {
-    xchg ch, cl (cl now is bx[0] and ch is bx[1])
-    neg ch (ch = -bx[1], cl = bx[0])
+    xchg ch, cl (cl now is tmp_bx[0] and ch is tmp_bx[1])
+    neg ch (ch = -tmp_bx[1], cl = tmp_bx[0])
 }
 if al & 0x2 != 0 {
-    neg cl (cl = -bx[1], ch = bx[0]  or cl = -bx[0], ch = bx[1])
+    neg cl (cl = -tmp_bx[1], ch = tmp_bx[0]  or cl = -tmp_bx[0], ch = tmp_bx[1])
 }
 if al & 0x4 != 0 {
     neg ch
 }
 cx could -first second (if al has 0x4), or first -second (if al has 0x2), or -second first (if al is odd), or -second -first (0x3), or second first (0x5), or second -first (0x7), or just first second
 // end fun_1000_41af
-            if bp[0x10] & 0x1 != 0 {
-                cx += bp[0x18]
+            if vars[0x10] & 0x1 != 0 {
+                cx += vars[0x18]
             }
-            bp[0x18] = cx
-            bx += 2
-            bp[0x12] = bx
-            if (bp[0x10] & 0x1 == 0) {
-                bx = 0xa9e3 + (bp[4] * 2) & 0xff
-                cx = bx[0-1]
-                al = (bp[3] + 0xa) & 0xf8
-                al += ch (bx[0])
+            vars[0x18] = cx (could be a few things by this stage with branching)
+            tmp_bx += 2
+            vars[0x12] = tmp_bx
+            if (vars[0x10] & 0x1 == 0) {
+                tmp_bx = 0xa9e3 + (vars[4] * 2) & 0xff
+                cx = tmp_bx[0-1]
+                al = (vars[3] + 0xa) & 0xf8
+                al += ch (tmp_bx[0])
                 al -= 0xa
-                bp[3] = al
-                ax = (bp[1-2] + 0xa) & 0xf8
+                /* al = tmp_bx[0] - 0xa + (vars[3] + 0xa) & 0xf8 */
+                vars[3] = al
+                ax = (vars[1-2] + 0xa) & 0xfff8
                 ax += cx
                 ax -= 0xa
-                bp[1-2] = ax
+                vars[1-2] = ax
+                // ah = (vars[1] + tmp_bx[0]) << 8 + (vars[2] + 0xa) & 0xff00
+                // al = tmp_bx[1] - 0xa + (vars[2] + 0xa) & 0xf8
             }
 // end fun_1000_3ef8
-            bx =bp[0x1e-0x1f]
-            al =bp[0x2f]
-            if bx[2] & 0x80 == 0 {
+            tmp_bx =vars[0x1e-0x1f]
+            al =vars[0x2f]
+            if tmp_bx[2] & 0x80 == 0 {
                 al = 0
             }
-            bp[0x26] = al
+            vars[0x26] = al
             di += 0x7
+            /*
+bp = {
+    0x0         = 0x4
+    0x1-0x2     = (rest[1]&0x1f + bx[1]) << 3 + (0xa9e3 + 2 * (bx[2] & 0x7))[1] - 0xa (gets updated if vars[0x10] & 0x1 == 0)
+    0x3         = (0xa9e3 + 2 * (bx[2] & 0x7))[0] (gets updated like a decimal count if vars[0x10] & 0x1 == 0)
+    0x4         = bx[2] & 0x7
+    0x5         = 0x5f
+    0x10        = (0xa9f3 + (((rest[0] / 8) & 0xc) | ((rest[1] / 2) & 0x70)))[0][0]
+    0x12        = end pointer after 0x12
+    0x18        = cx (could be a few things based on 2 (or 4) bytes after 0x14-0x15)
+    0x14-0x15   = 2 bytes after a 0x80 after (0xa9f3 + (((rest[0] / 8) & 0xc) | ((rest[1] / 2) & 0x70)))[0]
+    0x1e-0x1f   = bx (orig BX = 0x150 + 3 * UNKNOWN2[0])
+    0x26        = bx[2] & 0x80 == 0 ? 0 : (0xa9f3 + (((rest[0] / 8) & 0xc) | ((rest[1] / 2) & 0x70)))[3]
+    0x29-0x2a   = (0xa9f3 + (((rest[0] / 8) & 0xc) | ((rest[1] / 2) & 0x70)))[0][1-2]
+    0x2b-0x2c   = (rest[1]&0x1f + bx[1]) << 3 + (0xa9e3 + 2 * (bx[2] & 0x7))[1] - 0xa
+    0x2d        = (0xa9e3 + 2 * (bx[2] & 0x7))[0]
+    0x2e        = bx[2] & 0x7
+    0x2f        = (0xa9f3 + (((rest[0] / 8) & 0xc) | ((rest[1] / 2) & 0x70)))[3]
+    0x30        = (0xa9f3 + (((rest[0] / 8) & 0xc) | ((rest[1] / 2) & 0x70)))[2]
+    0x31        = 0
+            */
+/*
+di
+*/
             reset bx and cx
 // end fun_1000_4200
         }
