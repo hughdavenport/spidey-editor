@@ -1,0 +1,33 @@
+rest/unknown2 things
+
+bx = 0x150 + 3 * u2[0]
+if u2[1] != 0 {
+    di = 0x1b49
+    loop u2[1] {
+        *(dst_p++) = di
+        ah = *(rest_p++)
+        al = *(rest_p++)
+        if (ah & 0x80 == 0) {
+            *out= {
+                0 - rest[0]
+                1 - rest[0] & 0x1f
+                2 - rest[1] & 0x1f
+                3-4 - bx
+                5 - ((rest[0] >> 5) & 0x3) + 1
+                6 - ((rest[1] >> 5) & 0x7) + 1
+            }
+            out += 7
+            addr = room_p + 32 * (rest[0] & 0x1f) + rest[1] & 0x1f
+            for y in 0..(((rest[0] >> 5) & 0x3) + 1) {
+                for x in 0..(((rest[1] >> 5) & 0x7) + 1) {
+                    al = *addr
+                    *out = al
+                    *(addr++) = 0
+                }
+            }
+        } else {
+            call fun_1000_4200
+        }
+        bx += 3
+    }
+}
