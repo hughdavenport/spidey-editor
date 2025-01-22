@@ -12,6 +12,14 @@
 #define BLANK_TILE 0x00
 
 struct DecompresssedRoom {
+//    32
+//  * 22
+//  =704
+//  +  9
+//  =713 (0x2c9) - start of UNKNOWN2
+//  +  5
+//  + 24
+//  =742 (0x2e6) - start of rest
     uint8_t tiles[WIDTH_TILES * HEIGHT_TILES];
     uint8_t tile_offset;
     uint8_t background;
@@ -23,6 +31,11 @@ struct DecompresssedRoom {
     uint8_t gravity_vertical;
     uint8_t gravity_horizontal;
     uint8_t UNKNOWN2[5];
+// 0 - unused
+// 1 - number of 3 byte structures
+// 2 - first loop counter
+// 3 - counter lsb & 0x3
+// 4 - counter msb
     char name[24];
 };
 
