@@ -217,3 +217,10 @@ if (UNKNOWN2[2] / 4 != 0) {
 
 looks like it first sets up blocks (DI) of size 8, then uses that to decode stuff
 number of things
+
+fun 1000:3592
+*0x87 = 1
+*0x88 = 0x3
+*0x89-0x150 = 0
+es:0x150-0x450 = ds:819-b19
+ds/es set to 0xfb9 in main before calling

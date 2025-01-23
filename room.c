@@ -81,11 +81,13 @@ void dumpRoom(Room *room) {
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.tiles); i ++) {
         if (i % WIDTH_TILES == 0) fprintf(stderr, "\n    ");
         if ((i % WIDTH_TILES) != 0) fprintf(stderr, " ");
+        if (i == 250) fprintf(stderr, "\033[41;1m");
         if (room->data.tiles[i] == BLANK_TILE) {
             fprintf(stderr, "  ");
         } else {
             fprintf(stderr, "%02x", room->data.tiles[i]);
         }
+        if (i == 250) fprintf(stderr, "\033[m");
     }
     fprintf(stderr, "\n");
 
