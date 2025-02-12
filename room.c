@@ -89,20 +89,27 @@ void dumpRoom(Room *room) {
         uint8_t y = i / WIDTH_TILES;
         if (x == 0) fprintf(stderr, "\n    ");
         bool colored = false;
+        uint8_t tile = room->data.tiles[i];
         for (size_t o = 0; o < room->data.num_objects; o ++) {
-            if (x >= room->data.objects[o].x && x < room->data.objects[o].x + room->data.objects[o].width &&
-                    y >= room->data.objects[o].y && y < room->data.objects[o].y + room->data.objects[o].height) {
+            struct RoomObject *object = room->data.objects + o;
+            if (x >= object->x && x < object->x + object->width &&
+                    y >= object->y && y < object->y + object->height) {
 
-                fprintf(stderr, "\033[%d%ld;1m", room->data.objects[o].type == STATIC ? 3 : 4, (o % 8) + 1);
+                fprintf(stderr, "\033[%d%ld;1m", object->type == STATIC ? 3 : 4, (o % 8) + 1);
+                if (object->type == STATIC && object->tiles) {
+                    int o_x = x - object->x;
+                    int o_y = y - object->y;
+                    tile = object->tiles[o_y * object->width + o_x];
+                }
                 colored = true;
                 break;
             }
         }
         if (x != 0) fprintf(stderr, " ");
-        if (room->data.tiles[i] == BLANK_TILE) {
+        if (tile == BLANK_TILE) {
             fprintf(stderr, "  ");
         } else {
-            fprintf(stderr, "%02x", room->data.tiles[i]);
+            fprintf(stderr, "%02x", tile);
         }
         if (colored) fprintf(stderr, "\033[m");
     }
@@ -397,6 +404,12 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                         tmp.data.tiles + y * WIDTH_TILES + objects[i].x,
                         objects[i].width
                       );
+                memset(
+                        tmp.data.tiles + y * WIDTH_TILES + objects[i].x,
+                        '\0',
+                        objects[i].width
+                      );
+
             }
         } else {
             objects[i].type = ENEMY;
@@ -482,6 +495,21 @@ bool writeRoom(Room *room, FILE *fp) {
     size_t d_idx = 0;
     size_t d_len = 0;
     size_t c_len = 0;
+
+    // Copy the object tile data back
+    for (size_t i = 0; i < room->data.num_objects; i ++) {
+        if (room->data.objects[i].type == ENEMY) continue; // No tile data
+        if (room->data.objects[i].tiles == NULL) continue;
+        assert(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].height < HEIGHT_TILES);
+        for (size_t y = room->data.objects[i].y; y < room->data.objects[i].y + room->data.objects[i].height; y ++) {
+            memcpy(
+                    room->data.tiles + y * WIDTH_TILES + room->data.objects[i].x,
+                    room->data.objects[i].tiles + (y - room->data.objects[i].y) * room->data.objects[i].width,
+                    room->data.objects[i].width
+                  );
+        }
+    }
+
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.tiles); i ++) {
         decompressed[d_len++] = room->data.tiles[i];
     }
@@ -512,14 +540,14 @@ bool writeRoom(Room *room, FILE *fp) {
         // FIXME depending on type, first byte should have 0x80
         switch (room->data.objects[i].type) {
             case STATIC:
-                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].width - 1) << 5);
                 decompressed[d_len++] = room->data.objects[i].y | ((room->data.objects[i].height - 1) << 5);
+                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].width - 1) << 5);
                 break;
 
             case ENEMY:
                 // FIXME write this properly
-                decompressed[d_len++] = room->data.objects[i].x;
-                decompressed[d_len++] = room->data.objects[i].y;
+                decompressed[d_len++] = 0x80 | room->data.objects[i].y | ((room->data.objects[i].height - 1) << 5);
+                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].width - 1) << 5);
                 break;
 
         }
@@ -722,21 +750,21 @@ bool writeRoom(Room *room, FILE *fp) {
     }
 
 
-    fprintf(stderr, "  Data to compress (length=%zu): [", d_len);
-    for (size_t i = 0; i < d_len; i ++) {
-        if (i % 32 == 0) fprintf(stderr, "\n    ");
-        if ((i % 32) != 0) fprintf(stderr, " ");
-        fprintf(stderr, "%02x", decompressed[i]);
-    }
-    fprintf(stderr, "]\n");
+    /* fprintf(stderr, "  Data to compress (length=%zu): [", d_len); */
+    /* for (size_t i = 0; i < d_len; i ++) { */
+    /*     if (i % 32 == 0) fprintf(stderr, "\n    "); */
+    /*     if ((i % 32) != 0) fprintf(stderr, " "); */
+    /*     fprintf(stderr, "%02x", decompressed[i]); */
+    /* } */
+    /* fprintf(stderr, "]\n"); */
 
-    fprintf(stderr, "  Newly compressed room (length=%zu): [", c_len);
-    for (size_t i = 0; i < c_len; i ++) {
-        if (i % 32 == 0) fprintf(stderr, "\n    ");
-        if ((i % 32) != 0) fprintf(stderr, " ");
-        fprintf(stderr, "%02x", compressed[i]);
-    }
-    fprintf(stderr, "]\n");
+    /* fprintf(stderr, "  Newly compressed room (length=%zu): [", c_len); */
+    /* for (size_t i = 0; i < c_len; i ++) { */
+    /*     if (i % 32 == 0) fprintf(stderr, "\n    "); */
+    /*     if ((i % 32) != 0) fprintf(stderr, " "); */
+    /*     fprintf(stderr, "%02x", compressed[i]); */
+    /* } */
+    /* fprintf(stderr, "]\n"); */
 
     size_t written = 0;
     do {
@@ -797,7 +825,7 @@ bool readRooms(RoomFile *file) {
 
 typedef struct {
     uint8_t room_id;
-    size_t address;
+    int address;
     uint8_t value;
 } PatchInstruction;
 
@@ -928,6 +956,63 @@ int main(int argc, char **argv) {
                             return 1;
                         }
                         addr = sizeof(struct DecompresssedRoom) + idx;
+                    } else if ((strncmp(argv[0], "object[", 7) == 0 && isdigit(argv[0][7])) || (strncmp(argv[0], "objects[", 8) == 0 && isdigit(argv[0][8]))) {
+                        long idx = strtol(argv[0] + (argv[0][6] == '[' ? 7 : 8), &end, 0);
+                        if (errno == EINVAL || *end != ']') {
+                            fprintf(stderr, "Invalid object id: %s\n", argv[0]);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+                        addr = -offsetof(struct DecompresssedRoom, objects);
+                        addr -= idx * sizeof(struct RoomObject);
+                        long value = 0xFFFF;
+                        if (strcmp(end, "].x") == 0) {
+                            addr -= offsetof(struct RoomObject, x);
+                        } else if (strcmp(end, "].y") == 0) {
+                            addr -= offsetof(struct RoomObject, y);
+                        } else if (strcmp(end, "].width") == 0) {
+                            addr -= offsetof(struct RoomObject, width);
+                        } else if (strcmp(end, "].height") == 0) {
+                            addr -= offsetof(struct RoomObject, height);
+                        } else if (strcmp(end, "].type") == 0) {
+                            addr -= offsetof(struct RoomObject, type);
+                            if (strcmp(argv[1], "static") == 0) {
+                                value = STATIC;
+                            } else if (strcmp(argv[1], "enemy") == 0) {
+                                value = ENEMY;
+                            } else {
+                                fprintf(stderr, "Invalid object type: %s\n", argv[1]);
+                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                return 1;
+                            }
+                        } else if (strncmp(end, "].tile[", 7) == 0) {
+                            // Read [x][y] or [idx]
+                            fprintf(stderr, "%s:%d: UNIMPLEMENTED\n", __FILE__, __LINE__);
+                            return 1;
+                        } else {
+                            fprintf(stderr, "Invalid object field: %s\n", argv[0]);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+
+                        if (value == 0xFFFF) {
+                            value = strtol(argv[1], &end, 0);
+                            if (errno == EINVAL || end == NULL || *end != '\0') {
+                                fprintf(stderr, "Invalid number: %s\n", argv[1]);
+                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                return 1;
+                            }
+                        }
+                        if (value < 0 || value > 0xFF) {
+                            fprintf(stderr, "Value must be in the range 0..255\n");
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+
+                        ARRAY_ADD(patches, ((PatchInstruction){ .room_id = room_id, .address = addr, .value = value, }));
+                        argv += 2;
+                        argc -= 2;
+                        continue;
                     }
                     if (addr == -1) {
                         fprintf(stderr, "Invalid address: %s\n", argv[0]);
@@ -1137,9 +1222,24 @@ int main(int argc, char **argv) {
                 defer_return(1);
             }
             ARRAY_FREE(file.rooms[patch.room_id].compressed);
-            if (patch.address >= sizeof(file.rooms[patch.room_id].data)) {
+            if (patch.address < 0) {
+                int idx = -(patch.address + offsetof(struct DecompresssedRoom, objects)) / sizeof(struct RoomObject);
+                if (idx > file.rooms[patch.room_id].data.num_objects) {
+                    fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
+                    defer_return(1);
+                }
+                if (idx >= file.rooms[patch.room_id].data.num_objects) {
+                    // FIXME realloc stuff, inc num_objects
+                    fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new object\n", __FILE__, __LINE__);
+                    defer_return(1);
+                }
+                int addr = -(patch.address + offsetof(struct DecompresssedRoom, objects)) % sizeof(struct RoomObject);
+                struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
+                fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
+                ((uint8_t *)object)[addr] = patch.value;
+            } else if (patch.address >= sizeof(file.rooms[patch.room_id].data)) {
                 if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
-                    fprintf(stderr, "Address %lu invalid\n", patch.address);
+                    fprintf(stderr, "Address %d invalid\n", patch.address);
                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                     defer_return(1);
                 }
