@@ -11,6 +11,22 @@
 
 #define BLANK_TILE 0x00
 
+enum RoomObjectType {
+    STATIC,
+    ENEMY,
+};
+
+struct RoomObject {
+    // written as ((x << 8) | y) | ((width << 5) << 8) | (height << 5)
+    uint8_t x;
+    uint8_t y;
+    uint8_t width;
+    uint8_t height;
+
+    enum RoomObjectType type;
+    uint8_t *tiles;
+};
+
 struct DecompresssedRoom {
 //    32
 //  * 22
@@ -27,16 +43,21 @@ struct DecompresssedRoom {
     uint8_t room_east;
     uint8_t room_south;
     uint8_t room_west;
-    uint8_t UNKNOWN;
+
+    uint8_t UNKNOWN_a;
+
     uint8_t gravity_vertical;
     uint8_t gravity_horizontal;
-    uint8_t UNKNOWN2[5];
-// 0 - unused
-// 1 - number of 3 byte structures
-// 2 - first loop counter
-// 3 - counter lsb & 0x3
-// 4 - counter msb
+
+    uint8_t UNKNOWN_b; // unused?
+    uint8_t UNKNOWN_c; // number of moving objects?
+    uint8_t num_objects;
+    uint8_t UNKNOWN_e; // counter lsb & 0x3
+    uint8_t UNKNOWN_f; // counter msb
+
     char name[24];
+
+    struct RoomObject *objects;
 };
 
 typedef struct {

@@ -22,6 +22,12 @@ typedef struct {
 
 void freeRoom(Room *room) {
     if (room == NULL) return;
+    if (room->data.objects) {
+        for (size_t i = 0; i < room->data.num_objects; i ++) {
+            if (room->data.objects[i].tiles) free(room->data.objects[i].tiles);
+        }
+        free(room->data.objects);
+    }
     ARRAY_FREE(room->rest);
     ARRAY_FREE(room->compressed);
     ARRAY_FREE(room->decompressed);
@@ -79,15 +85,26 @@ void dumpRoom(Room *room) {
 
     fprintf(stderr, "  Tiles:");
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.tiles); i ++) {
-        if (i % WIDTH_TILES == 0) fprintf(stderr, "\n    ");
-        if ((i % WIDTH_TILES) != 0) fprintf(stderr, " ");
-        if (i == 250) fprintf(stderr, "\033[41;1m");
+        uint8_t x = i % WIDTH_TILES;
+        uint8_t y = i / WIDTH_TILES;
+        if (x == 0) fprintf(stderr, "\n    ");
+        bool colored = false;
+        for (size_t o = 0; o < room->data.num_objects; o ++) {
+            if (x >= room->data.objects[o].x && x < room->data.objects[o].x + room->data.objects[o].width &&
+                    y >= room->data.objects[o].y && y < room->data.objects[o].y + room->data.objects[o].height) {
+
+                fprintf(stderr, "\033[%d%ld;1m", room->data.objects[o].type == STATIC ? 3 : 4, (o % 8) + 1);
+                colored = true;
+                break;
+            }
+        }
+        if (x != 0) fprintf(stderr, " ");
         if (room->data.tiles[i] == BLANK_TILE) {
             fprintf(stderr, "  ");
         } else {
             fprintf(stderr, "%02x", room->data.tiles[i]);
         }
-        if (i == 250) fprintf(stderr, "\033[m");
+        if (colored) fprintf(stderr, "\033[m");
     }
     fprintf(stderr, "\n");
 
@@ -97,11 +114,26 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  Room East: %u\n", room->data.room_east);
     fprintf(stderr, "  Room South: %u\n", room->data.room_south);
     fprintf(stderr, "  Room West: %u\n", room->data.room_west);
-    fprintf(stderr, "  UNKNOWN #1: %u\n", room->data.UNKNOWN);
+
+    fprintf(stderr, "  UNKNOWN (a): %02x\n", room->data.UNKNOWN_a);
+
     fprintf(stderr, "  Gravity vertical: %u\n", room->data.gravity_vertical);
     fprintf(stderr, "  Gravity horizontal: %u\n", room->data.gravity_horizontal);
-    fprintf(stderr, "  UNKNOWN #2: [0x%02x, 0x%02x, 0x%02x, 0x%02x, 0x%02x]\n",
-            room->data.UNKNOWN2[0], room->data.UNKNOWN2[1], room->data.UNKNOWN2[2], room->data.UNKNOWN2[3], room->data.UNKNOWN2[4]);
+
+    fprintf(stderr, "  UNKNOWN (b): %02x\n", room->data.UNKNOWN_b);
+    fprintf(stderr, "  UNKNOWN (c): %02x\n", room->data.UNKNOWN_c);
+    fprintf(stderr, "  number of moving objects: %02x\n", room->data.num_objects);
+    fprintf(stderr, "  UNKNOWN (e): %02x\n", room->data.UNKNOWN_e);
+    fprintf(stderr, "  UNKNOWN (f): %02x\n", room->data.UNKNOWN_f);
+
+    fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
+    for (size_t i = 0; i < room->data.num_objects; i ++) {
+        fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}\n",
+                room->data.objects[i].type == STATIC ? "STATIC" : "ENEMY",
+                room->data.objects[i].x, room->data.objects[i].y,
+                room->data.objects[i].width, room->data.objects[i].height);
+        // FIXME show tiles?
+    }
 
     fprintf(stderr, "  Left over data (length=%zu): [", room->rest.length);
     for (size_t i = 0; i < room->rest.length; i ++) {
@@ -122,7 +154,7 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         return false;
     }
     long size = head->definitions[idx + 1] - head->definitions[idx];
-    if (size < 0) return false;
+    if (size <= 0) return false;
 
     Room tmp = {
         .index = idx,
@@ -289,6 +321,8 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
             return false; \
         } \
         int next_val = (a).data[data_idx++]; \
+        if (isprint(next_val)) log(stderr, "%s:%d: READ 0x%02x (%hhd, '%c') @ 0x%lx, %zu left\n", __FILE__, __LINE__, next_val, next_val, next_val, data_idx - 1, (a).length - data_idx); \
+        else log(stderr, "%s:%d: READ 0x%02x (%hhd) @ 0x%lx, %zu left\n", __FILE__, __LINE__, next_val, next_val, data_idx - 1, (a).length - data_idx); \
         dst = next_val; \
 }
 
@@ -301,15 +335,78 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
     read_next(tmp.data.room_east, tmp.decompressed);
     read_next(tmp.data.room_south, tmp.decompressed);
     read_next(tmp.data.room_west, tmp.decompressed);
-    read_next(tmp.data.UNKNOWN, tmp.decompressed);
+
+    read_next(tmp.data.UNKNOWN_a, tmp.decompressed);
+
     read_next(tmp.data.gravity_vertical, tmp.decompressed);
     read_next(tmp.data.gravity_horizontal, tmp.decompressed);
-    for (size_t i = 0; i < C_ARRAY_LEN(tmp.data.UNKNOWN2); i ++) {
-        read_next(tmp.data.UNKNOWN2[i], tmp.decompressed);
-    }
+
+    read_next(tmp.data.UNKNOWN_b, tmp.decompressed);
+    read_next(tmp.data.UNKNOWN_c, tmp.decompressed);
+    read_next(tmp.data.num_objects, tmp.decompressed);
+    read_next(tmp.data.UNKNOWN_e, tmp.decompressed);
+    read_next(tmp.data.UNKNOWN_f, tmp.decompressed);
+
     log(stderr, "%s:%d: Reading name at %04lu\n", __FILE__, __LINE__, data_idx);
     for (size_t i = 0; i < C_ARRAY_LEN(tmp.data.name); i ++) {
         read_next(tmp.data.name[i], tmp.decompressed);
+    }
+
+    log(stderr, "%s:%d: Reading %u moving objects at %04lu\n", __FILE__, __LINE__, tmp.data.UNKNOWN_d, data_idx);
+    tmp.data.objects = calloc(tmp.data.num_objects, sizeof(struct RoomObject));
+    assert(tmp.data.objects != NULL);
+    struct RoomObject *objects = tmp.data.objects;
+    for (size_t i = 0; i < tmp.data.num_objects; i ++) {
+        uint8_t msb, lsb;
+        read_next(msb, tmp.decompressed);
+        read_next(lsb, tmp.decompressed);
+        if ((msb & 0x80) == 0) {
+            objects[i].type = STATIC;
+            objects[i].x = lsb & 0x1f;
+            objects[i].y = msb & 0x1f;
+            objects[i].width = ((lsb & 0xe0) >> 5) + 1;
+            objects[i].height = ((msb & 0x60) >> 5) + 1;
+            assert(objects[i].x < WIDTH_TILES);
+            assert(objects[i].width < WIDTH_TILES);
+            assert(objects[i].x + objects[i].width < WIDTH_TILES);
+            if (!(objects[i].y < HEIGHT_TILES)) {
+                fprintf(stderr, "WARNING: Room %ld (%s) object %zu y is out of bounds (%u >= %u)\n",
+                        idx, tmp.data.name, i, objects[i].y, HEIGHT_TILES);
+                if (!(objects[i].y < WIDTH_TILES)) {
+                    fprintf(stderr, "WARNING: Room %ld (%s) object %zu y is really out of bounds (%u >= %u)\n",
+                            idx, tmp.data.name, i, objects[i].y, WIDTH_TILES);
+                }
+                continue;
+            }
+            assert(objects[i].y < HEIGHT_TILES);
+            assert(objects[i].height < HEIGHT_TILES);
+            if (!(objects[i].y + objects[i].height < HEIGHT_TILES)) {
+                fprintf(stderr, "WARNING: Room %ld (%s) object %zu y+height is out of bounds (%u >= %u)\n",
+                        idx, tmp.data.name, i, objects[i].y + objects[i].height, HEIGHT_TILES);
+                if (!(objects[i].y + objects[i].height < WIDTH_TILES)) {
+                    fprintf(stderr, "WARNING: Room %ld (%s) object %zu y+height is really out of bounds (%u >= %u)\n",
+                            idx, tmp.data.name, i, objects[i].y + objects[i].height, WIDTH_TILES);
+                }
+                continue;
+            }
+            objects[i].tiles = malloc(objects[i].width * objects[i].height);
+            assert(objects[i].tiles != NULL);
+            for (size_t y = objects[i].y; y < objects[i].y + objects[i].height; y ++) {
+                memcpy(
+                        objects[i].tiles + (y - objects[i].y) * objects[i].width,
+                        tmp.data.tiles + y * WIDTH_TILES + objects[i].x,
+                        objects[i].width
+                      );
+            }
+        } else {
+            objects[i].type = ENEMY;
+            objects[i].x = lsb & 0x1f;
+            objects[i].y = msb & 0x1f;
+
+            // FIXME work out what this is
+            objects[i].width = ((lsb & 0xe0) >> 5) + 1;
+            objects[i].height = ((msb & 0x60) >> 5) + 1;
+        }
     }
     // then stuff that controls enemy placement, switch actions, etc
     while (data_idx != tmp.decompressed.length) {
@@ -394,16 +491,41 @@ bool writeRoom(Room *room, FILE *fp) {
     decompressed[d_len++] = room->data.room_east;
     decompressed[d_len++] = room->data.room_south;
     decompressed[d_len++] = room->data.room_west;
-    decompressed[d_len++] = room->data.UNKNOWN;
+
+    decompressed[d_len++] = room->data.UNKNOWN_a;
+
     decompressed[d_len++] = room->data.gravity_vertical;
     decompressed[d_len++] = room->data.gravity_horizontal;
-    for (size_t i = 0; i < C_ARRAY_LEN(room->data.UNKNOWN2); i ++) {
-        decompressed[d_len++] = room->data.UNKNOWN2[i];
-    }
+
+    decompressed[d_len++] = room->data.UNKNOWN_b;
+    decompressed[d_len++] = room->data.UNKNOWN_c;
+    decompressed[d_len++] = room->data.num_objects;
+    decompressed[d_len++] = room->data.UNKNOWN_e;
+    decompressed[d_len++] = room->data.UNKNOWN_f;
+
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.name); i ++) {
         decompressed[d_len++] = room->data.name[i];
     }
+
+    assert(d_len + 2 * room->data.num_objects < C_ARRAY_LEN(decompressed));
+    for (size_t i = 0; i < room->data.num_objects; i ++) {
+        // FIXME depending on type, first byte should have 0x80
+        switch (room->data.objects[i].type) {
+            case STATIC:
+                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].width - 1) << 5);
+                decompressed[d_len++] = room->data.objects[i].y | ((room->data.objects[i].height - 1) << 5);
+                break;
+
+            case ENEMY:
+                // FIXME write this properly
+                decompressed[d_len++] = room->data.objects[i].x;
+                decompressed[d_len++] = room->data.objects[i].y;
+                break;
+
+        }
+    }
     // then stuff that controls enemy placement, switch actions, etc
+    assert(d_len + room->rest.length < C_ARRAY_LEN(decompressed));
     for (size_t i = 0; i < room->rest.length; i ++) {
         decompressed[d_len++] = room->rest.data[i];
     }
@@ -477,7 +599,7 @@ bool writeRoom(Room *room, FILE *fp) {
     while (d_idx < d_len) {
         uint8_t byte = decompressed[d_idx++];
         uint8_t length = 1;
-        log(stderr, "%s:%d: Compressing byte %x @ %u. Compressed so far %u.\n",
+        log(stderr, "%s:%d: Compressing byte %x @ %lu. Compressed so far %lu.\n",
                 __FILE__, __LINE__, byte, d_idx - 1, c_len);
         uint8_t best = 0;
         uint16_t best_back = 0;
@@ -689,6 +811,7 @@ int main(int argc, char **argv) {
     bool recompress = false;
     int recompress_room = -1;
     bool display = false;
+    bool list = false;
     int display_room = -1;
     int find_tile = -1;
     int find_tile_offset = 0;
@@ -753,8 +876,8 @@ int main(int argc, char **argv) {
                         addr = offsetof(struct DecompresssedRoom, room_south);
                     } else if (strcmp(argv[0], "room_west") == 0) {
                         addr = offsetof(struct DecompresssedRoom, room_west);
-                    } else if (strcasecmp(argv[0], "UNKNOWN") == 0) {
-                        addr = offsetof(struct DecompresssedRoom, UNKNOWN);
+                    } else if (strcasecmp(argv[0], "UNKNOWN") == 0 || strcasecmp(argv[0], "UNKNOWN_a") == 0) {
+                        addr = offsetof(struct DecompresssedRoom, UNKNOWN_a);
                     } else if (strcmp(argv[0], "gravity_vertical") == 0) {
                         addr = offsetof(struct DecompresssedRoom, gravity_vertical);
                     } else if (strcmp(argv[0], "gravity_horizontal") == 0) {
@@ -766,7 +889,19 @@ int main(int argc, char **argv) {
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             return 1;
                         }
-                        addr = offsetof(struct DecompresssedRoom, UNKNOWN2) + idx;
+                        addr = offsetof(struct DecompresssedRoom, UNKNOWN_b) + idx;
+                    } else if (strcasecmp(argv[0], "UNKNOWN_b") == 0) {
+                        addr = offsetof(struct DecompresssedRoom, UNKNOWN_b);
+                    } else if (strcasecmp(argv[0], "UNKNOWN_c") == 0) {
+                        addr = offsetof(struct DecompresssedRoom, UNKNOWN_c);
+                    } else if (strcasecmp(argv[0], "UNKNOWN_d") == 0) {
+                        fprintf(stderr, "WARNING: This will change how much data is looped over after main loop. You must ensure the correct data\n");
+                        // FIXME It'll probably blow the assert when writing
+                        addr = offsetof(struct DecompresssedRoom, num_objects);
+                    } else if (strcasecmp(argv[0], "UNKNOWN_e") == 0) {
+                        addr = offsetof(struct DecompresssedRoom, UNKNOWN_e);
+                    } else if (strcasecmp(argv[0], "UNKNOWN_f") == 0) {
+                        addr = offsetof(struct DecompresssedRoom, UNKNOWN_f);
                     } else if (strcmp(argv[0], "name") == 0) {
                         size_t len = strlen(argv[1]);
                         if (len > 20) {
@@ -893,9 +1028,14 @@ int main(int argc, char **argv) {
             }
         } else if (strcmp(argv[0], "editor") == 0) {
             return editor_main();
+        } else if (strcmp(argv[0], "rooms") == 0) {
+            list = true;
+            argv ++;
+            argc --;
         } else if (strcmp(argv[0], "help") == 0) {
             fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
             fprintf(stderr, "Subcommands:\n");
+            fprintf(stderr, "    rooms                                - List rooms\n");
             fprintf(stderr, "    display [ROOMID]                     - Defaults to all rooms\n");
             fprintf(stderr, "    recompress                           - No changes to underlying data, just recompress\n");
             fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
@@ -909,9 +1049,10 @@ int main(int argc, char **argv) {
             argc --;
         }
     }
-    if (find_tile == -1 && !display && !recompress && patches.length == 0) {
+    if (find_tile == -1 && !list && !display && !recompress && patches.length == 0) {
         fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
         fprintf(stderr, "Subcommands:\n");
+        fprintf(stderr, "    rooms                                - List rooms\n");
         fprintf(stderr, "    display [ROOMID]                     - Defaults to all rooms\n");
         fprintf(stderr, "    recompress                           - No changes to underlying data, just recompress\n");
         fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
@@ -961,6 +1102,14 @@ int main(int argc, char **argv) {
         }
         if (!found) {
             printf("Tile 0x%02x (offset 0x%02x) not found\n", find_tile, find_tile_offset);
+        }
+    }
+
+    if (list) {
+        for (size_t i = 0; i < C_ARRAY_LEN(file.rooms); i ++) {
+            if (file.rooms[i].valid) {
+                printf("%2ld: %s\n", i, file.rooms[i].data.name);
+            }
         }
     }
 
