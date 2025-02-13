@@ -92,6 +92,7 @@ struct {
     0x1b5f-60 = 0x0153 (index into movertab.dat (i = 1))
     0x1b61-2  = 0x92ec (bp + 0x32) (address of more stuff (bp)
 }
+no more objects
 
 0x1c89 = 0x1b3d
 
@@ -104,15 +105,22 @@ struct {
 bp {
     +0x00   0x92ec    = 0x04 (static)
     +0x01-2 0x92ed-f  = (0x00d0 + (u8)*0xab37) - 0xa = 0x00e8 (x + movertab[].delta_x + delta_table[movertab[].type & 0x7])
-    +0x03-4 0x92ef-f0 = (0x38 + *0xab36) - 0xa       = 0x2f   (same but for y)
+                      = later gets set to 0xed   // ax = delta_table[delta_table[movertab[].type & 0x7]].1 + ((x + movertab[].delta_x + delta_table[movertab[].type & 0x7] + 0xa) & 0xf8) - 0xa
+        bp[0x1] = ax
+    +0x03   0x92ef    = (0x38 + *0xab36) - 0xa       = 0x2f   (same but for y, and only a byte)
+                      = later gets set to 0x35   // al = delta_table[delta_table[movertab[].type & 0x7]].0 + (bp[0x3] + 0xa) & 0xf8) - 0xa
     +0x04   0x92f0    = 0x00 (movertab[i].type & 0x7)
     +0x05   0x92f1    = 0x5f (static)
 ..
     +0x10   0x92fc    = 0x00 (*(uint8_t*)(unknown_static_table[((((first&0x60)>>2)|(second&0xe0))>>1) + 0]))
 ..
-    +0x18   0x9304    - read at some stage, unsure when written (seems 0 initialized)
+    +0x12-3 0x92fe-f  - bx (pointer to just after what was stored in 0x18-19 (1000:27f9)
+..
+    +0x18-9 0x9304-5  - 0x0000 (pulled from pointer just before whats stored at 0x12-3
 ..
     +0x1e   0x930a    = 0x0153
+..
+    +0x26   0x9312    = 0x00 (movertab[][2] & 0x2 == 0 ? 0x00 : bp[0x2f])
 ..
     +0x29-a 0x9315-6  = 0xa4e5 (unknown_static_table[((((first&0x60)>>2)|(second&0xe0))>>1) + 0] + 1)
     +0x2b-c 0x9316-7  = bp[1]
@@ -284,18 +292,42 @@ looping twice (cl = 0x2) {
     if (bp[0x10] & 0x1 != 0) {
         // n/e
     }
-    bp[0x18] = cx (0x0000)
+    bp[0x18-9] = cx (0x0000)
     bx += 2 (1000:27f9)
-
-
-
-
-
-
-
-
-
-
+    bp[0x12-3] = bx
+    if (bp[0x10] & 0x1 == 0 {
+        bl = bp[0x4]     => 0x00 (movertab[i].type & 0x7)
+        bl *= 2
+        bh = 0
+        bx += 0xa9e3 (delta_table)
+        cx = *bx (0x0707)
+        al = bp[0x3]     => (0x38 + *0xab36) - 0xa       = 0x2f   (y + movertab[].delta_y + delta_table[movertab[].type & 0x7])
+        al += 0xa (0x39)
+        al &= 0xf8 (0x38)
+        al += ch (0x38 + 0x07 = 0x3f)
+        al -= 0xa = (0x35)
+        // al = delta_table[delta_table[movertab[].type & 0x7]].0 + ((y + movertab[].delta_y + delta_table[movertab[].tye & 0x7] + 0xa) & 0xf8) - 0xa
+        bp[0x3] = al
+        ch = 0
+        ax = bp[0x1]   => (0x00d0 + (u8)*0xab37) - 0xa = 0x00e8 (x + movertab[].delta_x + delta_table[movertab[].type & 0x7])
+        ax += 0xa (0xf2)
+        al *= 0xf8 (0xf0)
+        ax += cx (0xf0 + 0x07 = 0xf7)
+        ax -= 0xa (0xed)
+        // ax = delta_table[delta_table[movertab[].type & 0x7]].1 + ((x + movertab[].delta_x + delta_table[movertab[].type & 0x7] + 0xa) & 0xf8) - 0xa
+        bp[0x1] = ax
+    }
+    .. end fun_1000:3ed8
+    bx = bp[0x1e]      +0x1e   0x930a    = 0x0153
+    al = bp[0x2f]      +0x2f   0x931b    = 0xc0 (unknown_static_table[((((first&0x60)>>2)|(second&0xe0))>>1) + 3])
+    if (bx[0x2] & 0x2 == 0) { // movertab[][2] = 0xb8
+        al = 0
+    }
+    bp[0x26] = al (0x00)
+    di += 0x7 (0x1b63)
+    bx = orig_bx
+    cx = orig_cx
+    ... end fun 1000:4200
     ...
     bx += 3 (0x156)
 }

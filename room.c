@@ -135,11 +135,22 @@ void dumpRoom(Room *room) {
 
     fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
     for (size_t i = 0; i < room->data.num_objects; i ++) {
-        fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}\n",
-                room->data.objects[i].type == STATIC ? "STATIC" : "ENEMY",
-                room->data.objects[i].x, room->data.objects[i].y,
-                room->data.objects[i].width, room->data.objects[i].height);
-        // FIXME show tiles?
+        switch (room->data.objects[i].type) {
+            case STATIC:
+                fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}\n",
+                        "STATIC",
+                        room->data.objects[i].x, room->data.objects[i].y,
+                        room->data.objects[i].width, room->data.objects[i].height);
+                // FIXME show tiles?
+                break;
+
+            case ENEMY:
+                fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .sprite = %d, .damage = %d}\n",
+                        "ENEMY",
+                        room->data.objects[i].x, room->data.objects[i].y,
+                        room->data.objects[i].width, room->data.objects[i].height);
+                break;
+        }
     }
 
     fprintf(stderr, "  Left over data (length=%zu): [", room->rest.length);
@@ -970,9 +981,9 @@ int main(int argc, char **argv) {
                             addr -= offsetof(struct RoomObject, x);
                         } else if (strcmp(end, "].y") == 0) {
                             addr -= offsetof(struct RoomObject, y);
-                        } else if (strcmp(end, "].width") == 0) {
+                        } else if (strcmp(end, "].width") == 0 || strcmp(end, "].sprite") == 0) {
                             addr -= offsetof(struct RoomObject, width);
-                        } else if (strcmp(end, "].height") == 0) {
+                        } else if (strcmp(end, "].height") == 0 || strcmp(end, "].damage") == 0) {
                             addr -= offsetof(struct RoomObject, height);
                         } else if (strcmp(end, "].type") == 0) {
                             addr -= offsetof(struct RoomObject, type);

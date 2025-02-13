@@ -11,6 +11,17 @@
 
 #define BLANK_TILE 0x00
 
+enum EnemyType {
+    SHARK,
+    MUMMY,
+    BLUE_MAN,
+    WOLF,
+    R2D2,
+    DINOSAUR,
+    RAT,
+    SHOTGUN_LADY
+};
+
 enum RoomObjectType {
     STATIC,
     ENEMY,
