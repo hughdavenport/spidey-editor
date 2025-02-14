@@ -93,10 +93,16 @@ struct {
     0x1b61-2  = 0x92ec (bp + 0x32) (address of more stuff (bp)
 }
 no more objects
-
 0x1c89 = 0x1b3d
 
 0x1c8b = 0x01
+
+struct {
+    0x1c92   = 0x11 (second byte & 0x1f)
+    0x1c93   = 0x00 (static)
+    0x1c94   = 0x06 (first byte & 0x1f)
+
+}
 
 0x1d12 = unknown2[3] >> 2 = 0x06
 
@@ -330,4 +336,20 @@ looping twice (cl = 0x2) {
     ... end fun 1000:4200
     ...
     bx += 3 (0x156)
+}
+
+ok, so now we start second loop
+cl = *0x1d12 = unknown2[3] >> 2 = 0x06
+loop 6 times. first time {
+    ch = 0
+    di = 0x1c92 (was 0x1b49)
+    bx = *0x9690 = unknown2[4] << 8 | unknown2[3] & 0x3 = 0x00
+    ax = next two bytes = 0x2491
+    si += 2 (points at rest[6])
+    dx = ax (0x2491)
+    dx &= 0x1f1f (0x0411) - location of things?
+    di[0-2] = dl 0x00 dh (0x110004)
+    al >>=5 (signed, was 0b10010001, now 0b11111100
+    ...
+
 }

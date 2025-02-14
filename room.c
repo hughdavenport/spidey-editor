@@ -122,16 +122,16 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  Room South: %u\n", room->data.room_south);
     fprintf(stderr, "  Room West: %u\n", room->data.room_west);
 
-    fprintf(stderr, "  UNKNOWN (a): %02x\n", room->data.UNKNOWN_a);
+    fprintf(stderr, "  UNKNOWN (a): %d 0x%02x\n", room->data.UNKNOWN_a, room->data.UNKNOWN_a);
 
     fprintf(stderr, "  Gravity vertical: %u\n", room->data.gravity_vertical);
     fprintf(stderr, "  Gravity horizontal: %u\n", room->data.gravity_horizontal);
 
-    fprintf(stderr, "  UNKNOWN (b): %02x\n", room->data.UNKNOWN_b);
-    fprintf(stderr, "  UNKNOWN (c): %02x\n", room->data.UNKNOWN_c);
-    fprintf(stderr, "  number of moving objects: %02x\n", room->data.num_objects);
-    fprintf(stderr, "  UNKNOWN (e): %02x\n", room->data.UNKNOWN_e);
-    fprintf(stderr, "  UNKNOWN (f): %02x\n", room->data.UNKNOWN_f);
+    fprintf(stderr, "  UNKNOWN (b): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
+    fprintf(stderr, "  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
+    fprintf(stderr, "  number of moving objects: %d\n", room->data.num_objects);
+    fprintf(stderr, "  UNKNOWN (e) (num of ?? << 2 | lower 3 bits for bx): %d 0x%02x \n", room->data.UNKNOWN_e, room->data.UNKNOWN_e);
+    fprintf(stderr, "  UNKNOWN (f) (upper 8 bits of bx): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
 
     fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
     for (size_t i = 0; i < room->data.num_objects; i ++) {

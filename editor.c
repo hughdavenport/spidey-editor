@@ -229,6 +229,42 @@ void redraw() {
         }
     }
 
+    for (size_t i = 0; i < room.num_objects; i ++) {
+        struct RoomObject *object = room.objects + i;
+        assert(object->x >= 0);
+        assert(object->y >= 0);
+        assert(object->x < WIDTH_TILES);
+        assert(object->y < HEIGHT_TILES);
+        switch (object->type) {
+            case STATIC:
+                assert(object->x + object->width < WIDTH_TILES);
+                assert(object->y + object->height < HEIGHT_TILES);
+                printf("\033[3%ld;1m", (i % 8) + 1);
+                for (int y = object->y; y < object->y + object->height; y ++) {
+                    GOTO(2 * object->x, y + 1);
+                    for (int x = object->x; x < object->x + object->width; x ++) {
+                        uint8_t tile = object->tiles[(y - object->y) * object->width + (x - object->x)];
+                        if (tile == BLANK_TILE) {
+                            printf("  ");
+                        } else {
+                            printf("%02X", tile);
+                        }
+                    }
+                }
+                break;
+
+            case ENEMY:
+                GOTO(2 * object->x, object->y + 1);
+                // width is type, height is damage
+                printf("\033[4%ld;30;1m%d%d", (i % 8) + 1, object->width, object->height);
+                break;
+        }
+        printf("\033[m");
+    }
+
+    GOTO(0, 0);
+    printf("%d,%d (%d)", state->player.x, state->player.y, state->player.y * WIDTH_TILES + state->player.x);
+
     assert(state->player.x >= 0);
     assert(state->player.y >= 0);
     assert(state->player.x < WIDTH_TILES);
