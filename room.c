@@ -90,22 +90,32 @@ void dumpRoom(Room *room) {
         if (x == 0) fprintf(stderr, "\n    ");
         bool colored = false;
         uint8_t tile = room->data.tiles[i];
+        if (x != 0) fprintf(stderr, " ");
         for (size_t o = 0; o < room->data.num_objects; o ++) {
             struct RoomObject *object = room->data.objects + o;
-            if (x >= object->x && x < object->x + object->width &&
-                    y >= object->y && y < object->y + object->height) {
+            switch (object->type) {
+                case BLOCK:
+                    if (x >= object->x && x < object->x + object->block.width &&
+                        y >= object->y && y < object->y + object->block.height) {
 
-                fprintf(stderr, "\033[%d%ld;1m", object->type == STATIC ? 3 : 4, (o % 8) + 1);
-                if (object->type == STATIC && object->tiles) {
-                    int o_x = x - object->x;
-                    int o_y = y - object->y;
-                    tile = object->tiles[o_y * object->width + o_x];
-                }
-                colored = true;
-                break;
+                        fprintf(stderr, "\033[3%ld;1m", (o % 8) + 1);
+                        colored = true;
+                        assert(object->tiles != NULL);
+                        int o_x = x - object->x;
+                        int o_y = y - object->y;
+                        tile = object->tiles[o_y * object->block.width + o_x];
+                    }
+                    break;
+
+                case SPRITE:
+                    if (x == object->x && y == object->y) {
+                        fprintf(stderr, "\033[4%ld;30;1m", (o % 8) + 1);
+                        colored = true;
+                        tile = object->sprite.type << 4 | object->sprite.damage;
+                    }
             }
+            if (colored) break;
         }
-        if (x != 0) fprintf(stderr, " ");
         if (tile == BLANK_TILE) {
             fprintf(stderr, "  ");
         } else {
@@ -136,19 +146,35 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         switch (room->data.objects[i].type) {
-            case STATIC:
+            case BLOCK:
                 fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}\n",
-                        "STATIC",
+                        "BLOCK",
                         room->data.objects[i].x, room->data.objects[i].y,
-                        room->data.objects[i].width, room->data.objects[i].height);
+                        room->data.objects[i].block.width, room->data.objects[i].block.height);
                 // FIXME show tiles?
                 break;
 
-            case ENEMY:
-                fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .sprite = %d, .damage = %d}\n",
-                        "ENEMY",
-                        room->data.objects[i].x, room->data.objects[i].y,
-                        room->data.objects[i].width, room->data.objects[i].height);
+            case SPRITE:
+                fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .type = ",
+                        "SPRITE",
+                        room->data.objects[i].x, room->data.objects[i].y);
+                _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
+                switch (room->data.objects[i].sprite.type) {
+                    case SHARK: fprintf(stderr, "SHARK"); break;
+                    case MUMMY: fprintf(stderr, "MUMMY"); break;
+                    case BLUE_MAN: fprintf(stderr, "BLUE_MAN"); break;
+                    case WOLF: fprintf(stderr, "WOLF"); break;
+                    case R2D2: fprintf(stderr, "R2D2"); break;
+                    case DINOSAUR: fprintf(stderr, "DINOSAUR"); break;
+                    case RAT: fprintf(stderr, "RAT"); break;
+                    case SHOTGUN_LADY: fprintf(stderr, "SHOTGUN_LADY"); break;
+
+                    default:
+                        fprintf(stderr, "%s:%d: UNREACHABLE: Unexpected sprite type %d\n", __FILE__, __LINE__, room->data.objects[i].sprite.type);
+                        exit(1);
+                        break;
+                }
+                fprintf(stderr, ", .damage = %d}\n", room->data.objects[i].sprite.damage);
                 break;
         }
     }
@@ -379,14 +405,14 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         read_next(msb, tmp.decompressed);
         read_next(lsb, tmp.decompressed);
         if ((msb & 0x80) == 0) {
-            objects[i].type = STATIC;
+            objects[i].type = BLOCK;
             objects[i].x = lsb & 0x1f;
             objects[i].y = msb & 0x1f;
-            objects[i].width = ((lsb & 0xe0) >> 5) + 1;
-            objects[i].height = ((msb & 0x60) >> 5) + 1;
+            objects[i].block.width = ((lsb & 0xe0) >> 5) + 1;
+            objects[i].block.height = ((msb & 0x60) >> 5) + 1;
             assert(objects[i].x < WIDTH_TILES);
-            assert(objects[i].width < WIDTH_TILES);
-            assert(objects[i].x + objects[i].width < WIDTH_TILES);
+            assert(objects[i].block.width < WIDTH_TILES);
+            assert(objects[i].x + objects[i].block.width < WIDTH_TILES);
             if (!(objects[i].y < HEIGHT_TILES)) {
                 fprintf(stderr, "WARNING: Room %ld (%s) object %zu y is out of bounds (%u >= %u)\n",
                         idx, tmp.data.name, i, objects[i].y, HEIGHT_TILES);
@@ -397,39 +423,38 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                 continue;
             }
             assert(objects[i].y < HEIGHT_TILES);
-            assert(objects[i].height < HEIGHT_TILES);
-            if (!(objects[i].y + objects[i].height < HEIGHT_TILES)) {
+            assert(objects[i].block.height < HEIGHT_TILES);
+            if (!(objects[i].y + objects[i].block.height < HEIGHT_TILES)) {
                 fprintf(stderr, "WARNING: Room %ld (%s) object %zu y+height is out of bounds (%u >= %u)\n",
-                        idx, tmp.data.name, i, objects[i].y + objects[i].height, HEIGHT_TILES);
-                if (!(objects[i].y + objects[i].height < WIDTH_TILES)) {
+                        idx, tmp.data.name, i, objects[i].y + objects[i].block.height, HEIGHT_TILES);
+                if (!(objects[i].y + objects[i].block.height < WIDTH_TILES)) {
                     fprintf(stderr, "WARNING: Room %ld (%s) object %zu y+height is really out of bounds (%u >= %u)\n",
-                            idx, tmp.data.name, i, objects[i].y + objects[i].height, WIDTH_TILES);
+                            idx, tmp.data.name, i, objects[i].y + objects[i].block.height, WIDTH_TILES);
                 }
                 continue;
             }
-            objects[i].tiles = malloc(objects[i].width * objects[i].height);
+            objects[i].tiles = malloc(objects[i].block.width * objects[i].block.height);
             assert(objects[i].tiles != NULL);
-            for (size_t y = objects[i].y; y < objects[i].y + objects[i].height; y ++) {
+            for (size_t y = objects[i].y; y < objects[i].y + objects[i].block.height; y ++) {
                 memcpy(
-                        objects[i].tiles + (y - objects[i].y) * objects[i].width,
+                        objects[i].tiles + (y - objects[i].y) * objects[i].block.width,
                         tmp.data.tiles + y * WIDTH_TILES + objects[i].x,
-                        objects[i].width
+                        objects[i].block.width
                       );
                 memset(
                         tmp.data.tiles + y * WIDTH_TILES + objects[i].x,
                         '\0',
-                        objects[i].width
+                        objects[i].block.width
                       );
 
             }
         } else {
-            objects[i].type = ENEMY;
+            objects[i].type = SPRITE;
             objects[i].x = lsb & 0x1f;
             objects[i].y = msb & 0x1f;
 
-            // FIXME work out what this is
-            objects[i].width = ((lsb & 0xe0) >> 5) + 1;
-            objects[i].height = ((msb & 0x60) >> 5) + 1;
+            objects[i].sprite.type = ((lsb & 0xe0) >> 5) + 1;
+            objects[i].sprite.damage = ((msb & 0x60) >> 5) + 1;
         }
     }
     // then stuff that controls enemy placement, switch actions, etc
@@ -509,14 +534,14 @@ bool writeRoom(Room *room, FILE *fp) {
 
     // Copy the object tile data back
     for (size_t i = 0; i < room->data.num_objects; i ++) {
-        if (room->data.objects[i].type == ENEMY) continue; // No tile data
+        if (room->data.objects[i].type == SPRITE) continue; // No tile data
         if (room->data.objects[i].tiles == NULL) continue;
-        assert(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].height < HEIGHT_TILES);
-        for (size_t y = room->data.objects[i].y; y < room->data.objects[i].y + room->data.objects[i].height; y ++) {
+        assert(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].block.height < HEIGHT_TILES);
+        for (size_t y = room->data.objects[i].y; y < room->data.objects[i].y + room->data.objects[i].block.height; y ++) {
             memcpy(
                     room->data.tiles + y * WIDTH_TILES + room->data.objects[i].x,
-                    room->data.objects[i].tiles + (y - room->data.objects[i].y) * room->data.objects[i].width,
-                    room->data.objects[i].width
+                    room->data.objects[i].tiles + (y - room->data.objects[i].y) * room->data.objects[i].block.width,
+                    room->data.objects[i].block.width
                   );
         }
     }
@@ -550,15 +575,14 @@ bool writeRoom(Room *room, FILE *fp) {
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         // FIXME depending on type, first byte should have 0x80
         switch (room->data.objects[i].type) {
-            case STATIC:
-                decompressed[d_len++] = room->data.objects[i].y | ((room->data.objects[i].height - 1) << 5);
-                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].width - 1) << 5);
+            case BLOCK:
+                decompressed[d_len++] = room->data.objects[i].y | ((room->data.objects[i].block.height - 1) << 5);
+                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].block.width - 1) << 5);
                 break;
 
-            case ENEMY:
-                // FIXME write this properly
-                decompressed[d_len++] = 0x80 | room->data.objects[i].y | ((room->data.objects[i].height - 1) << 5);
-                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].width - 1) << 5);
+            case SPRITE:
+                decompressed[d_len++] = 0x80 | room->data.objects[i].y | ((room->data.objects[i].sprite.damage - 1) << 5);
+                decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].sprite.type - 1) << 5);
                 break;
 
         }
@@ -981,16 +1005,45 @@ int main(int argc, char **argv) {
                             addr -= offsetof(struct RoomObject, x);
                         } else if (strcmp(end, "].y") == 0) {
                             addr -= offsetof(struct RoomObject, y);
-                        } else if (strcmp(end, "].width") == 0 || strcmp(end, "].sprite") == 0) {
-                            addr -= offsetof(struct RoomObject, width);
+                        } else if (strcmp(end, "].width") == 0) {
+                            addr -= offsetof(struct RoomObject, block);
+                        } else if (strcmp(end, "].sprite") == 0) {
+                            addr -= offsetof(struct RoomObject, sprite);
+                            _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
+
+                            if (strcmp(argv[1], "SHARK") == 0) {
+                                value = SHARK;
+                            } else if (strcmp(argv[1], "MUMMY") == 0) {
+                                value = MUMMY;
+                            } else if (strcmp(argv[1], "BLUE_MAN") == 0) {
+                                value = BLUE_MAN;
+                            } else if (strcmp(argv[1], "WOLF") == 0) {
+                                value = WOLF;
+                            } else if (strcmp(argv[1], "R2D2") == 0) {
+                                value = R2D2;
+                            } else if (strcmp(argv[1], "DINOSAUR") == 0) {
+                                value = DINOSAUR;
+                            } else if (strcmp(argv[1], "RAT") == 0) {
+                                value = RAT;
+                            } else if (strcmp(argv[1], "SHOTGUN_LADY") == 0) {
+                                value = SHOTGUN_LADY;
+                            } else {
+                                value = strtol(argv[1], &end, 0);
+                                if (value < 0 || value >= NUM_SPRITE_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
+                                    fprintf(stderr, "Invalid sprite type: %s\n", argv[1]);
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    return 1;
+                                }
+                                return 1;
+                            }
                         } else if (strcmp(end, "].height") == 0 || strcmp(end, "].damage") == 0) {
-                            addr -= offsetof(struct RoomObject, height);
+                            addr -= offsetof(struct RoomObject, block) + 1;
                         } else if (strcmp(end, "].type") == 0) {
                             addr -= offsetof(struct RoomObject, type);
-                            if (strcmp(argv[1], "static") == 0) {
-                                value = STATIC;
-                            } else if (strcmp(argv[1], "enemy") == 0) {
-                                value = ENEMY;
+                            if (strcmp(argv[1], "static") == 0 || strcmp(argv[1], "block") == 0) {
+                                value = BLOCK;
+                            } else if (strcmp(argv[1], "enemy") == 0 || strcmp(argv[1], "sprite") == 0) {
+                                value = SPRITE;
                             } else {
                                 fprintf(stderr, "Invalid object type: %s\n", argv[1]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
@@ -1248,7 +1301,10 @@ int main(int argc, char **argv) {
                 struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
                 fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
                 ((uint8_t *)object)[addr] = patch.value;
+            } else if (false) {
+                // FIXME: add ability to write to tiles of objects?
             } else if (patch.address >= sizeof(file.rooms[patch.room_id].data)) {
+                fprintf(stderr, "%s:%d: WARNING: Patching *rest* may not be stable currently\n", __FILE__, __LINE__);
                 if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
                     fprintf(stderr, "Address %d invalid\n", patch.address);
                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);

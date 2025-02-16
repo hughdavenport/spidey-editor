@@ -98,10 +98,12 @@ no more objects
 0x1c8b = 0x01
 
 struct {
-    0x1c92   = 0x11 (second byte & 0x1f)
-    0x1c93   = 0x00 (static)
-    0x1c94   = 0x06 (first byte & 0x1f)
-
+    +0x00     0x1c92   = 0x11 (second byte & 0x1f)
+    +0x01     0x1c93   = 0x00 (static)
+    +0x02     0x1c94   = 0x06 (first byte & 0x1f)
+    +0x03     0x1c95   = 0xa0 ((first & 0x20) | (second / 32 (>>5) & 0x83))
+    +0x04-5   0x1c96-7 = 0x0000 (*0x9690 = unknown2[4] << 8 | unknown2[3] & 0x3 = 0x0000)
+    +0x06-07  0x1c98-9 = pointer to bytes after these two ^^
 }
 
 0x1d12 = unknown2[3] >> 2 = 0x06
@@ -343,13 +345,34 @@ cl = *0x1d12 = unknown2[3] >> 2 = 0x06
 loop 6 times. first time {
     ch = 0
     di = 0x1c92 (was 0x1b49)
-    bx = *0x9690 = unknown2[4] << 8 | unknown2[3] & 0x3 = 0x00
+    bx = *0x9690 = unknown2[4] << 8 | unknown2[3] & 0x3 = 0x0000
     ax = next two bytes = 0x2491
     si += 2 (points at rest[6])
     dx = ax (0x2491)
     dx &= 0x1f1f (0x0411) - location of things?
     di[0-2] = dl 0x00 dh (0x110004)
-    al >>=5 (signed, was 0b10010001, now 0b11111100
+    al >>=5 (signed, was 0b10010001 0x91, now 0b11111100, 0xfb
+    al &= 0x83 (0x80)
+    ah &= 0x20 (0x20)
+    al |= ah (0xa0)
+    di[3] = al
+    di[4-5] = bx
+    bl ++ (0x0001)
+    if (bl == 4) { n/a }
+    di[6-7] = si (pointer after bytes read so far)
+    push bx
+    push cx
+    al = di[4] = 0x00
+    al &= 0x3 (0x00)
+    bx = 0xab09
+    xlat bx (al = bx[al] = 0x02)
+    bl = di[5] = 0x00
+    bh = 0
+    bx += 0x90 (0x0090)
+
+
+
+
     ...
 
 }

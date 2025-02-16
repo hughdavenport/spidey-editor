@@ -41,7 +41,11 @@
 
 #define RESET_GFX_MODE "\x1b[0m"
 #define CLEAR_SCREEN   "\x1b[0J"
-#define GOTO(x, y)     printf("\x1b[%d;%dH", (y) + 1, (x) + 1)
+#define GOTO(x, y)     do { \
+    assert((x) < MIN_WIDTH && "width out of bounds"); \
+    assert((y) < MIN_HEIGHT && "height out of bounds"); \
+    printf("\x1b[%d;%dH", (y) + 1, (x) + 1); \
+} while (false)
 
 #define UP    "\x1b[A"
 #define DOWN  "\x1b[B"
@@ -78,6 +82,9 @@
 #define F10  "\x1b[21~"
 #define F11  "\x1b[23~"
 #define F12  "\x1b[24~"
+
+#define MIN_HEIGHT HEIGHT_TILES + 2
+#define MIN_WIDTH 2 * WIDTH_TILES
 
 #include "room.h"
 
@@ -192,14 +199,14 @@ void redraw() {
     GOTO(0, 0);
     printf(RESET_GFX_MODE CLEAR_SCREEN);
 
-    if (state->screen_dimensions.x < 2 * WIDTH_TILES || state->screen_dimensions.y < HEIGHT_TILES + 1) {
+    assert(MIN_WIDTH >= 2 * WIDTH_TILES);
+    assert(MIN_HEIGHT >= HEIGHT_TILES + 2);
+    if (state->screen_dimensions.x < MIN_WIDTH || state->screen_dimensions.y < MIN_HEIGHT) {
         char *message = NULL;
         assert(asprintf(&message,
                     "Required screen dimension is %dx%d. Currently %dx%d",
-                    2 * WIDTH_TILES,
-                    HEIGHT_TILES + 1,
-                    state->screen_dimensions.x,
-                    state->screen_dimensions.y
+                    MIN_WIDTH, MIN_HEIGHT,
+                    state->screen_dimensions.x, state->screen_dimensions.y
         ) >= 0);
         GOTO(state->screen_dimensions.x / 2 - (int)strlen(message) / 2, state->screen_dimensions.y / 2);
         printf("%s", message);
@@ -207,9 +214,6 @@ void redraw() {
         fflush(stdout);
         return;
     }
-
-    assert(state->screen_dimensions.x >= 2 * WIDTH_TILES);
-    assert(state->screen_dimensions.y >= HEIGHT_TILES + 1);
 
     struct DecompresssedRoom room = state->rooms.rooms[state->level].data;
     GOTO(16, 0);
@@ -236,14 +240,14 @@ void redraw() {
         assert(object->x < WIDTH_TILES);
         assert(object->y < HEIGHT_TILES);
         switch (object->type) {
-            case STATIC:
-                assert(object->x + object->width < WIDTH_TILES);
-                assert(object->y + object->height < HEIGHT_TILES);
+            case BLOCK:
+                assert(object->x + object->block.width < WIDTH_TILES);
+                assert(object->y + object->block.height < HEIGHT_TILES);
                 printf("\033[3%ld;1m", (i % 8) + 1);
-                for (int y = object->y; y < object->y + object->height; y ++) {
+                for (int y = object->y; y < object->y + object->block.height; y ++) {
                     GOTO(2 * object->x, y + 1);
-                    for (int x = object->x; x < object->x + object->width; x ++) {
-                        uint8_t tile = object->tiles[(y - object->y) * object->width + (x - object->x)];
+                    for (int x = object->x; x < object->x + object->block.width; x ++) {
+                        uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
                         if (tile == BLANK_TILE) {
                             printf("  ");
                         } else {
@@ -253,10 +257,9 @@ void redraw() {
                 }
                 break;
 
-            case ENEMY:
+            case SPRITE:
                 GOTO(2 * object->x, object->y + 1);
-                // width is type, height is damage
-                printf("\033[4%ld;30;1m%d%d", (i % 8) + 1, object->width, object->height);
+                printf("\033[4%ld;30;1m%d%d", (i % 8) + 1, object->sprite.type, object->sprite.damage);
                 break;
         }
         printf("\033[m");
@@ -280,6 +283,17 @@ void redraw() {
     if (state->player.y >= 0) {
         GOTO(2 * state->player.x, state->player.y + 1);
         printf("@@");
+    }
+
+    GOTO(0, HEIGHT_TILES + 1);
+    uint8_array rest = state->rooms.rooms[state->level].rest;
+    int pre = printf("Rest (length=%zu):", rest.length);
+    for (size_t i = 0; i < rest.length; i ++) {
+        if (pre + 3 * (i + 2) > state->screen_dimensions.x) {
+            printf("...");
+            break;
+        }
+        printf(" %02x", rest.data[i]);
     }
 
     fflush(stdout);

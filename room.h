@@ -11,7 +11,7 @@
 
 #define BLANK_TILE 0x00
 
-enum EnemyType {
+typedef enum {
     SHARK,
     MUMMY,
     BLUE_MAN,
@@ -19,20 +19,29 @@ enum EnemyType {
     R2D2,
     DINOSAUR,
     RAT,
-    SHOTGUN_LADY
-};
+    SHOTGUN_LADY,
+    NUM_SPRITE_TYPES
+} SpriteType;
 
 enum RoomObjectType {
-    STATIC,
-    ENEMY,
+    BLOCK,
+    SPRITE,
 };
 
 struct RoomObject {
     // written as ((x << 8) | y) | ((width << 5) << 8) | (height << 5)
     uint8_t x;
     uint8_t y;
-    uint8_t width;
-    uint8_t height;
+    union {
+        struct {
+            uint8_t width;
+            uint8_t height;
+        } block;
+        struct {
+            SpriteType type;
+            uint8_t damage;
+        } sprite;
+    };
 
     enum RoomObjectType type;
     uint8_t *tiles;
@@ -71,14 +80,15 @@ struct DecompresssedRoom {
     struct RoomObject *objects;
 };
 
+typedef ARRAY(uint8_t) uint8_array;
 typedef struct {
     uint8_t index;
     uint16_t address;
     bool valid;
     struct DecompresssedRoom data;
-    ARRAY(uint8_t) rest;
-    ARRAY(uint8_t) compressed;
-    ARRAY(uint8_t) decompressed;
+    uint8_array rest;
+    uint8_array compressed;
+    uint8_array decompressed;
 } Room;
 
 typedef struct RoomFile {
