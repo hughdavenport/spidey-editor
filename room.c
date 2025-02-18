@@ -28,6 +28,12 @@ void freeRoom(Room *room) {
         }
         free(room->data.objects);
     }
+    if (room->data.switches) {
+        for (size_t i = 0; i < room->data.num_switches; i ++) {
+            ARRAY_FREE(room->data.switches[i].data);
+        }
+        free(room->data.switches);
+    }
     ARRAY_FREE(room->rest);
     ARRAY_FREE(room->compressed);
     ARRAY_FREE(room->decompressed);
@@ -109,13 +115,21 @@ void dumpRoom(Room *room) {
 
                 case SPRITE:
                     if (x == object->x && y == object->y) {
-                        fprintf(stderr, "\033[4%ld;30;1m", (o % 8) + 1);
+                        fprintf(stderr, "\033[4%ld;30;1m", (o % 3) + 1);
                         colored = true;
                         tile = object->sprite.type << 4 | object->sprite.damage;
                     }
             }
             if (colored) break;
         }
+        for (size_t s = 0; s < room->data.num_switches; s ++) {
+            struct SwitchObject *sw = room->data.switches + s;
+            if (x == sw->x && y == sw->y) {
+                fprintf(stderr, "\033[4%ld;30;1m", (s % 3) + 4);
+                colored = true;
+            }
+        }
+
         if (tile == BLANK_TILE) {
             fprintf(stderr, "  ");
         } else {
@@ -140,14 +154,16 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  UNKNOWN (b): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
     fprintf(stderr, "  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
     fprintf(stderr, "  number of moving objects: %d\n", room->data.num_objects);
-    fprintf(stderr, "  UNKNOWN (e) (num of ?? << 2 | lower 3 bits for bx): %d 0x%02x \n", room->data.UNKNOWN_e, room->data.UNKNOWN_e);
+    fprintf(stderr, "  UNKNOWN (e) (num of switches << 2 | lower 3 bits for bx): %d 0x%02x \n", room->data._num_switches, room->data._num_switches);
+    fprintf(stderr, "  number of moving switches: %d\n", room->data.num_switches);
     fprintf(stderr, "  UNKNOWN (f) (upper 8 bits of bx): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
 
     fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         switch (room->data.objects[i].type) {
             case BLOCK:
-                fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}\n",
+                fprintf(stderr, "    \033[3%ld;1m", (i % 8) + 1);
+                fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}",
                         "BLOCK",
                         room->data.objects[i].x, room->data.objects[i].y,
                         room->data.objects[i].block.width, room->data.objects[i].block.height);
@@ -155,7 +171,8 @@ void dumpRoom(Room *room) {
                 break;
 
             case SPRITE:
-                fprintf(stderr, "    {.type = %s, .x = %d, .y = %d, .type = ",
+                fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 1);
+                fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .type = ",
                         "SPRITE",
                         room->data.objects[i].x, room->data.objects[i].y);
                 _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
@@ -174,9 +191,24 @@ void dumpRoom(Room *room) {
                         exit(1);
                         break;
                 }
-                fprintf(stderr, ", .damage = %d}\n", room->data.objects[i].sprite.damage);
+                fprintf(stderr, ", .damage = %d}", room->data.objects[i].sprite.damage);
                 break;
         }
+        fprintf(stderr, "\033[m\n");
+    }
+
+    fprintf(stderr, "  Switches (length=%u):\n", room->data.num_switches);
+    for (size_t i = 0; i < room->data.num_switches; i ++) {
+        fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 4);
+        fprintf(stderr, "{.x = %d, .y = %d}",
+                room->data.switches[i].x, room->data.switches[i].y);
+        fprintf(stderr, ", data = [");
+        for (size_t d = 0; d < room->data.switches[i].data.length; d ++) {
+            if (d != 0) fprintf(stderr, ", ");
+            fprintf(stderr, "0x%02x", room->data.switches[i].data.data[d]);
+        }
+        fprintf(stderr, "]");
+        fprintf(stderr, "\033[m\n");
     }
 
     fprintf(stderr, "  Left over data (length=%zu): [", room->rest.length);
@@ -388,7 +420,8 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
     read_next(tmp.data.UNKNOWN_b, tmp.decompressed);
     read_next(tmp.data.UNKNOWN_c, tmp.decompressed);
     read_next(tmp.data.num_objects, tmp.decompressed);
-    read_next(tmp.data.UNKNOWN_e, tmp.decompressed);
+    read_next(tmp.data._num_switches, tmp.decompressed);
+    tmp.data.num_switches = tmp.data._num_switches >> 2;
     read_next(tmp.data.UNKNOWN_f, tmp.decompressed);
 
     log(stderr, "%s:%d: Reading name at %04lu\n", __FILE__, __LINE__, data_idx);
@@ -457,6 +490,44 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
             objects[i].sprite.damage = ((msb & 0x60) >> 5) + 1;
         }
     }
+
+    log(stderr, "%s:%d: Reading %u switches at %04lu\n", __FILE__, __LINE__, tmp.data.UNKNOWN_d, data_idx);
+    tmp.data.switches = calloc(tmp.data.num_switches, sizeof(struct SwitchObject));
+    assert(tmp.data.switches != NULL);
+    struct SwitchObject *switches = tmp.data.switches;
+    for (size_t i = 0; i < tmp.data.num_switches; i ++) {
+        uint8_t msb, lsb;
+        read_next(msb, tmp.decompressed);
+        read_next(lsb, tmp.decompressed);
+        switches[i].y = msb & 0x1f;
+        switches[i].x = lsb & 0x1f;
+        // FIXME figure out what rest of bytes do
+        ARRAY_ADD(switches[i].data, msb);
+        ARRAY_ADD(switches[i].data, lsb);
+        while (data_idx < tmp.decompressed.length && (tmp.decompressed.data[data_idx] & 0xc0) != 0x00) {
+            read_next(msb, tmp.decompressed);
+            read_next(lsb, tmp.decompressed);
+            if ((msb & 0xc0) == 0x80) {
+                uint8_t x = msb & 0x1f;
+                uint8_t y = lsb & 0x1f;
+                uint8_t width = ((lsb >> 5) & 0x7) + 1;
+                uint8_t off, on;
+                read_next(off, tmp.decompressed);
+                read_next(on, tmp.decompressed);
+                // FIXME add some sort of struct to the array?
+                (void)x;(void)y;(void)width;
+                ARRAY_ADD(switches[i].data, msb);
+                ARRAY_ADD(switches[i].data, lsb);
+                ARRAY_ADD(switches[i].data, off);
+                ARRAY_ADD(switches[i].data, on);
+            } else {
+                // 0x40 was set, unsure what bytes are used for, but just add the bytes
+                ARRAY_ADD(switches[i].data, msb);
+                ARRAY_ADD(switches[i].data, lsb);
+            }
+        }
+    }
+
     // then stuff that controls enemy placement, switch actions, etc
     while (data_idx != tmp.decompressed.length) {
         uint8_t val;
@@ -564,7 +635,7 @@ bool writeRoom(Room *room, FILE *fp) {
     decompressed[d_len++] = room->data.UNKNOWN_b;
     decompressed[d_len++] = room->data.UNKNOWN_c;
     decompressed[d_len++] = room->data.num_objects;
-    decompressed[d_len++] = room->data.UNKNOWN_e;
+    decompressed[d_len++] = room->data._num_switches;
     decompressed[d_len++] = room->data.UNKNOWN_f;
 
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.name); i ++) {
@@ -585,6 +656,19 @@ bool writeRoom(Room *room, FILE *fp) {
                 decompressed[d_len++] = room->data.objects[i].x | ((room->data.objects[i].sprite.type - 1) << 5);
                 break;
 
+        }
+    }
+    assert(room->data.num_switches == room->data._num_switches >> 2 && "_num_switches needs to be updated after changing num_switches");
+    for (size_t i = 0; i < room->data.num_switches; i ++) {
+        assert(room->data.switches[i].data.length >= 2);
+        room->data.switches[i].data.data[0] &= ~0x1f;
+        room->data.switches[i].data.data[0] |= room->data.switches[i].y;
+        room->data.switches[i].data.data[1] &= ~0x1f;
+        room->data.switches[i].data.data[1] |= room->data.switches[i].x;
+        assert(d_len + 2 * (room->data.num_switches - i) + room->data.switches[i].data.length < C_ARRAY_LEN(decompressed));
+        // FIXME construct this from objects
+        for (size_t d = 0; d < room->data.switches[i].data.length; d ++) {
+            decompressed[d_len++] = room->data.switches[i].data.data[d];
         }
     }
     // then stuff that controls enemy placement, switch actions, etc
@@ -858,7 +942,15 @@ bool readRooms(RoomFile *file) {
     return ret;
 }
 
+typedef enum {
+    NORMAL,
+    OBJECT,
+    SWITCH,
+
+    NUM_PATCH_TYPES // _Static_asserts depend on this being the last entry
+} PatchType;
 typedef struct {
+    PatchType type;
     uint8_t room_id;
     int address;
     uint8_t value;
@@ -962,7 +1054,9 @@ int main(int argc, char **argv) {
                         // FIXME It'll probably blow the assert when writing
                         addr = offsetof(struct DecompresssedRoom, num_objects);
                     } else if (strcasecmp(argv[0], "UNKNOWN_e") == 0) {
-                        addr = offsetof(struct DecompresssedRoom, UNKNOWN_e);
+                        fprintf(stderr, "WARNING: This will change how much data is looped over after main loop. You must ensure the correct data\n");
+                        // FIXME It'll probably blow the assert when writing
+                        addr = offsetof(struct DecompresssedRoom, _num_switches);
                     } else if (strcasecmp(argv[0], "UNKNOWN_f") == 0) {
                         addr = offsetof(struct DecompresssedRoom, UNKNOWN_f);
                     } else if (strcmp(argv[0], "name") == 0) {
@@ -983,14 +1077,6 @@ int main(int argc, char **argv) {
                         argv += 2;
                         argc -= 2;
                         break;
-                    } else if (strncmp(argv[0], "rest[", 5) == 0 && isdigit(argv[0][5])) {
-                        long idx = strtol(argv[0] + 9, &end, 0);
-                        if (errno == EINVAL || *end != ']') {
-                            fprintf(stderr, "Invalid rest address: %s\n", argv[0]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
-                        }
-                        addr = sizeof(struct DecompresssedRoom) + idx;
                     } else if ((strncmp(argv[0], "object[", 7) == 0 && isdigit(argv[0][7])) || (strncmp(argv[0], "objects[", 8) == 0 && isdigit(argv[0][8]))) {
                         long idx = strtol(argv[0] + (argv[0][6] == '[' ? 7 : 8), &end, 0);
                         if (errno == EINVAL || *end != ']') {
@@ -998,17 +1084,16 @@ int main(int argc, char **argv) {
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             return 1;
                         }
-                        addr = -offsetof(struct DecompresssedRoom, objects);
-                        addr -= idx * sizeof(struct RoomObject);
+                        addr = idx * sizeof(struct RoomObject);
                         long value = 0xFFFF;
                         if (strcmp(end, "].x") == 0) {
-                            addr -= offsetof(struct RoomObject, x);
+                            addr += offsetof(struct RoomObject, x);
                         } else if (strcmp(end, "].y") == 0) {
-                            addr -= offsetof(struct RoomObject, y);
+                            addr += offsetof(struct RoomObject, y);
                         } else if (strcmp(end, "].width") == 0) {
-                            addr -= offsetof(struct RoomObject, block);
+                            addr += offsetof(struct RoomObject, block);
                         } else if (strcmp(end, "].sprite") == 0) {
-                            addr -= offsetof(struct RoomObject, sprite);
+                            addr += offsetof(struct RoomObject, sprite);
                             _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
 
                             if (strcmp(argv[1], "SHARK") == 0) {
@@ -1037,9 +1122,9 @@ int main(int argc, char **argv) {
                                 return 1;
                             }
                         } else if (strcmp(end, "].height") == 0 || strcmp(end, "].damage") == 0) {
-                            addr -= offsetof(struct RoomObject, block) + 1;
+                            addr += offsetof(struct RoomObject, block) + 1;
                         } else if (strcmp(end, "].type") == 0) {
-                            addr -= offsetof(struct RoomObject, type);
+                            addr += offsetof(struct RoomObject, type);
                             if (strcmp(argv[1], "static") == 0 || strcmp(argv[1], "block") == 0) {
                                 value = BLOCK;
                             } else if (strcmp(argv[1], "enemy") == 0 || strcmp(argv[1], "sprite") == 0) {
@@ -1073,7 +1158,50 @@ int main(int argc, char **argv) {
                             return 1;
                         }
 
-                        ARRAY_ADD(patches, ((PatchInstruction){ .room_id = room_id, .address = addr, .value = value, }));
+                        ARRAY_ADD(patches, ((PatchInstruction){ .type = OBJECT, .room_id = room_id, .address = addr, .value = value, }));
+                        argv += 2;
+                        argc -= 2;
+                        continue;
+                    } else if ((strncmp(argv[0], "switch[", 7) == 0 && isdigit(argv[0][7])) || (strncmp(argv[0], "switchs[", 8) == 0 && isdigit(argv[0][8])) || (strncmp(argv[0], "switches[", 9) == 0 && isdigit(argv[0][9]))) {
+                        long idx = strtol(argv[0] + (argv[0][6] == '[' ? 7 : (argv[0][7] == '[' ? 8 : 9)), &end, 0);
+                        if (errno == EINVAL || *end != ']') {
+                            fprintf(stderr, "Invalid switch id: %s\n", argv[0]);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+                        addr = idx * sizeof(struct SwitchObject);
+                        if (strcmp(end, "].x") == 0) {
+                            addr += offsetof(struct SwitchObject, x);
+                        } else if (strcmp(end, "].y") == 0) {
+                            addr += offsetof(struct SwitchObject, y);
+                        } else if (strncmp(end, "].data[", 7) == 0) {
+                            idx = strtol(end + 7, &end, 0);
+                            if (errno == EINVAL || *end != ']') {
+                                fprintf(stderr, "Invalid data index: %s\n", argv[0]);
+                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                return 1;
+                            }
+                            addr <<= 8;
+                            addr += idx;
+                        } else {
+                            fprintf(stderr, "Invalid switch field: %s\n", argv[0]);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+
+                        long value = strtol(argv[1], &end, 0);
+                        if (errno == EINVAL || end == NULL || *end != '\0') {
+                            fprintf(stderr, "Invalid number: %s\n", argv[1]);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+                        if (value < 0 || value > 0xFF) {
+                            fprintf(stderr, "Value must be in the range 0..255\n");
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            return 1;
+                        }
+
+                        ARRAY_ADD(patches, ((PatchInstruction){ .type = SWITCH, .room_id = room_id, .address = addr, .value = value, }));
                         argv += 2;
                         argc -= 2;
                         continue;
@@ -1286,33 +1414,87 @@ int main(int argc, char **argv) {
                 defer_return(1);
             }
             ARRAY_FREE(file.rooms[patch.room_id].compressed);
-            if (patch.address < 0) {
-                int idx = -(patch.address + offsetof(struct DecompresssedRoom, objects)) / sizeof(struct RoomObject);
-                if (idx > file.rooms[patch.room_id].data.num_objects) {
-                    fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
-                    defer_return(1);
-                }
-                if (idx >= file.rooms[patch.room_id].data.num_objects) {
-                    // FIXME realloc stuff, inc num_objects
-                    fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new object\n", __FILE__, __LINE__);
-                    defer_return(1);
-                }
-                int addr = -(patch.address + offsetof(struct DecompresssedRoom, objects)) % sizeof(struct RoomObject);
-                struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
-                fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
-                ((uint8_t *)object)[addr] = patch.value;
-            } else if (false) {
+            _Static_assert(NUM_PATCH_TYPES == 3, "Unexpected number of patch types");
+            switch (patch.type) {
+                case NORMAL:
+                    if (patch.address >= sizeof(file.rooms[patch.room_id].data)) {
+                        fprintf(stderr, "%s:%d: WARNING: Patching *rest* may not be stable currently\n", __FILE__, __LINE__);
+                        if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
+                            fprintf(stderr, "Address %d invalid\n", patch.address);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            defer_return(1);
+                        }
+                        file.rooms[patch.room_id].rest.data[patch.address - sizeof(file.rooms[patch.room_id].data)] = patch.value;
+                    } else {
+                        ((uint8_t *)&file.rooms[patch.room_id].data)[patch.address] = patch.value;
+                    }
+                    break;
+
+                case OBJECT: {
                 // FIXME: add ability to write to tiles of objects?
-            } else if (patch.address >= sizeof(file.rooms[patch.room_id].data)) {
-                fprintf(stderr, "%s:%d: WARNING: Patching *rest* may not be stable currently\n", __FILE__, __LINE__);
-                if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
-                    fprintf(stderr, "Address %d invalid\n", patch.address);
-                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                    defer_return(1);
-                }
-                file.rooms[patch.room_id].rest.data[patch.address - sizeof(file.rooms[patch.room_id].data)] = patch.value;
-            } else {
-                ((uint8_t *)&file.rooms[patch.room_id].data)[patch.address] = patch.value;
+                    int idx = patch.address / sizeof(struct RoomObject);
+                    if (idx > file.rooms[patch.room_id].data.num_objects) {
+                        fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
+                        defer_return(1);
+                    }
+                    if (idx >= file.rooms[patch.room_id].data.num_objects) {
+                        // FIXME realloc stuff, inc num_objects
+                        fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new object\n", __FILE__, __LINE__);
+                        defer_return(1);
+                    }
+                    int addr = patch.address % sizeof(struct RoomObject);
+                    struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
+                    fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
+                    ((uint8_t *)object)[addr] = patch.value;
+                }; break;
+
+                case SWITCH: {
+                    if (patch.address >= (0x1 << 8)) {
+                        int data_idx = patch.address & ((0x1 << 8) - 1);
+                        int idx = (patch.address >> 8) / sizeof(struct SwitchObject);
+                        if (idx > file.rooms[patch.room_id].data.num_switches) {
+                            fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
+                            defer_return(1);
+                        }
+                        if (idx >= file.rooms[patch.room_id].data.num_switches) {
+                            // FIXME realloc stuff, inc num_switches, update _num_switches (num_switches << | _num_switches & 0x3 currently)
+                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new switch\n", __FILE__, __LINE__);
+                            defer_return(1);
+                        }
+                        struct SwitchObject *sw = file.rooms[patch.room_id].data.switches + idx;
+                        if (data_idx > sw->data.length) {
+                            fprintf(stderr, "Switch data index %d for switch %d in room %d is out of bounds\n", data_idx, idx, patch.room_id);
+                            defer_return(1);
+                        }
+                        if (data_idx >= sw->data.length) {
+                            // FIXME realloc stuff, inc num_switches, update _num_switches (num_switches << | _num_switches & 0x3 currently)
+                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: append new switch data\n", __FILE__, __LINE__);
+                            defer_return(1);
+                        }
+                        fprintf(stderr, "Writing switch %d data[%d] with %02x\n", idx, data_idx, patch.value);
+                        sw->data.data[data_idx] = patch.value;
+                    } else {
+                        int idx = patch.address / sizeof(struct SwitchObject);
+                        if (idx > file.rooms[patch.room_id].data.num_switches) {
+                            fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
+                            defer_return(1);
+                        }
+                        if (idx >= file.rooms[patch.room_id].data.num_switches) {
+                            // FIXME realloc stuff, inc num_switches, update _num_switches (num_switches << | _num_switches & 0x3 currently)
+                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new switch\n", __FILE__, __LINE__);
+                            defer_return(1);
+                        }
+                        int addr = patch.address % sizeof(struct SwitchObject);
+                        struct SwitchObject *sw = file.rooms[patch.room_id].data.switches + idx;
+                        fprintf(stderr, "Writing switch %d at %d with %02x\n", idx, addr, patch.value);
+                        ((uint8_t *)sw)[addr] = patch.value;
+                    }
+                }; break;
+
+                default:
+                    fprintf(stderr, "%s:%d: UNREACHABLE: Unexpected patch type %d\n", __FILE__, __LINE__, patch.type);
+                    exit(1);
+                    break;
             }
         }
     }

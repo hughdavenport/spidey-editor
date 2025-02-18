@@ -83,6 +83,9 @@
 #define F11  "\x1b[23~"
 #define F12  "\x1b[24~"
 
+#define ESCAPE '\033'
+#define CTRL_H '\010'
+
 #define MIN_HEIGHT HEIGHT_TILES + 2
 #define MIN_WIDTH 2 * WIDTH_TILES
 
@@ -100,6 +103,8 @@ typedef struct {
     RoomFile rooms;
     bool resized;
     size_t level;
+    bool debug;
+    bool hex;
 } game_state;
 game_state *state = NULL;
 
@@ -132,25 +137,25 @@ void process_input() {
             if (KEY_MATCHES("q")) {
                 end();
                 UNREACHABLE();
-            } else if (KEY_MATCHES("a") || KEY_MATCHES(LEFT)) {
+            } else if (KEY_MATCHES("a") || KEY_MATCHES(LEFT) || KEY_MATCHES("h")) {
                 state->player.x --;
                 if (state->player.x < 0) {
                     state->level = state->rooms.rooms[state->level].data.room_west;
                     state->player.x = WIDTH_TILES - 1;
                 }
-            } else if (KEY_MATCHES("d") || KEY_MATCHES(RIGHT)) {
+            } else if (KEY_MATCHES("d") || KEY_MATCHES(RIGHT) || KEY_MATCHES("l")) {
                 state->player.x ++;
                 if (state->player.x >= WIDTH_TILES) {
                     state->level = state->rooms.rooms[state->level].data.room_east;
                     state->player.x = 0;
                 }
-            } else if (KEY_MATCHES("w") || KEY_MATCHES(UP)) {
+            } else if (KEY_MATCHES("w") || KEY_MATCHES(UP) || KEY_MATCHES("k")) {
                 state->player.y --;
                 if (state->player.y < 0) {
                     state->level = state->rooms.rooms[state->level].data.room_north;
                     state->player.y = HEIGHT_TILES - 1;
                 }
-            } else if (KEY_MATCHES("s") || KEY_MATCHES(DOWN)) {
+            } else if (KEY_MATCHES("s") || KEY_MATCHES(DOWN) || KEY_MATCHES("j")) {
                 state->player.y ++;
                 if (state->player.y >= HEIGHT_TILES) {
                     state->level = state->rooms.rooms[state->level].data.room_south;
@@ -162,27 +167,41 @@ void process_input() {
                 i += strlen(match);
             } else {
                 // Swallow unused input
-                if (buf[i] == '\x1b') {
-                    if (i + 1 < n) {
-                        // ESC sequence
-                        switch (buf[i]) {
-                            case '[':
-                                // CSI sequence
-                                i += 2;
-                                while (i < n && (isdigit(buf[i]) || buf[i] == ';')) i ++;
-                                i ++;
-                                break;
+                switch (buf[i]) {
+                    case ESCAPE:
+                        if (i + 1 < n) {
+                            // ESC sequence
+                            switch (buf[i + 1]) {
+                                case '[':
+                                    if (i + 2 < n) {
+                                        // CSI sequence
+                                        i += 2;
+                                        while (i < n && (isdigit(buf[i]) || buf[i] == ';')) i ++;
+                                        i ++;
+                                    } else {
+                                        // alt
+                                        UNREACHABLE();
+                                    }
+                                    break;
 
-                            default:
-                                // Another sequence, or more likely ALT+char
-                                i += 2;
-                                break;
+                                default:
+                                    UNREACHABLE();
+                                    break;
+                            }
+                        } else {
+                            state->debug = !state->debug;
+                            i += 1; // Single escape
                         }
-                    } else {
+                        break;
+
+                    case CTRL_H:
+                        state->hex = !state->hex;
+                        state->debug = true;
                         i += 1;
-                    }
-                } else {
-                    i += 1;
+                        break;
+
+                    default:
+                        i += 1;
                 }
             }
 #undef KEY_MATCHES
@@ -208,7 +227,13 @@ void redraw() {
                     MIN_WIDTH, MIN_HEIGHT,
                     state->screen_dimensions.x, state->screen_dimensions.y
         ) >= 0);
-        GOTO(state->screen_dimensions.x / 2 - (int)strlen(message) / 2, state->screen_dimensions.y / 2);
+        int x = state->screen_dimensions.x / 2 - (int)strlen(message) / 2;
+        int y = state->screen_dimensions.y / 2;
+        if (x < 0) x = 0;
+        if (x >= MIN_WIDTH) x = MIN_WIDTH - 1;
+        if (y < 0) y = 0;
+        if (y >= MIN_HEIGHT) y = MIN_HEIGHT - 1;
+        GOTO(x, y);
         printf("%s", message);
         free(message);
         fflush(stdout);
@@ -227,8 +252,18 @@ void redraw() {
         for (int x = 0; x < WIDTH_TILES; x ++) {
             uint8_t tile = room.tiles[y * WIDTH_TILES + x];
             if (tile != BLANK_TILE) {
+                bool colored = false;
+                for (int s = 0; s < room.num_switches; s ++) {
+                    struct SwitchObject *sw = room.switches + s;
+                    if (x == sw->x && y == sw->y) {
+                        colored = true;
+                        printf("\033[4%d;30;1m", (s % 3) + 4);
+                        break;
+                    }
+                }
                 GOTO(2 * x, y + 1);
                 printf("%02X", tile);
+                if (colored) printf("\033[m");
             }
         }
     }
@@ -259,14 +294,16 @@ void redraw() {
 
             case SPRITE:
                 GOTO(2 * object->x, object->y + 1);
-                printf("\033[4%ld;30;1m%d%d", (i % 8) + 1, object->sprite.type, object->sprite.damage);
+                printf("\033[4%ld;30;1m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
                 break;
         }
         printf("\033[m");
     }
 
-    GOTO(0, 0);
-    printf("%d,%d (%d)", state->player.x, state->player.y, state->player.y * WIDTH_TILES + state->player.x);
+    if (state->debug) {
+        GOTO(0, 0);
+        printf(state->hex ? "%02x,%02x" : "%d,%d", state->player.x, state->player.y);
+    }
 
     assert(state->player.x >= 0);
     assert(state->player.y >= 0);
@@ -274,26 +311,28 @@ void redraw() {
     assert(state->player.y < HEIGHT_TILES);
     if (state->player.y - 2 >= 0) {
         GOTO(2 * state->player.x, state->player.y - 1);
-        printf("@@");
+        printf("\033[41;30;1m@@\033[m");
     }
     if (state->player.y - 1 >= 0) {
         GOTO(2 * state->player.x, state->player.y);
-        printf("@@");
+        printf("\033[41;30;1m@@\033[m");
     }
     if (state->player.y >= 0) {
         GOTO(2 * state->player.x, state->player.y + 1);
-        printf("@@");
+        printf("\033[41;30;1m@@\033[m");
     }
 
-    GOTO(0, HEIGHT_TILES + 1);
-    uint8_array rest = state->rooms.rooms[state->level].rest;
-    int pre = printf("Rest (length=%zu):", rest.length);
-    for (size_t i = 0; i < rest.length; i ++) {
-        if (pre + 3 * (i + 2) > state->screen_dimensions.x) {
-            printf("...");
-            break;
+    if (state->debug) {
+        GOTO(0, HEIGHT_TILES + 1);
+        uint8_array rest = state->rooms.rooms[state->level].rest;
+        int pre = printf("Rest (length=%zu):", rest.length);
+        for (size_t i = 0; i < rest.length; i ++) {
+            if (pre + 3 * (i + 2) > state->screen_dimensions.x) {
+                printf("...");
+                break;
+            }
+            printf(state->hex ? " %02x" : " %d", rest.data[i]);
         }
-        printf(" %02x", rest.data[i]);
     }
 
     fflush(stdout);
@@ -320,6 +359,9 @@ void setup() {
 
     state = calloc(1, sizeof(game_state));
     assert(state != NULL && "Not enough memory");
+
+    state->debug = true;
+    state->hex = true;
 
     assert(tcgetattr(STDIN_FILENO, &state->original_termios) == 0);
 

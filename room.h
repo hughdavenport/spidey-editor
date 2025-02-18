@@ -47,6 +47,15 @@ struct RoomObject {
     uint8_t *tiles;
 };
 
+struct SwitchObject {
+    // written as ((y << 8) | x) | ???
+    uint8_t x;
+    uint8_t y;
+
+    // Unsure what all this is just yet
+    ARRAY(uint8_t) data;
+};
+
 struct DecompresssedRoom {
 //    32
 //  * 22
@@ -70,14 +79,16 @@ struct DecompresssedRoom {
     uint8_t gravity_horizontal;
 
     uint8_t UNKNOWN_b; // unused?
-    uint8_t UNKNOWN_c; // number of moving objects?
+    uint8_t UNKNOWN_c; // ??
     uint8_t num_objects;
-    uint8_t UNKNOWN_e; // counter lsb & 0x3
+    uint8_t _num_switches; // num_switches << 2 | ... counter lsb & 0x3
     uint8_t UNKNOWN_f; // counter msb
 
     char name[24];
 
+    uint8_t num_switches; // _num_switches >> 2
     struct RoomObject *objects;
+    struct SwitchObject *switches;
 };
 
 typedef ARRAY(uint8_t) uint8_array;

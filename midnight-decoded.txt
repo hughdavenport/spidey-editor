@@ -98,15 +98,19 @@ no more objects
 0x1c8b = 0x01
 
 struct {
-    +0x00     0x1c92   = 0x11 (second byte & 0x1f)
+    +0x00     0x1c92   = 0x11 (second byte & 0x1f, x of switch to right of gap at top)
     +0x01     0x1c93   = 0x00 (static)
-    +0x02     0x1c94   = 0x06 (first byte & 0x1f)
+    +0x02     0x1c94   = 0x04 (first byte & 0x1f, y of switch to right of gap at top)
     +0x03     0x1c95   = 0xa0 ((first & 0x20) | (second / 32 (>>5) & 0x83))
     +0x04-5   0x1c96-7 = 0x0000 (*0x9690 = unknown2[4] << 8 | unknown2[3] & 0x3 = 0x0000)
     +0x06-07  0x1c98-9 = pointer to bytes after these two ^^
 }
+struct {
+    +0x00     0x1c9a   = 
+}
 
 0x1d12 = unknown2[3] >> 2 = 0x06
+0x1d13 = ah = 0x00
 
 0x9293 = 0x0002
 
@@ -355,7 +359,7 @@ loop 6 times. first time {
     al &= 0x83 (0x80)
     ah &= 0x20 (0x20)
     al |= ah (0xa0)
-    di[3] = al
+    di[3] = al (second >> 5 & 0x3) | (second & 0x80) | (first & 0x20)
     di[4-5] = bx
     bl ++ (0x0001)
     if (bl == 4) { n/a }
@@ -368,11 +372,130 @@ loop 6 times. first time {
     xlat bx (al = bx[al] = 0x02)
     bl = di[5] = 0x00
     bh = 0
-    bx += 0x90 (0x0090)
-
-
-
-
+    bx += 0x90 (0x0090) (in a diff ds this is spidfigr, but not now, seems to be 0x00)
+    if (*(u8*)bx & al != 0) {
+        n/a
+    }
+    ... call FUN_1000_4c5e (saves di, si)
     ...
+       al >>= 1 (0x02 => 0x01)
+       ah = 0
+       al &= *bx (0x00)
+       if (al != 0) ah = 0x20 (n/a)
+       *1d13 = ah (0x00)
+       if (di[3] & 0x80 == 0) return (0xa0 & 0x80 == 0x80, no return, this would be if second byte didn't have the high bit set)
+       bl = di[0] (0x11)
+       bh = di[2] (0x04)
+       if (bl > 0x1f) return (0x11 < 0x1f, no return)
+       if (bl < 0x00) return (no return)
+       if (bh > 0x15) return (no return)
+       if (bh < 0) return (no return)
+       si = 0x1fa5 (points to a whole bunch of 0x00's)
+       al = bl (0x11)
+       ah = 0
+       si += ax (0x1fb6, still points to a bunch of 0x00's)
+       ah = bh (0x04)
+       al = 0
+       ax >>= 3 (0x0080)
+       si += ax (0x2036, points to 54, 42, 42, 42, 42, ..., just on right side top switch)
+       al = *si (0x54)
+       al &= 0x1f (0x14)
+       if (al < 0x10) return (n/a)
+       if (al > 0x18) return (n/a)
+       ah = 0
+       if (*1d13 != 0) ah = 1 (n/a)
+       *si &= 0xfe (stays at 0x54, this takes away the bottom bit if set)
+       *si ^= ah (stays at 0x54, this could toggle the bottom bit)
+       al = *si (0x54)
+       call a function if not init'd (n/a)
+    ... end FUN_1000_4c5e (restores di, si)
+    do {
+        al = *si (third byte, 0x59)
+        al &= 0xc0 (0x40, get top two bits)
+        if (al == 0) (n/a)
+        if (al & 0x80 == 0) {
+            si += 2 (consume two more bytes!)
+            continue;
+        }
+        .. continued
+        al = *si & 0xc0 = (fifth byte, 0x53 & 0xc0 = 0x40)
+        if (al == 0) (n/a)
+        if (al & 0x80 == 0) continue si again
+        .. continued
+        al = *si & 0xc0 (seventh byte, 0x24 & 0xc0 = 0x00)
+        if (al == 0) {
+            di += 8 (0x1c9a)
+            break
+        }
+    }
+} loop again, second time, 6 bytes consumed, 5 times more {
+    points to the switch on left of top hole
+    xlat produces 0x08
+    ninth byte has 0x80, so slightly diff if
+    if (al & 0x80 != 0) {
+        ... call  fun_1000_4ccb (save cx, bx, di)
+        store es and set to 0xa000
+        if (*0x1d1f == 0) (n/a)
+        bh = si[0] (0x84)
+        bl = si[1] (0x2f) (this is used as a loop counter ((0x2f >> 5) & 0x7) + 1 == 2)
+        cl = bl (0x2f)
+        cx *= 8 (0x0178)
+        cl = ch (0x0101)
+        cx &= 0x7 (0x0001)
+        cx ++ (0x0002)
+        bx &= 0x1f1f (0x040f, points to just right of the switch)
+        di = *0x968e (room pointer)
+        di += bl + bh << 5 (will point to the coords)
+        al = si[2] (0x00)
+        if (*0x1d13 == 0) { (i guess this is a *switched* variable?)
+            al = si[3] (0x44) (this is a tile number)
+        }
+        ah = si[0] (0x84)
+        if (bh >(=?) 0x16) (n/a)
+        ch = 0x20
+        dx = 0x100
+        if (ah & 0x20 == 0) {
+            ch = 0x01
+            dx = 0x0001
+        }
+        ah = cl (0x02)
+        cl = ch (0x01)
+        ch = 0
+        loop twice (ah) {
+            push ax, di, cx, si, bx, dx
+            *di = al (di points to the tile to the right of the switch, al = 0x44, happens to be the same)
+            calls func if on init, but n/a
+            pop everything
+            bx += dx (0x040f + 0x1 = 0x0410, + 0x1 = 0x0411)
+            di += cx (adds 1)
+        }
+        retores es
+        ... end fun_1000_4ccb
+        si += 4
+        continue
+    }
+    .. continuing
+    eleventh byte 0x50 has 0x40 set, skip two
+    thirteenth byte 0x33 is the next switch
+} loop again, third time, 6+6=12 bytes consumed, 4 times more {
+    points to the switch in underground cave
+    xlat produces 0x20
+    fifteenth byte 0x58 has 0x40 set, skip two
+    seventeenth byte 0x09 is the next switch
+} loop again, forth time, 6+6+4=16 bytes consumed, 3 times more {
+    points to the switch next to r2d2
+    xlat produces 0x80
+    ninteenth byte 0xB3 has 0x80 set {
+        group of 4 bytes, y, (x | count << 5), off tile, on tile
+    }
+    twenty third byte 0x2e is start of next switch
+} loop again, fifth time, 6+6+4+6=22 bytes consumed, 1 times more {
+    points to switch above heli
+    xlat is 0x02
+    twenty fifth byte 0xe0 has both 0x80 and 0x40
+     (the test is for == 0x80, so just skip 2)
+    twenty seventh byte 0x27 is next switch
+} loop again, sixth time, 6+6+4+6+4=26 bytes consumed, last time {
+    points to top right corner of where heli stops?
 
 }
