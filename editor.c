@@ -255,7 +255,8 @@ void redraw() {
                 bool colored = false;
                 for (int s = 0; s < room.num_switches; s ++) {
                     struct SwitchObject *sw = room.switches + s;
-                    if (x == sw->x && y == sw->y) {
+                    assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
+                    if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
                         colored = true;
                         printf("\033[4%d;30;1m", (s % 3) + 4);
                         break;

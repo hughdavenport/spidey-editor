@@ -68,8 +68,6 @@ struct SwitchChunk {
 };
 
 struct SwitchObject {
-    uint8_t x;
-    uint8_t y;
     ARRAY(struct SwitchChunk) chunks;
 };
 

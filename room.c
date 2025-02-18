@@ -124,7 +124,8 @@ void dumpRoom(Room *room) {
         }
         for (size_t s = 0; s < room->data.num_switches; s ++) {
             struct SwitchObject *sw = room->data.switches + s;
-            if (x == sw->x && y == sw->y) {
+            assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
+            if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
                 fprintf(stderr, "\033[4%ld;30;1m", (s % 3) + 4);
                 colored = true;
             }
@@ -211,8 +212,9 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  Switches (length=%u):\n", room->data.num_switches);
     for (size_t i = 0; i < room->data.num_switches; i ++) {
         fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 4);
+        assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
         fprintf(stderr, "{.x = %d, .y = %d",
-                room->data.switches[i].x, room->data.switches[i].y);
+                room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y);
         fprintf(stderr, ", .chunks (num=%lu) = [", room->data.switches[i].chunks.length);
         for (size_t c = 0; c < room->data.switches[i].chunks.length; c ++) {
             fprintf(stderr, "\033[m\n        \033[4%ld;30;1m", (i % 3) + 4);
@@ -220,6 +222,7 @@ void dumpRoom(Room *room) {
             _Static_assert(NUM_CHUNK_TYPES == 3, "Unexpected number of chunk types");
             switch (chunk->type) {
                 case PREAMBLE:
+                    assert(c == 0);
                     fprintf(stderr, "{.type = PREAMBLE, .x = %d, .y = %d, .msb_without_y = %02x, .lsb_without_x = %02x}",
                             chunk->x, chunk->y, chunk->msb & ~0x1f, chunk->lsb & ~0x1f);
                     break;
@@ -533,16 +536,16 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         uint8_t msb, lsb;
         read_next(msb, tmp.decompressed);
         read_next(lsb, tmp.decompressed);
-        switches[i].y = msb & 0x1f;
-        switches[i].x = lsb & 0x1f;
+        uint8_t y = msb & 0x1f;
+        uint8_t x = lsb & 0x1f;
         // FIXME figure out what rest of bytes do
-        ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .msb = msb, .lsb = lsb }));
+        ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, msb = msb, .lsb = lsb }));
         while (data_idx < tmp.decompressed.length && (tmp.decompressed.data[data_idx] & 0xc0) != 0x00) {
             read_next(msb, tmp.decompressed);
             read_next(lsb, tmp.decompressed);
             if ((msb & 0xc0) == 0x80) {
-                uint8_t x = msb & 0x1f;
-                uint8_t y = lsb & 0x1f;
+                x = msb & 0x1f;
+                y = lsb & 0x1f;
                 uint8_t size = ((lsb >> 5) & 0x7) + 1;
                 uint8_t off, on;
                 read_next(off, tmp.decompressed);
@@ -694,8 +697,9 @@ bool writeRoom(Room *room, FILE *fp) {
             _Static_assert(NUM_CHUNK_TYPES == 3, "Unexpected number of chunk types");
             switch (chunk->type) {
                 case PREAMBLE:
-                    decompressed[d_len++] = (sw->y & 0x1f) | (chunk->msb & ~0x1f);
-                    decompressed[d_len++] = (sw->x & 0x1f) | (chunk->lsb & ~0x1f);
+                    assert(c == 0);
+                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->msb & ~0x1f);
+                    decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->lsb & ~0x1f);
                     break;
 
                 case TOGGLE_BLOCK:
@@ -706,8 +710,8 @@ bool writeRoom(Room *room, FILE *fp) {
                     break;
 
                 case UNKNOWN:
-                    decompressed[d_len++] = chunk->msb & ~0x1f;
-                    decompressed[d_len++] = chunk->lsb & ~0x1f;
+                    decompressed[d_len++] = chunk->msb;
+                    decompressed[d_len++] = chunk->lsb;
                     break;
 
                 default:
@@ -1218,9 +1222,13 @@ int main(int argc, char **argv) {
                         addr = (idx + 1) * sizeof(struct SwitchObject);
                         long value = 0xFFFF;
                         if (strcmp(end, "].x") == 0) {
-                            addr += offsetof(struct SwitchObject, x);
+                            // Do it on chunks[0].x
+                            addr <<= 8;
+                            addr += offsetof(struct SwitchChunk, x);
                         } else if (strcmp(end, "].y") == 0) {
-                            addr += offsetof(struct SwitchObject, y);
+                            // Do it on chunks[0].y
+                            addr <<= 8;
+                            addr += offsetof(struct SwitchChunk, y);
                         } else if (strncmp(end, "].chunk[", 8) == 0 || strncmp(end, "].chunks[", 9) == 0) {
                             idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
                             if (errno == EINVAL || *end != ']') {
@@ -1249,6 +1257,11 @@ int main(int argc, char **argv) {
                                 _Static_assert(NUM_CHUNK_TYPES == 3, "Unexpected number of chunk types");
 
                                 if (strcmp(argv[1], "PREAMBLE") == 0) {
+                                    if (idx != 0) {
+                                        fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
+                                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                        return 1;
+                                    }
                                     value = PREAMBLE;
                                 } else if (strcmp(argv[1], "TOGGLE_BLOCK") == 0) {
                                     value = TOGGLE_BLOCK;
@@ -1258,6 +1271,11 @@ int main(int argc, char **argv) {
                                     value = strtol(argv[1], &end, 0);
                                     if (value < 0 || value >= NUM_CHUNK_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
                                         fprintf(stderr, "Invalid chunk type: %s\n", argv[1]);
+                                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                        return 1;
+                                    }
+                                    if (value == PREAMBLE && idx != 0) {
+                                        fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
                                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                         return 1;
                                     }
