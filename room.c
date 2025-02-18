@@ -225,8 +225,8 @@ void dumpRoom(Room *room) {
                     break;
 
                 case TOGGLE_BLOCK:
-                    fprintf(stderr, "{.type = TOGGLE_BLOCK, .x = %d, .y = %d, .size = %d, .off = %02x, .on = %02x, .msb_without_y = %02x, .lsb_without_x = %02x}",
-                            chunk->x, chunk->y, chunk->size, chunk->off, chunk->on, chunk->msb & ~0x1f, chunk->lsb & ~0x1f);
+                    fprintf(stderr, "{.type = TOGGLE_BLOCK, .x = %d, .y = %d, .size = %d, .off = %02x, .on = %02x, .msb_without_y = %02x}",
+                            chunk->x, chunk->y, chunk->size, chunk->off, chunk->on, chunk->msb & ~0x1f);
                     break;
 
                 case UNKNOWN:
@@ -699,7 +699,7 @@ bool writeRoom(Room *room, FILE *fp) {
                     break;
 
                 case TOGGLE_BLOCK:
-                    decompressed[d_len++] = chunk->y & 0x1f;
+                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->msb & ~0x1f);
                     decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->size << 5);
                     decompressed[d_len++] = chunk->off;
                     decompressed[d_len++] = chunk->on;
@@ -1216,6 +1216,7 @@ int main(int argc, char **argv) {
                             return 1;
                         }
                         addr = (idx + 1) * sizeof(struct SwitchObject);
+                        long value = 0xFFFF;
                         if (strcmp(end, "].x") == 0) {
                             addr += offsetof(struct SwitchObject, x);
                         } else if (strcmp(end, "].y") == 0) {
@@ -1231,8 +1232,37 @@ int main(int argc, char **argv) {
                             addr += idx * sizeof(struct SwitchChunk);
                             if (strcmp(end, "].x") == 0) {
                                 addr += offsetof(struct SwitchChunk, x);
-                            } else if (strcmp(end, "].x") == 0) {
+                            } else if (strcmp(end, "].y") == 0) {
                                 addr += offsetof(struct SwitchChunk, y);
+                            } else if (strcmp(end, "].size") == 0) {
+                                addr += offsetof(struct SwitchChunk, size);
+                            } else if (strcmp(end, "].off") == 0) {
+                                addr += offsetof(struct SwitchChunk, off);
+                            } else if (strcmp(end, "].on") == 0) {
+                                addr += offsetof(struct SwitchChunk, on);
+                            } else if (strcmp(end, "].msb") == 0 || strcmp(end, "].msb_without_y") == 0) {
+                                addr += offsetof(struct SwitchChunk, msb);
+                            } else if (strcmp(end, "].lsb") == 0 || strcmp(end, "].lsb_without_x") == 0) {
+                                addr += offsetof(struct SwitchChunk, lsb);
+                            } else if (strcmp(end, "].type") == 0) {
+                                addr += offsetof(struct SwitchChunk, type);
+                                _Static_assert(NUM_CHUNK_TYPES == 3, "Unexpected number of chunk types");
+
+                                if (strcmp(argv[1], "PREAMBLE") == 0) {
+                                    value = PREAMBLE;
+                                } else if (strcmp(argv[1], "TOGGLE_BLOCK") == 0) {
+                                    value = TOGGLE_BLOCK;
+                                } else if (strcmp(argv[1], "UNKNOWN") == 0) {
+                                    value = UNKNOWN;
+                                } else {
+                                    value = strtol(argv[1], &end, 0);
+                                    if (value < 0 || value >= NUM_CHUNK_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
+                                        fprintf(stderr, "Invalid chunk type: %s\n", argv[1]);
+                                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                        return 1;
+                                    }
+                                    return 1;
+                                }
                             } else {
                                 fprintf(stderr, "Invalid chunk field: %s\n", argv[0]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
@@ -1244,11 +1274,13 @@ int main(int argc, char **argv) {
                             return 1;
                         }
 
-                        long value = strtol(argv[1], &end, 0);
-                        if (errno == EINVAL || end == NULL || *end != '\0') {
-                            fprintf(stderr, "Invalid number: %s\n", argv[1]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                        if (value == 0xFFFF) {
+                            value = strtol(argv[1], &end, 0);
+                            if (errno == EINVAL || end == NULL || *end != '\0') {
+                                fprintf(stderr, "Invalid number: %s\n", argv[1]);
+                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                return 1;
+                            }
                         }
                         if (value < 0 || value > 0xFF) {
                             fprintf(stderr, "Value must be in the range 0..255\n");
@@ -1508,6 +1540,7 @@ int main(int argc, char **argv) {
                         int addr = patch.address & ((0x1 << 8) - 1);
                         int idx = (patch.address >> 8) / sizeof(struct SwitchObject) - 1;
                         int chunk_idx = addr / sizeof(struct SwitchChunk);
+                        addr %= sizeof(struct SwitchChunk);
                         if (idx < 0) {
                             fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
                             defer_return(1);
@@ -1532,7 +1565,7 @@ int main(int argc, char **argv) {
                             defer_return(1);
                         }
                         fprintf(stderr, "Writing switch %d chunk[%d] at %d with %02x\n", idx, chunk_idx, addr, patch.value);
-                        ((uint8_t *)sw->chunks.data + chunk_idx)[addr] = patch.value;
+                        ((uint8_t *)&sw->chunks.data[chunk_idx])[addr] = patch.value;
                     } else {
                         int idx = patch.address / sizeof(struct SwitchObject) - 1;
                         if (idx < 0) {
