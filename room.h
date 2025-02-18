@@ -28,6 +28,14 @@ enum RoomObjectType {
     SPRITE,
 };
 
+enum SwitchChunkType {
+    PREAMBLE,
+    TOGGLE_BLOCK,
+    UNKNOWN,
+
+    NUM_CHUNK_TYPES // _Static_asserts depend on this being at the end
+};
+
 struct RoomObject {
     // written as ((x << 8) | y) | ((width << 5) << 8) | (height << 5)
     uint8_t x;
@@ -47,13 +55,22 @@ struct RoomObject {
     uint8_t *tiles;
 };
 
-struct SwitchObject {
-    // written as ((y << 8) | x) | ???
+struct SwitchChunk {
+    enum SwitchChunkType type;
+    uint8_t msb;
+    uint8_t lsb;
+
     uint8_t x;
     uint8_t y;
+    uint8_t size;
+    uint8_t off;
+    uint8_t on;
+};
 
-    // Unsure what all this is just yet
-    ARRAY(uint8_t) data;
+struct SwitchObject {
+    uint8_t x;
+    uint8_t y;
+    ARRAY(struct SwitchChunk) chunks;
 };
 
 struct DecompresssedRoom {
