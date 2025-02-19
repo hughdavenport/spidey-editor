@@ -648,6 +648,8 @@ bool writeRoom(Room *room, FILE *fp) {
         }
     }
 
+    room->data._num_switches = (room->data.num_switches << 2) | (room->data._num_switches & 0x3);
+
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.tiles); i ++) {
         decompressed[d_len++] = room->data.tiles[i];
     }
@@ -689,7 +691,6 @@ bool writeRoom(Room *room, FILE *fp) {
 
         }
     }
-    assert(room->data.num_switches == room->data._num_switches >> 2 && "_num_switches needs to be updated after changing num_switches");
     for (size_t i = 0; i < room->data.num_switches; i ++) {
         struct SwitchObject *sw = room->data.switches + i;
         assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
@@ -1022,24 +1023,28 @@ int main(int argc, char **argv) {
     int find_tile = -1;
     int find_tile_offset = 0;
     char *program = argv[0];
+    ARRAY(uint8_t) rooms = {0};
+    FILE *fp = NULL;
+    int ret = 0;
+#define defer_return(code) { ret = code; goto defer; }
     argc --;
     argv ++;
     while (argc > 0) {
         if (strcmp(argv[0], "patch") == 0) {
             if (argc <= 3) {
                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                return 1;
+                defer_return(1);
             }
             long room_id = strtol(argv[1], &end, 0);
             if (errno == EINVAL || end == NULL || *end != '\0') {
                 fprintf(stderr, "Invalid number: %s\n", argv[1]);
                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                return 1;
+                defer_return(1);
             }
             if (room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file.rooms)) {
                 fprintf(stderr, "Room ID out of range 0..%lu\n", C_ARRAY_LEN(file.rooms) - 1);
                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                return 1;
+                defer_return(1);
             }
             argv += 2;
             argc -= 2;
@@ -1053,21 +1058,21 @@ int main(int argc, char **argv) {
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid tile address: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
                         if (end[1] == '[') {
                             long y = strtol(end + 2, &end, 0);
                             if (errno == EINVAL || strcmp(end, "]") != 0) {
                                 fprintf(stderr, "Invalid tile address for y: %s\n", argv[0]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                return 1;
+                                defer_return(1);
                             }
                             idx = y * WIDTH_TILES + idx;
                         }
                         if (idx > WIDTH_TILES * HEIGHT_TILES) {
                             fprintf(stderr, "Invalid tile address, too large: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
                         addr = idx;
                     } else if (strcmp(argv[0], "tile_offset") == 0) {
@@ -1093,7 +1098,7 @@ int main(int argc, char **argv) {
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid UNKNOWN2 address: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
                         addr = offsetof(struct DecompresssedRoom, UNKNOWN_b) + idx;
                     } else if (strcasecmp(argv[0], "UNKNOWN_b") == 0) {
@@ -1115,7 +1120,7 @@ int main(int argc, char **argv) {
                         if (len > 20) {
                             fprintf(stderr, "Invalid name. Max 20 characters: %s\n", argv[1]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
                         addr = offsetof(struct DecompresssedRoom, name);
                         for (size_t idx = 0; idx < 20; ++ idx) {
@@ -1133,7 +1138,7 @@ int main(int argc, char **argv) {
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid object id: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
                         addr = idx * sizeof(struct RoomObject);
                         long value = 0xFFFF;
@@ -1168,9 +1173,9 @@ int main(int argc, char **argv) {
                                 if (value < 0 || value >= NUM_SPRITE_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
                                     fprintf(stderr, "Invalid sprite type: %s\n", argv[1]);
                                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                    return 1;
+                                    defer_return(1);
                                 }
-                                return 1;
+                                defer_return(1);
                             }
                         } else if (strcmp(end, "].height") == 0 || strcmp(end, "].damage") == 0) {
                             addr += offsetof(struct RoomObject, block) + 1;
@@ -1183,16 +1188,16 @@ int main(int argc, char **argv) {
                             } else {
                                 fprintf(stderr, "Invalid object type: %s\n", argv[1]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                return 1;
+                                defer_return(1);
                             }
                         } else if (strncmp(end, "].tile[", 7) == 0) {
                             // Read [x][y] or [idx]
                             fprintf(stderr, "%s:%d: UNIMPLEMENTED\n", __FILE__, __LINE__);
-                            return 1;
+                            defer_return(1);
                         } else {
                             fprintf(stderr, "Invalid object field: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
 
                         if (value == 0xFFFF) {
@@ -1200,13 +1205,13 @@ int main(int argc, char **argv) {
                             if (errno == EINVAL || end == NULL || *end != '\0') {
                                 fprintf(stderr, "Invalid number: %s\n", argv[1]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                return 1;
+                                defer_return(1);
                             }
                         }
                         if (value < 0 || value > 0xFF) {
                             fprintf(stderr, "Value must be in the range 0..255\n");
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
 
                         ARRAY_ADD(patches, ((PatchInstruction){ .type = OBJECT, .room_id = room_id, .address = addr, .value = value, }));
@@ -1218,7 +1223,7 @@ int main(int argc, char **argv) {
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid switch id: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
                         addr = (idx + 1) * sizeof(struct SwitchObject);
                         long value = 0xFFFF;
@@ -1235,7 +1240,7 @@ int main(int argc, char **argv) {
                             if (errno == EINVAL || *end != ']') {
                                 fprintf(stderr, "Invalid chunk index: %s\n", argv[0]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                return 1;
+                                defer_return(1);
                             }
                             addr <<= 8;
                             addr += idx * sizeof(struct SwitchChunk);
@@ -1261,9 +1266,9 @@ int main(int argc, char **argv) {
                                     if (value < 0 || value >= 2 || errno == EINVAL || end == NULL || *end != '\0') {
                                         fprintf(stderr, "Invalid direction type: %s\n", argv[1]);
                                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                        return 1;
+                                        defer_return(1);
                                     }
-                                    return 1;
+                                    defer_return(1);
                                 }
                             } else if (strcmp(end, "].msb") == 0 || strcmp(end, "].msb_without_y") == 0) {
                                 addr += offsetof(struct SwitchChunk, msb);
@@ -1276,7 +1281,7 @@ int main(int argc, char **argv) {
                                     if (idx != 0) {
                                         fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
                                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                        return 1;
+                                        defer_return(1);
                                     }
                                     value = PREAMBLE;
                                 } else if (strcmp(argv[1], "TOGGLE_BLOCK") == 0) {
@@ -1288,24 +1293,24 @@ int main(int argc, char **argv) {
                                     if (value < 0 || value >= NUM_CHUNK_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
                                         fprintf(stderr, "Invalid chunk type: %s\n", argv[1]);
                                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                        return 1;
+                                        defer_return(1);
                                     }
                                     if (value == PREAMBLE && idx != 0) {
                                         fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
                                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                        return 1;
+                                        defer_return(1);
                                     }
-                                    return 1;
+                                    defer_return(1);
                                 }
                             } else {
                                 fprintf(stderr, "Invalid chunk field: %s\n", argv[0]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                return 1;
+                                defer_return(1);
                             }
                         } else {
                             fprintf(stderr, "Invalid switch field: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
 
                         if (value == 0xFFFF) {
@@ -1313,13 +1318,13 @@ int main(int argc, char **argv) {
                             if (errno == EINVAL || end == NULL || *end != '\0') {
                                 fprintf(stderr, "Invalid number: %s\n", argv[1]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                return 1;
+                                defer_return(1);
                             }
                         }
                         if (value < 0 || value > 0xFF) {
                             fprintf(stderr, "Value must be in the range 0..255\n");
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                            return 1;
+                            defer_return(1);
                         }
 
                         ARRAY_ADD(patches, ((PatchInstruction){ .type = SWITCH, .room_id = room_id, .address = addr, .value = value, }));
@@ -1330,25 +1335,25 @@ int main(int argc, char **argv) {
                     if (addr == -1) {
                         fprintf(stderr, "Invalid address: %s\n", argv[0]);
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                        return 1;
+                        defer_return(1);
                     }
                 }
                 if (addr < 0) {
                     fprintf(stderr, "Address must be positive\n");
                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
 
                 long value = strtol(argv[1], &end, 0);
                 if (errno == EINVAL || end == NULL || *end != '\0') {
                     fprintf(stderr, "Invalid number: %s\n", argv[1]);
                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
                 if (value < 0 || value > 0xFF) {
                     fprintf(stderr, "Value must be in the range 0..255\n");
                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
 
                 ARRAY_ADD(patches, ((PatchInstruction){ .room_id = room_id, .address = addr, .value = value, }));
@@ -1364,12 +1369,12 @@ int main(int argc, char **argv) {
                 if (errno == EINVAL || end == NULL || *end != '\0') {
                     fprintf(stderr, "Invalid number: %s\n", argv[0]);
                     fprintf(stderr, "Usage: %s recompress [ROOM_ID] [FILENAME]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
                 if (room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file.rooms)) {
                     fprintf(stderr, "Value must be in the range 0..%lu\n", C_ARRAY_LEN(file.rooms) - 1);
                     fprintf(stderr, "Usage: %s recompress [ROOM_ID] [FILENAME]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
                 recompress_room = room_id;
                 argv ++;
@@ -1384,12 +1389,12 @@ int main(int argc, char **argv) {
                 if (errno == EINVAL || end == NULL || *end != '\0') {
                     fprintf(stderr, "Invalid number: %s\n", argv[0]);
                     fprintf(stderr, "Usage: %s display [ROOM_ID] [FILENAME]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
                 if (room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file.rooms)) {
                     fprintf(stderr, "Value must be in the range 0..%lu\n", C_ARRAY_LEN(file.rooms) - 1);
                     fprintf(stderr, "Usage: %s display [ROOM_ID] [FILENAME]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
                 display_room = room_id;
                 argv ++;
@@ -1400,12 +1405,12 @@ int main(int argc, char **argv) {
             if (errno == EINVAL || end == NULL || *end != '\0') {
                 fprintf(stderr, "Invalid number: %s\n", argv[1]);
                 fprintf(stderr, "Usage: %s find_tile tile_id [tile_offset]\n", program);
-                return 1;
+                defer_return(1);
             }
             if (find_tile < 0 || find_tile >= 64) {
                 fprintf(stderr, "Invalid tile number: %s\n", argv[1]);
                 fprintf(stderr, "Usage: %s find_tile tile_id [tile_offset]\n", program);
-                return 1;
+                defer_return(1);
             }
             argv += 2;
             argc -= 2;
@@ -1414,18 +1419,18 @@ int main(int argc, char **argv) {
                 if (errno == EINVAL || end == NULL || *end != '\0') {
                     fprintf(stderr, "Invalid tile number: %s\n", argv[0]);
                     fprintf(stderr, "Usage: %s find_tile tile_id [tile_offset]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
                 if (find_tile_offset < 0 || find_tile_offset % 4 != 0 || find_tile_offset > 28) {
                     fprintf(stderr, "Invalid offset: %s\n", argv[0]);
                     fprintf(stderr, "Usage: %s find_tile tile_id [tile_offset]\n", program);
-                    return 1;
+                    defer_return(1);
                 }
                 argv ++;
                 argc --;
             }
         } else if (strcmp(argv[0], "editor") == 0) {
-            return editor_main();
+            defer_return(editor_main());
         } else if (strcmp(argv[0], "rooms") == 0) {
             list = true;
             argv ++;
@@ -1439,7 +1444,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
             fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
             fprintf(stderr, "    help                                 - Display this message\n");
-            return 1;
+            defer_return(1);
         } else {
             fileName = argv[0];
             // Should we allow args after this?
@@ -1457,15 +1462,13 @@ int main(int argc, char **argv) {
         fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
         fprintf(stderr, "    editor                               - Start an editor\n");
         fprintf(stderr, "    help                                 - Display this message\n");
-        return 1;
+        defer_return(1);
     }
-    FILE *fp = fopen(fileName, "rb");
+    fp = fopen(fileName, "rb");
     if (fp == NULL) {
         fprintf(stderr, "Could not open %s for reading.\n", fileName);
-        return 1;
+        defer_return(1);
     }
-    int ret = 0;
-#define defer_return(code) { ret = code; goto defer; }
     fprintf(stderr, "Reading file %s.\n", fileName);
     if (!readFile(&file, fp)) defer_return(1);
     fclose(fp);
@@ -1535,6 +1538,16 @@ int main(int argc, char **argv) {
                 defer_return(1);
             }
             ARRAY_FREE(file.rooms[patch.room_id].compressed);
+            bool found = false;
+            for (size_t r = 0; r < rooms.length; r ++) {
+                if (patch.room_id == rooms.data[r]) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                ARRAY_ADD(rooms, patch.room_id);
+            }
             _Static_assert(NUM_PATCH_TYPES == 3, "Unexpected number of patch types");
             switch (patch.type) {
                 case NORMAL:
@@ -1579,41 +1592,40 @@ int main(int argc, char **argv) {
                             fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
                             defer_return(1);
                         }
-                        if (idx > file.rooms[patch.room_id].data.num_switches) {
-                            fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
-                            defer_return(1);
-                        }
                         if (idx >= file.rooms[patch.room_id].data.num_switches) {
-                            // FIXME realloc stuff, inc num_switches, update _num_switches (num_switches << | _num_switches & 0x3 currently)
-                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new switch\n", __FILE__, __LINE__);
-                            defer_return(1);
+                            Room *room = &file.rooms[patch.room_id];
+                            room->data.switches = realloc(room->data.switches, (idx + 1) * sizeof(struct SwitchObject));
+                            assert(room->data.switches != NULL);
+                            for (size_t i = room->data.num_switches; i <= idx; i ++) {
+                                room->data.switches[i].chunks.capacity = 0;
+                                room->data.switches[i].chunks.length = 0;
+                                room->data.switches[i].chunks.data = NULL;
+                            }
+                            room->data.num_switches = idx + 1;
                         }
                         struct SwitchObject *sw = file.rooms[patch.room_id].data.switches + idx;
-                        if (chunk_idx > sw->chunks.length) {
-                            fprintf(stderr, "Switch chunk index %d for switch %d in room %d is out of bounds\n", chunk_idx, idx, patch.room_id);
-                            defer_return(1);
-                        }
                         if (chunk_idx >= sw->chunks.length) {
-                            // FIXME realloc stuff, inc num_switches, update _num_switches (num_switches << | _num_switches & 0x3 currently)
-                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: append new switch chunk\n", __FILE__, __LINE__);
-                            defer_return(1);
+                            ARRAY_ENSURE(sw->chunks, chunk_idx + 1);
+                            sw->chunks.length = chunk_idx + 1;
                         }
                         fprintf(stderr, "Writing switch %d chunk[%d] at %d with %02x\n", idx, chunk_idx, addr, patch.value);
                         ((uint8_t *)&sw->chunks.data[chunk_idx])[addr] = patch.value;
                     } else {
+
+                        fprintf(stderr, "%s:%d: UNREACHABLE: switches now only have chunks, and no local fields\n", __FILE__, __LINE__);
+                        exit(1);
+
                         int idx = patch.address / sizeof(struct SwitchObject) - 1;
                         if (idx < 0) {
                             fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
                             defer_return(1);
                         }
-                        if (idx > file.rooms[patch.room_id].data.num_switches) {
-                            fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
-                            defer_return(1);
-                        }
                         if (idx >= file.rooms[patch.room_id].data.num_switches) {
-                            // FIXME realloc stuff, inc num_switches, update _num_switches (num_switches << | _num_switches & 0x3 currently)
-                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new switch\n", __FILE__, __LINE__);
-                            defer_return(1);
+                            Room *room = &file.rooms[patch.room_id];
+                            room->data.switches = realloc(room->data.switches, (idx + 1) * sizeof(struct SwitchObject));
+                            assert(room->data.switches != NULL);
+                            memset(room->data.switches + room->data.num_switches, 0, (idx + 1 - room->data.num_switches) * sizeof(struct SwitchObject));
+                            room->data.num_switches = idx + 1;
                         }
                         int addr = patch.address % sizeof(struct SwitchObject);
                         struct SwitchObject *sw = file.rooms[patch.room_id].data.switches + idx;
@@ -1628,6 +1640,13 @@ int main(int argc, char **argv) {
                     break;
             }
         }
+        for (size_t i = 0; i < rooms.length; i ++) {
+            if (!file.rooms[rooms.data[i]].valid) {
+                fprintf(stderr, "Room %d is invalid\n", rooms.data[i]);
+                defer_return(1);
+            }
+            dumpRoom(&file.rooms[rooms.data[i]]);
+        }
     }
     if (patches.length > 0 || recompress) {
         if (recompress) {
@@ -1637,7 +1656,7 @@ int main(int argc, char **argv) {
                 }
             } else {
                 if (!file.rooms[recompress_room].valid) {
-                    fprintf(stderr, "Room %d is invalid\n", display_room);
+                    fprintf(stderr, "Room %d is invalid\n", recompress_room);
                     defer_return(1);
                 }
                 ARRAY_FREE(file.rooms[recompress_room].compressed);
@@ -1657,6 +1676,7 @@ int main(int argc, char **argv) {
 
 defer:
 #undef defer_return
+    ARRAY_FREE(rooms);
     ARRAY_FREE(patches);
     freeRoomFile(&file);
     if (fp) { fclose(fp); fp = NULL; }

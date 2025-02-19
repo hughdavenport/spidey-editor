@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -o errexit
-tile=$1
+tile=${1:-1}
 offset=${2:-0}
 y=21
 room=0
@@ -29,4 +29,4 @@ done
 ./a.out patch $room tile_offset $offset
 ./a.out display $room
 ./a.out find_tile $tile $offset
-./play.sh
+# ./play.sh
