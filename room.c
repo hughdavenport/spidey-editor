@@ -228,8 +228,8 @@ void dumpRoom(Room *room) {
                     break;
 
                 case TOGGLE_BLOCK:
-                    fprintf(stderr, "{.type = TOGGLE_BLOCK, .x = %d, .y = %d, .size = %d, .off = %02x, .on = %02x, .msb_without_y = %02x}",
-                            chunk->x, chunk->y, chunk->size, chunk->off, chunk->on, chunk->msb & ~0x1f);
+                    fprintf(stderr, "{.type = TOGGLE_BLOCK, .x = %d, .y = %d, .size = %d, .dir = %s, .off = %02x, .on = %02x}",
+                            chunk->x, chunk->y, chunk->size, chunk->dir == VERTICAL ? "VERTICAL" : "HORIZONTAL", chunk->off, chunk->on);
                     break;
 
                 case UNKNOWN:
@@ -548,9 +548,10 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                 y = lsb & 0x1f;
                 uint8_t size = ((lsb >> 5) & 0x7) + 1;
                 uint8_t off, on;
+                enum SwitchChunkDirection dir = ((msb & 0x20) == 0) ? HORIZONTAL : VERTICAL;
                 read_next(off, tmp.decompressed);
                 read_next(on, tmp.decompressed);
-                ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK, .x = x, .y = y, .size = size, .off = off, .on = on, .msb = msb, .lsb = lsb }));
+                ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK, .x = x, .y = y, .size = size, .dir = dir, .off = off, .on = on }));
             } else {
                 // 0x40 was set, unsure what bytes are used for, but just add the bytes
                 ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = UNKNOWN, .msb = msb, .lsb = lsb }));
@@ -703,7 +704,7 @@ bool writeRoom(Room *room, FILE *fp) {
                     break;
 
                 case TOGGLE_BLOCK:
-                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->msb & ~0x1f);
+                    decompressed[d_len++] = 0x80 | (chunk->y & 0x1f) | (chunk->dir == VERTICAL ? 0x20 : 0);
                     decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->size << 5);
                     decompressed[d_len++] = chunk->off;
                     decompressed[d_len++] = chunk->on;
@@ -1046,9 +1047,9 @@ int main(int argc, char **argv) {
                 long addr = strtol(argv[0], &end, 0);
                 if (errno == EINVAL || end == NULL || *end != '\0') {
                     addr = -1;
-                    if (strncmp(argv[0], "tile[", 5) == 0 && isdigit(argv[0][5])) {
+                    if ((strncmp(argv[0], "tile[", 5) == 0 && isdigit(argv[0][5])) || (strncmp(argv[0], "tiles[", 6) == 0 && isdigit(argv[0][6]))) {
                         // Read [x][y] or [idx]
-                        long idx = strtol(argv[0] + 5, &end, 0);
+                        long idx = strtol(argv[0] + (argv[0][4] == '[' ? 5 : 6), &end, 0);
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid tile address: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
@@ -1248,6 +1249,22 @@ int main(int argc, char **argv) {
                                 addr += offsetof(struct SwitchChunk, off);
                             } else if (strcmp(end, "].on") == 0) {
                                 addr += offsetof(struct SwitchChunk, on);
+                            } else if (strcmp(end, "].dir") == 0) {
+                                addr += offsetof(struct SwitchChunk, dir);
+                                if (strcmp(argv[1], "VERTICAL") == 0) {
+                                    value = VERTICAL;
+                                } else if (strcmp(argv[1], "HORIZONTAL") == 0) {
+                                    value = HORIZONTAL;
+                                } else {
+                                    value = strtol(argv[1], &end, 0);
+                                    if (value == 0x20) value = VERTICAL;
+                                    if (value < 0 || value >= 2 || errno == EINVAL || end == NULL || *end != '\0') {
+                                        fprintf(stderr, "Invalid direction type: %s\n", argv[1]);
+                                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                        return 1;
+                                    }
+                                    return 1;
+                                }
                             } else if (strcmp(end, "].msb") == 0 || strcmp(end, "].msb_without_y") == 0) {
                                 addr += offsetof(struct SwitchChunk, msb);
                             } else if (strcmp(end, "].lsb") == 0 || strcmp(end, "].lsb_without_x") == 0) {
@@ -1255,7 +1272,6 @@ int main(int argc, char **argv) {
                             } else if (strcmp(end, "].type") == 0) {
                                 addr += offsetof(struct SwitchChunk, type);
                                 _Static_assert(NUM_CHUNK_TYPES == 3, "Unexpected number of chunk types");
-
                                 if (strcmp(argv[1], "PREAMBLE") == 0) {
                                     if (idx != 0) {
                                         fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");

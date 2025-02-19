@@ -36,6 +36,11 @@ enum SwitchChunkType {
     NUM_CHUNK_TYPES // _Static_asserts depend on this being at the end
 };
 
+enum SwitchChunkDirection {
+    HORIZONTAL,
+    VERTICAL
+};
+
 struct RoomObject {
     // written as ((x << 8) | y) | ((width << 5) << 8) | (height << 5)
     uint8_t x;
@@ -63,6 +68,7 @@ struct SwitchChunk {
     uint8_t x;
     uint8_t y;
     uint8_t size;
+    enum SwitchChunkDirection dir;
     uint8_t off;
     uint8_t on;
 };
