@@ -1181,9 +1181,9 @@ int main(int argc, char **argv) {
                             addr += offsetof(struct RoomObject, block) + 1;
                         } else if (strcmp(end, "].type") == 0) {
                             addr += offsetof(struct RoomObject, type);
-                            if (strcmp(argv[1], "static") == 0 || strcmp(argv[1], "block") == 0) {
+                            if (strcasecmp(argv[1], "static") == 0 || strcasecmp(argv[1], "block") == 0) {
                                 value = BLOCK;
-                            } else if (strcmp(argv[1], "enemy") == 0 || strcmp(argv[1], "sprite") == 0) {
+                            } else if (strcasecmp(argv[1], "enemy") == 0 || strcasecmp(argv[1], "sprite") == 0) {
                                 value = SPRITE;
                             } else {
                                 fprintf(stderr, "Invalid object type: %s\n", argv[1]);
@@ -1256,9 +1256,9 @@ int main(int argc, char **argv) {
                                 addr += offsetof(struct SwitchChunk, on);
                             } else if (strcmp(end, "].dir") == 0) {
                                 addr += offsetof(struct SwitchChunk, dir);
-                                if (strcmp(argv[1], "VERTICAL") == 0) {
+                                if (strcasecmp(argv[1], "VERTICAL") == 0) {
                                     value = VERTICAL;
-                                } else if (strcmp(argv[1], "HORIZONTAL") == 0) {
+                                } else if (strcasecmp(argv[1], "HORIZONTAL") == 0) {
                                     value = HORIZONTAL;
                                 } else {
                                     value = strtol(argv[1], &end, 0);
@@ -1277,16 +1277,16 @@ int main(int argc, char **argv) {
                             } else if (strcmp(end, "].type") == 0) {
                                 addr += offsetof(struct SwitchChunk, type);
                                 _Static_assert(NUM_CHUNK_TYPES == 3, "Unexpected number of chunk types");
-                                if (strcmp(argv[1], "PREAMBLE") == 0) {
+                                if (strcasecmp(argv[1], "PREAMBLE") == 0) {
                                     if (idx != 0) {
                                         fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
                                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                         defer_return(1);
                                     }
                                     value = PREAMBLE;
-                                } else if (strcmp(argv[1], "TOGGLE_BLOCK") == 0) {
+                                } else if (strcasecmp(argv[1], "TOGGLE_BLOCK") == 0) {
                                     value = TOGGLE_BLOCK;
-                                } else if (strcmp(argv[1], "UNKNOWN") == 0) {
+                                } else if (strcasecmp(argv[1], "UNKNOWN") == 0) {
                                     value = UNKNOWN;
                                 } else {
                                     value = strtol(argv[1], &end, 0);
@@ -1567,14 +1567,16 @@ int main(int argc, char **argv) {
                 case OBJECT: {
                 // FIXME: add ability to write to tiles of objects?
                     int idx = patch.address / sizeof(struct RoomObject);
-                    if (idx > file.rooms[patch.room_id].data.num_objects) {
+                    if (idx < 0) {
                         fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
                         defer_return(1);
                     }
                     if (idx >= file.rooms[patch.room_id].data.num_objects) {
-                        // FIXME realloc stuff, inc num_objects
-                        fprintf(stderr, "%s:%d: UNIMPLEMENTED: write new object\n", __FILE__, __LINE__);
-                        defer_return(1);
+                            Room *room = &file.rooms[patch.room_id];
+                            room->data.objects = realloc(room->data.objects, (idx + 1) * sizeof(struct RoomObject));
+                            assert(room->data.objects != NULL);
+                            memset(room->data.objects + room->data.num_objects, 0, (idx + 1 - room->data.num_objects) * sizeof(struct RoomObject));
+                            room->data.num_objects = idx + 1;
                     }
                     int addr = patch.address % sizeof(struct RoomObject);
                     struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
@@ -1596,14 +1598,14 @@ int main(int argc, char **argv) {
                             Room *room = &file.rooms[patch.room_id];
                             room->data.switches = realloc(room->data.switches, (idx + 1) * sizeof(struct SwitchObject));
                             assert(room->data.switches != NULL);
-                            for (size_t i = room->data.num_switches; i <= idx; i ++) {
-                                room->data.switches[i].chunks.capacity = 0;
-                                room->data.switches[i].chunks.length = 0;
-                                room->data.switches[i].chunks.data = NULL;
-                            }
+                            memset(room->data.switches + room->data.num_switches, 0, (idx + 1 - room->data.num_switches) * sizeof(struct SwitchObject));
                             room->data.num_switches = idx + 1;
                         }
                         struct SwitchObject *sw = file.rooms[patch.room_id].data.switches + idx;
+                        if (chunk_idx < 0) {
+                            fprintf(stderr, "Chunk id %d for switch %d in room %d is out of bounds\n", chunk_idx, idx, patch.room_id);
+                            defer_return(1);
+                        }
                         if (chunk_idx >= sw->chunks.length) {
                             ARRAY_ENSURE(sw->chunks, chunk_idx + 1);
                             sw->chunks.length = chunk_idx + 1;
