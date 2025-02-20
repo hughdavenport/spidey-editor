@@ -482,25 +482,17 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
             objects[i].block.height = ((msb & 0x60) >> 5) + 1;
             assert(objects[i].x < WIDTH_TILES);
             assert(objects[i].block.width < WIDTH_TILES);
-            assert(objects[i].x + objects[i].block.width < WIDTH_TILES);
+            assert(objects[i].x + objects[i].block.width <= WIDTH_TILES);
             if (!(objects[i].y < HEIGHT_TILES)) {
                 fprintf(stderr, "WARNING: Room %ld (%s) object %zu y is out of bounds (%u >= %u)\n",
                         idx, tmp.data.name, i, objects[i].y, HEIGHT_TILES);
-                if (!(objects[i].y < WIDTH_TILES)) {
-                    fprintf(stderr, "WARNING: Room %ld (%s) object %zu y is really out of bounds (%u >= %u)\n",
-                            idx, tmp.data.name, i, objects[i].y, WIDTH_TILES);
-                }
                 continue;
             }
             assert(objects[i].y < HEIGHT_TILES);
             assert(objects[i].block.height < HEIGHT_TILES);
-            if (!(objects[i].y + objects[i].block.height < HEIGHT_TILES)) {
+            if (!(objects[i].y + objects[i].block.height <= HEIGHT_TILES)) {
                 fprintf(stderr, "WARNING: Room %ld (%s) object %zu y+height is out of bounds (%u >= %u)\n",
                         idx, tmp.data.name, i, objects[i].y + objects[i].block.height, HEIGHT_TILES);
-                if (!(objects[i].y + objects[i].block.height < WIDTH_TILES)) {
-                    fprintf(stderr, "WARNING: Room %ld (%s) object %zu y+height is really out of bounds (%u >= %u)\n",
-                            idx, tmp.data.name, i, objects[i].y + objects[i].block.height, WIDTH_TILES);
-                }
                 continue;
             }
             objects[i].tiles = malloc(objects[i].block.width * objects[i].block.height);
@@ -523,7 +515,7 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
             objects[i].x = lsb & 0x1f;
             objects[i].y = msb & 0x1f;
 
-            objects[i].sprite.type = ((lsb & 0xe0) >> 5) + 1;
+            objects[i].sprite.type = (((lsb & 0xe0) >> 5) + 1) % NUM_SPRITE_TYPES;
             objects[i].sprite.damage = ((msb & 0x60) >> 5) + 1;
         }
     }
@@ -988,18 +980,6 @@ bool writeFile(RoomFile *file, FILE *fp) {
     return true;
 }
 
-bool readRooms(RoomFile *file) {
-    char *fileName = "ROOMS.SPL";
-    FILE *fp = fopen(fileName, "rb");
-    if (fp == NULL) {
-        fprintf(stderr, "Could not open %s for reading.\n", fileName);
-        return false;
-    }
-    bool ret = readFile(file, fp);
-    fclose(fp);
-    return ret;
-}
-
 typedef enum {
     NORMAL,
     OBJECT,
@@ -1016,6 +996,16 @@ typedef struct {
 } PatchInstruction;
 
 #define ROOMS_FILE "ROOMS.SPL"
+bool readRooms(RoomFile *file) {
+    FILE *fp = fopen(ROOMS_FILE, "rb");
+    if (fp == NULL) {
+        fprintf(stderr, "Could not open %s for reading.\n", ROOMS_FILE);
+        return false;
+    }
+    bool ret = readFile(file, fp);
+    fclose(fp);
+    return ret;
+}
 int editor_main();
 int main(int argc, char **argv) {
     char *fileName = ROOMS_FILE;
@@ -1029,6 +1019,7 @@ int main(int argc, char **argv) {
     int display_room = -1;
     int find_tile = -1;
     int find_tile_offset = 0;
+    int find_sprite = -1;
     char *program = argv[0];
     ARRAY(uint8_t) rooms = {0};
     FILE *fp = NULL;
@@ -1182,21 +1173,21 @@ int main(int argc, char **argv) {
                                 addr += offsetof(struct RoomObject, sprite.type);
                                 _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
 
-                                if (strcmp(argv[1], "SHARK") == 0) {
+                                if (strcasecmp(argv[1], "SHARK") == 0) {
                                     value = SHARK;
-                                } else if (strcmp(argv[1], "MUMMY") == 0) {
+                                } else if (strcasecmp(argv[1], "MUMMY") == 0) {
                                     value = MUMMY;
-                                } else if (strcmp(argv[1], "BLUE_MAN") == 0) {
+                                } else if (strcasecmp(argv[1], "BLUE_MAN") == 0) {
                                     value = BLUE_MAN;
-                                } else if (strcmp(argv[1], "WOLF") == 0) {
+                                } else if (strcasecmp(argv[1], "WOLF") == 0) {
                                     value = WOLF;
-                                } else if (strcmp(argv[1], "R2D2") == 0) {
+                                } else if (strcasecmp(argv[1], "R2D2") == 0) {
                                     value = R2D2;
-                                } else if (strcmp(argv[1], "DINOSAUR") == 0) {
+                                } else if (strcasecmp(argv[1], "DINOSAUR") == 0) {
                                     value = DINOSAUR;
-                                } else if (strcmp(argv[1], "RAT") == 0) {
+                                } else if (strcasecmp(argv[1], "RAT") == 0) {
                                     value = RAT;
-                                } else if (strcmp(argv[1], "SHOTGUN_LADY") == 0) {
+                                } else if (strcasecmp(argv[1], "SHOTGUN_LADY") == 0) {
                                     value = SHOTGUN_LADY;
                                 } else {
                                     value = strtol(argv[1], &end, 0);
@@ -1499,6 +1490,10 @@ int main(int argc, char **argv) {
                 argc --;
             }
         } else if (strcmp(argv[0], "find_tile") == 0) {
+            if (argc <= 1) {
+                fprintf(stderr, "Usage: %s find_tile tile_id [tile_offset]\n", program);
+                defer_return(1);
+            }
             find_tile = strtol(argv[1], &end, 0);
             if (errno == EINVAL || end == NULL || *end != '\0') {
                 fprintf(stderr, "Invalid number: %s\n", argv[1]);
@@ -1527,6 +1522,52 @@ int main(int argc, char **argv) {
                 argv ++;
                 argc --;
             }
+        } else if (strcmp(argv[0], "find_sprite") == 0) {
+            _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
+            if (strcasecmp(argv[1], "SHARK") == 0) {
+                find_sprite = SHARK;
+            } else if (strcasecmp(argv[1], "MUMMY") == 0) {
+                find_sprite = MUMMY;
+            } else if (strcasecmp(argv[1], "BLUE_MAN") == 0) {
+                find_sprite = BLUE_MAN;
+            } else if (strcasecmp(argv[1], "WOLF") == 0) {
+                find_sprite = WOLF;
+            } else if (strcasecmp(argv[1], "R2D2") == 0) {
+                find_sprite = R2D2;
+            } else if (strcasecmp(argv[1], "DINOSAUR") == 0) {
+                find_sprite = DINOSAUR;
+            } else if (strcasecmp(argv[1], "RAT") == 0) {
+                find_sprite = RAT;
+            } else if (strcasecmp(argv[1], "SHOTGUN_LADY") == 0) {
+                find_sprite = SHOTGUN_LADY;
+            } else {
+                find_sprite = strtol(argv[1], &end, 0);
+                if (find_sprite < 0 || find_sprite >= NUM_SPRITE_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
+                    fprintf(stderr, "Invalid sprite type: %s\n", argv[1]);
+                    fprintf(stderr, "Usage: %s find_sprite SPRITENAME\n", program);
+                    fprintf(stderr, "Available types:\n");
+                    _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
+                    for (size_t i = 0; i < NUM_SPRITE_TYPES; i ++) {
+                        switch ((SpriteType)i) {
+                            case SHARK: fprintf(stderr, "    SHARK\n"); break;
+                            case MUMMY: fprintf(stderr, "    MUMMY\n"); break;
+                            case BLUE_MAN: fprintf(stderr, "    BLUE_MAN\n"); break;
+                            case WOLF: fprintf(stderr, "    WOLF\n"); break;
+                            case R2D2: fprintf(stderr, "    R2D2\n"); break;
+                            case DINOSAUR: fprintf(stderr, "    DINOSAUR\n"); break;
+                            case RAT: fprintf(stderr, "    RAT\n"); break;
+                            case SHOTGUN_LADY: fprintf(stderr, "    SHOTGUN_LADY\n"); break;
+
+                            default:
+                                fprintf(stderr, "%s:%d: UNREACHABLE\n", __FILE__, __LINE__);
+                                exit(1);
+                        }
+                    }
+                    defer_return(1);
+                }
+            }
+            argv += 2;
+            argc -= 2;
         } else if (strcmp(argv[0], "editor") == 0) {
             defer_return(editor_main());
         } else if (strcmp(argv[0], "rooms") == 0) {
@@ -1541,6 +1582,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
             fprintf(stderr, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
             fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
+            fprintf(stderr, "    find_sprite SPRITENAME               - Find a sprite\n");
             fprintf(stderr, "    editor                               - Start an editor\n");
             fprintf(stderr, "    help                                 - Display this message\n");
             defer_return(1);
@@ -1551,7 +1593,7 @@ int main(int argc, char **argv) {
             argc --;
         }
     }
-    if (find_tile == -1 && !list && !display && !recompress && patches.length == 0) {
+    if (find_sprite == -1 && find_tile == -1 && !list && !display && !recompress && patches.length == 0) {
         fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
         fprintf(stderr, "Subcommands:\n");
         fprintf(stderr, "    rooms                                - List rooms\n");
@@ -1560,6 +1602,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
         fprintf(stderr, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
         fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
+        fprintf(stderr, "    find_sprite SPRITENAME               - Find a sprite\n");
         fprintf(stderr, "    editor                               - Start an editor\n");
         fprintf(stderr, "    help                                 - Display this message\n");
         defer_return(1);
@@ -1603,6 +1646,56 @@ int main(int argc, char **argv) {
         }
         if (!found) {
             printf("Tile 0x%02x (offset 0x%02x) not found\n", find_tile, find_tile_offset);
+        }
+    }
+
+    if (find_sprite != -1) {
+        bool found = false;
+        for (size_t i = 0; i < C_ARRAY_LEN(file.rooms); i ++) {
+            if (file.rooms[i].valid) {
+                for (size_t idx = 0; idx < file.rooms[i].data.num_objects; idx ++) {
+                    struct RoomObject *obj = &file.rooms[i].data.objects[idx];
+                    if (obj->type == SPRITE && obj->sprite.type == find_sprite) {
+                        printf("Found sprite ");
+                        switch ((SpriteType)find_sprite) {
+                            case SHARK: fprintf(stderr, "SHARK\n"); break;
+                            case MUMMY: fprintf(stderr, "MUMMY\n"); break;
+                            case BLUE_MAN: fprintf(stderr, "BLUE_MAN\n"); break;
+                            case WOLF: fprintf(stderr, "WOLF\n"); break;
+                            case R2D2: fprintf(stderr, "R2D2\n"); break;
+                            case DINOSAUR: fprintf(stderr, "DINOSAUR\n"); break;
+                            case RAT: fprintf(stderr, "RAT\n"); break;
+                            case SHOTGUN_LADY: fprintf(stderr, "SHOTGUN_LADY\n"); break;
+
+                            default:
+                                fprintf(stderr, "%s:%d: UNREACHABLE: Unexpected sprite type %d\n", __FILE__, __LINE__, find_sprite);
+                                exit(1);
+                        }
+                        printf(" in room %ld (%s)\n", i, file.rooms[i].data.name);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!found) {
+            printf("Sprite ");
+            _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
+            switch ((SpriteType)find_sprite) {
+                case SHARK: fprintf(stderr, "SHARK\n"); break;
+                case MUMMY: fprintf(stderr, "MUMMY\n"); break;
+                case BLUE_MAN: fprintf(stderr, "BLUE_MAN\n"); break;
+                case WOLF: fprintf(stderr, "WOLF\n"); break;
+                case R2D2: fprintf(stderr, "R2D2\n"); break;
+                case DINOSAUR: fprintf(stderr, "DINOSAUR\n"); break;
+                case RAT: fprintf(stderr, "RAT\n"); break;
+                case SHOTGUN_LADY: fprintf(stderr, "SHOTGUN_LADY\n"); break;
+
+                default:
+                    fprintf(stderr, "%s:%d: UNREACHABLE: Unexpected sprite type %d\n", __FILE__, __LINE__, find_sprite);
+                    exit(1);
+            }
+            printf(" not found\n");
         }
     }
 
