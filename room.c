@@ -1006,6 +1006,7 @@ typedef struct {
     uint8_t room_id;
     int address;
     uint8_t value;
+    bool delete;
 } PatchInstruction;
 
 #define ROOMS_FILE "ROOMS.SPL"
@@ -1360,6 +1361,58 @@ int main(int argc, char **argv) {
                 argv += 2;
                 argc -= 2;
             }
+        } else if (strcmp(argv[0], "delete") == 0) {
+            if (argc <= 2) {
+                fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                defer_return(1);
+            }
+            long room_id = strtol(argv[1], &end, 0);
+            if (errno == EINVAL || end == NULL || *end != '\0') {
+                fprintf(stderr, "Invalid number: %s\n", argv[1]);
+                fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                defer_return(1);
+            }
+            if (room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file.rooms)) {
+                fprintf(stderr, "Room ID out of range 0..%lu\n", C_ARRAY_LEN(file.rooms) - 1);
+                fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                defer_return(1);
+            }
+            argv += 2;
+            argc -= 2;
+            while (argc >= 1) {
+                long addr = 0xFFFF;
+                if ((strncmp(argv[0], "object[", 7) == 0 && isdigit(argv[0][7])) || (strncmp(argv[0], "objects[", 8) == 0 && isdigit(argv[0][8]))) {
+                    long idx = strtol(argv[0] + (argv[0][6] == '[' ? 7 : 8), &end, 0);
+                    if (errno == EINVAL || *end != ']') {
+                        fprintf(stderr, "Invalid object id: %s\n", argv[0]);
+                        fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                        defer_return(1);
+                    }
+                    addr = idx * sizeof(struct RoomObject);
+                    ARRAY_ADD(patches, ((PatchInstruction){ .type = OBJECT, .room_id = room_id, .address = addr, .delete = true }));
+                } else if ((strncmp(argv[0], "switch[", 7) == 0 && isdigit(argv[0][7])) || (strncmp(argv[0], "switchs[", 8) == 0 && isdigit(argv[0][8])) || (strncmp(argv[0], "switches[", 9) == 0 && isdigit(argv[0][9]))) {
+                    long idx = strtol(argv[0] + (argv[0][6] == '[' ? 7 : (argv[0][7] == '[' ? 8 : 9)), &end, 0);
+                    if (errno == EINVAL || *end != ']') {
+                        fprintf(stderr, "Invalid switch id: %s\n", argv[0]);
+                        fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                        defer_return(1);
+                    }
+                    addr = (idx + 1) * sizeof(struct SwitchObject);
+                    if (strncmp(end, "].chunk[", 8) == 0 || strncmp(end, "].chunks[", 9) == 0) {
+                        idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
+                        if (errno == EINVAL || *end != ']') {
+                            fprintf(stderr, "Invalid chunk index: %s\n", argv[0]);
+                            fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                            defer_return(1);
+                        }
+                        addr <<= 8;
+                        addr += idx * sizeof(struct SwitchChunk);
+                    }
+                    ARRAY_ADD(patches, ((PatchInstruction){ .type = SWITCH, .room_id = room_id, .address = addr, .delete = true }));
+                }
+                argv ++;
+                argc --;
+            }
         } else if (strcmp(argv[0], "recompress") == 0) {
             recompress = true;
             argv ++;
@@ -1459,6 +1512,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "    display [ROOMID]                     - Defaults to all rooms\n");
         fprintf(stderr, "    recompress                           - No changes to underlying data, just recompress\n");
         fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
+        fprintf(stderr, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room");
         fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
         fprintf(stderr, "    editor                               - Start an editor\n");
         fprintf(stderr, "    help                                 - Display this message\n");
@@ -1551,6 +1605,7 @@ int main(int argc, char **argv) {
             _Static_assert(NUM_PATCH_TYPES == 3, "Unexpected number of patch types");
             switch (patch.type) {
                 case NORMAL:
+                    assert(patch.delete == false);
                     if (patch.address >= sizeof(file.rooms[patch.room_id].data)) {
                         fprintf(stderr, "%s:%d: WARNING: Patching *rest* may not be stable currently\n", __FILE__, __LINE__);
                         if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
@@ -1571,17 +1626,29 @@ int main(int argc, char **argv) {
                         fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
                         defer_return(1);
                     }
-                    if (idx >= file.rooms[patch.room_id].data.num_objects) {
+                    if (patch.delete) {
+                        Room *room = &file.rooms[patch.room_id];
+                        if (idx >= file.rooms[patch.room_id].data.num_objects) {
+                            fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
+                            defer_return(1);
+                        }
+                        fprintf(stderr, "Deleting object %d at from room %d\n", idx, patch.room_id);
+                        if (room->data.objects[idx].tiles) free(room->data.objects[idx].tiles);
+                        memmove(room->data.objects + idx, room->data.objects + idx + 1, (room->data.num_objects - idx - 1) * sizeof(struct RoomObject));
+                        room->data.num_objects --;
+                    } else {
+                        if (idx >= file.rooms[patch.room_id].data.num_objects) {
                             Room *room = &file.rooms[patch.room_id];
                             room->data.objects = realloc(room->data.objects, (idx + 1) * sizeof(struct RoomObject));
                             assert(room->data.objects != NULL);
                             memset(room->data.objects + room->data.num_objects, 0, (idx + 1 - room->data.num_objects) * sizeof(struct RoomObject));
                             room->data.num_objects = idx + 1;
+                        }
+                        int addr = patch.address % sizeof(struct RoomObject);
+                        struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
+                        fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
+                        ((uint8_t *)object)[addr] = patch.value;
                     }
-                    int addr = patch.address % sizeof(struct RoomObject);
-                    struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
-                    fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
-                    ((uint8_t *)object)[addr] = patch.value;
                 }; break;
 
                 case SWITCH: {
@@ -1606,33 +1673,56 @@ int main(int argc, char **argv) {
                             fprintf(stderr, "Chunk id %d for switch %d in room %d is out of bounds\n", chunk_idx, idx, patch.room_id);
                             defer_return(1);
                         }
-                        if (chunk_idx >= sw->chunks.length) {
-                            ARRAY_ENSURE(sw->chunks, chunk_idx + 1);
-                            sw->chunks.length = chunk_idx + 1;
+                        if (patch.delete) {
+                            if (chunk_idx >= sw->chunks.length) {
+                                fprintf(stderr, "Chunk id %d for switch %d in room %d is out of bounds\n", chunk_idx, idx, patch.room_id);
+                                defer_return(1);
+                            }
+                            fprintf(stderr, "Deleting chunk %d for switch %d from room %d\n", chunk_idx, idx, patch.room_id);
+                            memmove(sw->chunks.data + chunk_idx, sw->chunks.data + chunk_idx + 1, (sw->chunks.length - chunk_idx - 1) * sizeof(struct SwitchChunk));
+                            sw->chunks.length --;
+                        } else {
+                            if (chunk_idx >= sw->chunks.length) {
+                                ARRAY_ENSURE(sw->chunks, chunk_idx + 1);
+                                sw->chunks.length = chunk_idx + 1;
+                            }
+                            fprintf(stderr, "Writing switch %d chunk[%d] at %d with %02x\n", idx, chunk_idx, addr, patch.value);
+                            ((uint8_t *)&sw->chunks.data[chunk_idx])[addr] = patch.value;
                         }
-                        fprintf(stderr, "Writing switch %d chunk[%d] at %d with %02x\n", idx, chunk_idx, addr, patch.value);
-                        ((uint8_t *)&sw->chunks.data[chunk_idx])[addr] = patch.value;
                     } else {
-
-                        fprintf(stderr, "%s:%d: UNREACHABLE: switches now only have chunks, and no local fields\n", __FILE__, __LINE__);
-                        exit(1);
+                        if (!patch.delete) {
+                            fprintf(stderr, "%s:%d: UNREACHABLE: switches now only have chunks, and no local fields\n", __FILE__, __LINE__);
+                            exit(1);
+                        }
 
                         int idx = patch.address / sizeof(struct SwitchObject) - 1;
                         if (idx < 0) {
                             fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
                             defer_return(1);
                         }
-                        if (idx >= file.rooms[patch.room_id].data.num_switches) {
+                        if (patch.delete) {
                             Room *room = &file.rooms[patch.room_id];
-                            room->data.switches = realloc(room->data.switches, (idx + 1) * sizeof(struct SwitchObject));
-                            assert(room->data.switches != NULL);
-                            memset(room->data.switches + room->data.num_switches, 0, (idx + 1 - room->data.num_switches) * sizeof(struct SwitchObject));
-                            room->data.num_switches = idx + 1;
+                            if (idx >= file.rooms[patch.room_id].data.num_switches) {
+                                fprintf(stderr, "Switch id %d for room %d is out of bounds\n", idx, patch.room_id);
+                                defer_return(1);
+                            }
+                            ARRAY_FREE(room->data.switches[idx].chunks);
+                            fprintf(stderr, "Deleting switch %d from room %d\n", idx, patch.room_id);
+                            memmove(room->data.switches + idx, room->data.switches + idx + 1, (room->data.num_switches - idx - 1) * sizeof(struct RoomObject));
+                            room->data.num_switches --;
+                        } else {
+                            if (idx >= file.rooms[patch.room_id].data.num_switches) {
+                                Room *room = &file.rooms[patch.room_id];
+                                room->data.switches = realloc(room->data.switches, (idx + 1) * sizeof(struct SwitchObject));
+                                assert(room->data.switches != NULL);
+                                memset(room->data.switches + room->data.num_switches, 0, (idx + 1 - room->data.num_switches) * sizeof(struct SwitchObject));
+                                room->data.num_switches = idx + 1;
+                            }
+                            int addr = patch.address % sizeof(struct SwitchObject);
+                            struct SwitchObject *sw = file.rooms[patch.room_id].data.switches + idx;
+                            fprintf(stderr, "Writing switch %d at %d with %02x\n", idx, addr, patch.value);
+                            ((uint8_t *)sw)[addr] = patch.value;
                         }
-                        int addr = patch.address % sizeof(struct SwitchObject);
-                        struct SwitchObject *sw = file.rooms[patch.room_id].data.switches + idx;
-                        fprintf(stderr, "Writing switch %d at %d with %02x\n", idx, addr, patch.value);
-                        ((uint8_t *)sw)[addr] = patch.value;
                     }
                 }; break;
 
