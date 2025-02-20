@@ -184,7 +184,7 @@ void dumpRoom(Room *room) {
 
             case SPRITE:
                 fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 1);
-                fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .type = ",
+                fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .sprite = ",
                         "SPRITE",
                         room->data.objects[i].x, room->data.objects[i].y);
                 _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
@@ -705,8 +705,8 @@ bool writeRoom(Room *room, FILE *fp) {
                     break;
 
                 case TOGGLE_BLOCK:
-                    decompressed[d_len++] = 0x80 | (chunk->y & 0x1f) | (chunk->dir == VERTICAL ? 0x20 : 0);
-                    decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->size << 5);
+                    decompressed[d_len++] = 0x80 | (chunk->x & 0x1f) | (chunk->dir == VERTICAL ? 0x20 : 0);
+                    decompressed[d_len++] = (chunk->y & 0x1f) | ((chunk->size - 1) << 5);
                     decompressed[d_len++] = chunk->off;
                     decompressed[d_len++] = chunk->on;
                     break;
@@ -1171,9 +1171,9 @@ int main(int argc, char **argv) {
                             } else if (strcmp(end, "].y") == 0) {
                                 addr += offsetof(struct RoomObject, y);
                             } else if (strcmp(end, "].width") == 0) {
-                                addr += offsetof(struct RoomObject, block);
+                                addr += offsetof(struct RoomObject, block.width);
                             } else if (strcmp(end, "].sprite") == 0) {
-                                addr += offsetof(struct RoomObject, sprite);
+                                addr += offsetof(struct RoomObject, sprite.type);
                                 _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
 
                                 if (strcmp(argv[1], "SHARK") == 0) {
@@ -1201,8 +1201,10 @@ int main(int argc, char **argv) {
                                     }
                                     defer_return(1);
                                 }
-                            } else if (strcmp(end, "].height") == 0 || strcmp(end, "].damage") == 0) {
-                                addr += offsetof(struct RoomObject, block) + 1;
+                            } else if (strcmp(end, "].height") == 0) {
+                                addr += offsetof(struct RoomObject, block.height);
+                            } else if (strcmp(end, "].damage") == 0) {
+                                addr += offsetof(struct RoomObject, sprite.damage);
                             } else if (strcmp(end, "].type") == 0) {
                                 addr += offsetof(struct RoomObject, type);
                                 if (strcasecmp(argv[1], "static") == 0 || strcasecmp(argv[1], "block") == 0) {
@@ -1306,7 +1308,7 @@ int main(int argc, char **argv) {
                                     addr += offsetof(struct SwitchChunk, type);
                                     _Static_assert(NUM_CHUNK_TYPES == 3, "Unexpected number of chunk types");
                                     if (strcasecmp(argv[1], "PREAMBLE") == 0) {
-                                        if (idx != 0) {
+                                        if (chunk_idx != 0) {
                                             fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
                                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                             defer_return(1);
