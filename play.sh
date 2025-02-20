@@ -4,7 +4,7 @@ SPIDEY_DIR=${SPIDEY_DIR:-Spider}
 cp ROOMS.SPL $SPIDEY_DIR
 cd $SPIDEY_DIR
 ls
-dosbox SPIDEY.EXE &
+dosbox-x -nopromptfolder SPIDEY.EXE &
 db=$!
 # Wait for window to open
 i3-msg -m -t subscribe '[ "window" ]' | grep -q DOSBOX
@@ -23,6 +23,7 @@ xdotool type Enter
 sleep .1
 xdotool type Enter
 sleep .1
-for i in {1..50}; do xdotool key 1; done # why does it not pick it up :(
+for i in {1..100}; do xdotool key 1; done # why does it not pick it up :(
+xdotool key F12+F
 wait $db
 cd -

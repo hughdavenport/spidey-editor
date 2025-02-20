@@ -29,4 +29,4 @@ done
 ./a.out patch $room tile_offset $offset
 ./a.out display $room
 ./a.out find_tile $tile $offset
-# ./play.sh
+./play.sh
