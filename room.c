@@ -1071,12 +1071,12 @@ int main(int argc, char **argv) {
                             }
                             idx = y * WIDTH_TILES + idx;
                         }
-                        if (idx > WIDTH_TILES * HEIGHT_TILES) {
+                        if (idx >= WIDTH_TILES * HEIGHT_TILES) {
                             fprintf(stderr, "Invalid tile address, too large: %s\n", argv[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             defer_return(1);
                         }
-                        addr = idx;
+                        addr = offsetof(struct DecompresssedRoom, tiles) + idx;
                     } else if (strcmp(argv[0], "tile_offset") == 0) {
                         addr = offsetof(struct DecompresssedRoom, tile_offset);
                     } else if (strcmp(argv[0], "background") == 0) {
@@ -1655,6 +1655,7 @@ int main(int argc, char **argv) {
                         }
                         file.rooms[patch.room_id].rest.data[patch.address - sizeof(file.rooms[patch.room_id].data)] = patch.value;
                     } else {
+                        fprintf(stderr, "Writing at %d with %02x\n", patch.address, patch.value);
                         ((uint8_t *)&file.rooms[patch.room_id].data)[patch.address] = patch.value;
                     }
                     break;
