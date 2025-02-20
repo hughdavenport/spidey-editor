@@ -77,7 +77,7 @@ struct SwitchObject {
     ARRAY(struct SwitchChunk) chunks;
 };
 
-struct DecompresssedRoom {
+struct __attribute__((__packed__)) DecompresssedRoom {
 //    32
 //  * 22
 //  =704
@@ -107,10 +107,13 @@ struct DecompresssedRoom {
 
     char name[24];
 
+    uint8_t end_marker; // Can be used with offsetof() to work out if an address is in the raw room or not
+
     uint8_t num_switches; // _num_switches >> 2
     struct RoomObject *objects;
     struct SwitchObject *switches;
 };
+_Static_assert(offsetof(struct DecompresssedRoom, end_marker) == 742, "Size of room is unexpected");
 
 typedef ARRAY(uint8_t) uint8_array;
 typedef struct {

@@ -156,7 +156,7 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
     fprintf(stderr, "  number of moving objects: %d\n", room->data.num_objects);
     fprintf(stderr, "  UNKNOWN (e) (num of switches << 2 | lower 3 bits for bx): %d 0x%02x \n", room->data._num_switches, room->data._num_switches);
-    fprintf(stderr, "  number of moving switches: %d\n", room->data.num_switches);
+    fprintf(stderr, "  number of switches: %d\n", room->data.num_switches);
     fprintf(stderr, "  UNKNOWN (f) (upper 8 bits of bx): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
 
     fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
@@ -615,6 +615,7 @@ bool writeRoom(Room *room, FILE *fp) {
     if (fp == NULL || room == NULL || !room->valid) return false;
 
     if (room->compressed.length > 0) {
+        /* fprintf(stderr, "Writing already compressed room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp)); */
         size_t written = 0;
         do {
             size_t write_ret = fwrite(room->compressed.data + written, sizeof(uint8_t), room->compressed.length - written, fp);
@@ -624,7 +625,7 @@ bool writeRoom(Room *room, FILE *fp) {
         return true;
     }
 
-    fprintf(stderr, "Writing Room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp));
+    fprintf(stderr, "Compressing and writing Room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp));
 
 /* #define log(...) fprintf(__VA_ARGS__) */
 #define log(...) do {} while (false)
@@ -728,6 +729,9 @@ bool writeRoom(Room *room, FILE *fp) {
     for (size_t i = 0; i < room->rest.length; i ++) {
         decompressed[d_len++] = room->rest.data[i];
     }
+
+    assert(d_len < C_ARRAY_LEN(decompressed));
+    log(stderr, "Compressing %ld bytes of data\n", d_len);
 
     compressed[c_len++] = '\x8f';
     compressed[c_len++] = '\0';
@@ -862,7 +866,7 @@ bool writeRoom(Room *room, FILE *fp) {
                 // 5- Output marker[0], send marker[2] and length < 0x80. Copies room marker (0x8f, but could be different?) length + 2 times
                 log(stderr, "%s:%d: RLE marker[0] length %u (%x).\n",
                         __FILE__, __LINE__, length, length - 2);
-                compressed[c_len++] = compressed[0];
+                compressed[c_len++] = compressed[2];
                 compressed[c_len++] = length - 2;
                 d_idx += length - 1; // We had already read 1 at start of loop
                 continue;
@@ -920,6 +924,8 @@ bool writeRoom(Room *room, FILE *fp) {
         compressed[c_len++] = byte;
     }
 
+    log(stderr, "Compressed %ld bytes of data into %ld bytes\n", d_len, c_len);
+    assert(c_len < C_ARRAY_LEN(compressed));
 
     /* fprintf(stderr, "  Data to compress (length=%zu): [", d_len); */
     /* for (size_t i = 0; i < d_len; i ++) { */
@@ -1646,7 +1652,7 @@ int main(int argc, char **argv) {
             switch (patch.type) {
                 case NORMAL:
                     assert(patch.delete == false);
-                    if (patch.address >= sizeof(file.rooms[patch.room_id].data)) {
+                    if (patch.address >= offsetof(struct DecompresssedRoom, end_marker) || patch.address >= sizeof(file.rooms[patch.room_id].data)) {
                         fprintf(stderr, "%s:%d: WARNING: Patching *rest* may not be stable currently\n", __FILE__, __LINE__);
                         if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
                             fprintf(stderr, "Address %d invalid\n", patch.address);
@@ -1655,7 +1661,8 @@ int main(int argc, char **argv) {
                         }
                         file.rooms[patch.room_id].rest.data[patch.address - sizeof(file.rooms[patch.room_id].data)] = patch.value;
                     } else {
-                        fprintf(stderr, "Writing at %d with %02x\n", patch.address, patch.value);
+                        fprintf(stderr, "Writing at %d with %02x (was %02x)\n", patch.address, patch.value,
+                                ((uint8_t *)&file.rooms[patch.room_id].data)[patch.address]);
                         ((uint8_t *)&file.rooms[patch.room_id].data)[patch.address] = patch.value;
                     }
                     break;
