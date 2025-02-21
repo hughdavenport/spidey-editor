@@ -32,7 +32,7 @@ enum SwitchChunkType {
     PREAMBLE,
     TOGGLE_BLOCK,
     TOGGLE_BIT,
-    UNKNOWN,
+    TOGGLE_OBJECT,
 
     NUM_CHUNK_TYPES // _Static_asserts depend on this being at the end
 };
@@ -72,6 +72,10 @@ struct SwitchChunk {
     enum SwitchChunkDirection dir;
     uint8_t off;
     uint8_t on;
+    uint8_t bitmask;
+    uint8_t index;
+    uint8_t test;
+    uint8_t value;
 };
 
 struct SwitchObject {

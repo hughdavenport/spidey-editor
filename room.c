@@ -96,7 +96,7 @@ void dumpRoom(Room *room) {
         if (x == 0) fprintf(stderr, "\n    ");
         bool colored = false;
         uint8_t tile = room->data.tiles[i];
-        if (x != 0) fprintf(stderr, " ");
+        /* if (x != 0) fprintf(stderr, " "); */
         for (size_t o = 0; o < room->data.num_objects; o ++) {
             struct RoomObject *object = room->data.objects + o;
             switch (object->type) {
@@ -155,8 +155,8 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  UNKNOWN (b): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
     fprintf(stderr, "  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
     fprintf(stderr, "  number of moving objects: %d\n", room->data.num_objects);
-    fprintf(stderr, "  UNKNOWN (e) (num of switches << 2 | lower 3 bits for bx): %d 0x%02x \n", room->data._num_switches, room->data._num_switches);
     fprintf(stderr, "  number of switches: %d\n", room->data.num_switches);
+    fprintf(stderr, "  UNKNOWN (e) (without num switches, just lower 3 bits for bx): %d 0x%02x \n", room->data._num_switches & 0x7, room->data._num_switches & 0x7);
     fprintf(stderr, "  UNKNOWN (f) (upper 8 bits of bx): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
 
     fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
@@ -233,13 +233,19 @@ void dumpRoom(Room *room) {
                     break;
 
                 case TOGGLE_BIT:
-                    fprintf(stderr, "{.type = TOGGLE_BIT, .on = %x, .off = %x, .msb_without_on_and_off = %x, .global_switch_id? = %d}",
-                            chunk->on, chunk->off, chunk->msb & ~(0xc0 | 0x3c), chunk->lsb);
+                    // Only does this if switch_structs[unknown(f) + i / 3] has {0x2, 0x8, 0x20, 0x80}[i] set
+                    // Note i is switch index, not chunk->index, or chunk_idx
+                    fprintf(stderr, "{.type = TOGGLE_BIT, .on = %x, .off = %x, .index = %d, .bitmask = 0x%02x}",
+                            chunk->on, chunk->off, chunk->index, chunk->bitmask);
+                    fprintf(stderr, " only when global_switches[%ld] has bitmask %02x",
+                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]);
                     break;
 
-                case UNKNOWN:
-                    fprintf(stderr, "{.type = UNKNOWN, .msb = %02x, .lsb = %02x}",
-                            chunk->msb, chunk->lsb);
+                case TOGGLE_OBJECT:
+                    fprintf(stderr, "{.type = TOGGLE_OBJECT, .index = %d, .test = %02x, value = 0x%02x}",
+                            chunk->index, chunk->test, chunk->value);
+                    fprintf(stderr, " only when global_switches[%ld] has bitmask %02x",
+                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]);
                     break;
 
                 default:
@@ -539,14 +545,6 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
         ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, msb = msb, .lsb = lsb }));
 
-        // The assembly has two tracks here
-        // it stores a list of switch states in 0x90-??
-        // if & 0xc0 == 0x40
-        // else if & 0xc0 == 0x80
-        //  - same as code below
-        // else
-        //
-
         while (data_idx < tmp.decompressed.length && (tmp.decompressed.data[data_idx] & 0xc0) != 0x00) {
             read_next(msb, tmp.decompressed);
             read_next(lsb, tmp.decompressed);
@@ -564,18 +562,32 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                 }; break;
 
                 case 0x40: {
+                    // Only does this if switch_structs[unknown(f) + i / 3] has {0x2, 0x8, 0x20, 0x80}[i] set
                     uint8_t on = (msb >> 4) & 0x3;
                     uint8_t off = (msb >> 2) & 0x3;
-                    // Unsure about 0b00000011
-                    ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BIT, .on = on, .off = off, .msb = msb, .lsb = lsb }));
+                    uint8_t bitmask = (uint8_t[]){0x01, 0x04, 0x10, 0x40}[msb & 0x3];
+                    // removes bit, sets bit << 1
+                    // Note that this static array index is based purely on byte, not on switch index
+                    uint8_t index = lsb;
+                    // This seems to be the index that is set, not the index that is checked
+                    ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BIT, .on = on, .off = off, .bitmask = bitmask, .index = index }));
                 }; break;
 
                 case 0xc0: {
+                    // Only does this if switch_structs[unknown(f) + i / 3] has {0x2, 0x8, 0x20, 0x80}[i] set
+                    // 0b00110000 is tested against *0x1d13
+                    // msb & 0xf is index into objects
+                    // if object is block, set movertab[2] = lsb
+                    // if sprite, set movertab[2] = lsb & 0xf8, maybe | 0x80 if movertab[2] & 0x2 != 0
+                    uint8_t test = msb & 0x30;
+                    uint8_t index = msb & 0xf;
+                    ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_OBJECT, .index = index, .test = test, .value = lsb }));
 
                 }; break;
 
                 default:
-                    ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = UNKNOWN, .msb = msb, .lsb = lsb }));
+                    fprintf(stderr, "%s:%d: UNREACHABLE: Unexpected chunk type 0x%02x\n", __FILE__, __LINE__, msb);
+                    exit(1);
             }
         }
     }
@@ -733,14 +745,22 @@ bool writeRoom(Room *room, FILE *fp) {
                     decompressed[d_len++] = chunk->on;
                     break;
 
-                case TOGGLE_BIT:
-                    decompressed[d_len++] = 0x40 | ((chunk->on & 0x3) << 4) | ((chunk->off & 0x3) << 2) | (chunk->msb & ~0xfc);
-                    decompressed[d_len++] = chunk->lsb;
-                    break;
+                case TOGGLE_BIT: {
+                    uint8_t mask_idx = 4;
+                    switch(chunk->bitmask) {
+                        case 0x01: mask_idx = 0; break;
+                        case 0x04: mask_idx = 1; break;
+                        case 0x10: mask_idx = 2; break;
+                        case 0x40: mask_idx = 3; break;
+                    }
+                    assert(mask_idx < 4);
+                    decompressed[d_len++] = 0x40 | ((chunk->on & 0x3) << 4) | ((chunk->off & 0x3) << 2) | (mask_idx & 0x3);
+                    decompressed[d_len++] = chunk->index;
+                }; break;
 
-                case UNKNOWN:
-                    decompressed[d_len++] = chunk->msb;
-                    decompressed[d_len++] = chunk->lsb;
+                case TOGGLE_OBJECT:
+                    decompressed[d_len++] = 0xc0 | (chunk->test & 0x30) | (chunk->index & 0xf);
+                    decompressed[d_len++] = chunk->value;
                     break;
 
                 default:
@@ -1341,6 +1361,14 @@ int main(int argc, char **argv) {
                                     addr += offsetof(struct SwitchChunk, msb);
                                 } else if (strcmp(end, "].lsb") == 0 || strcmp(end, "].lsb_without_x") == 0 || strcmp(end, "].global_switch_id") == 0) {
                                     addr += offsetof(struct SwitchChunk, lsb);
+                                } else if (strcmp(end, "].index") == 0) {
+                                    addr += offsetof(struct SwitchChunk, index);
+                                } else if (strcmp(end, "].bitmask") == 0) {
+                                    addr += offsetof(struct SwitchChunk, bitmask);
+                                } else if (strcmp(end, "].test") == 0) {
+                                    addr += offsetof(struct SwitchChunk, test);
+                                } else if (strcmp(end, "].value") == 0) {
+                                    addr += offsetof(struct SwitchChunk, value);
                                 } else if (strcmp(end, "].type") == 0) {
                                     addr += offsetof(struct SwitchChunk, type);
                                     _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
@@ -1355,8 +1383,8 @@ int main(int argc, char **argv) {
                                         value = TOGGLE_BLOCK;
                                     } else if (strcasecmp(argv[1], "TOGGLE_BIT") == 0) {
                                         value = TOGGLE_BIT;
-                                    } else if (strcasecmp(argv[1], "UNKNOWN") == 0) {
-                                        value = UNKNOWN;
+                                    } else if (strcasecmp(argv[1], "TOGGLE_OBJECT") == 0) {
+                                        value = TOGGLE_OBJECT;
                                     } else {
                                         value = strtol(argv[1], &end, 0);
                                         if (value < 0 || value >= NUM_CHUNK_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
