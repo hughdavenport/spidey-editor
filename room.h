@@ -31,6 +31,7 @@ enum RoomObjectType {
 enum SwitchChunkType {
     PREAMBLE,
     TOGGLE_BLOCK,
+    TOGGLE_BIT,
     UNKNOWN,
 
     NUM_CHUNK_TYPES // _Static_asserts depend on this being at the end

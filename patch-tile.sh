@@ -25,7 +25,7 @@ for x in {16..24}; do
     ./a.out patch $room tile[$x][$((y-2))] $((tile+128))
     ./a.out patch $room tile[$x][$y] $((tile+64))
 done
-for x in {24..30}; do
+for x in {0..30}; do
     ./a.out patch $room tile[$x][$((y-1))] $tile
     ./a.out patch $room tile[$x][$y] $((tile+64))
 done
