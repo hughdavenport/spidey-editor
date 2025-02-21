@@ -559,6 +559,7 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                     enum SwitchChunkDirection dir = ((msb & 0x20) == 0) ? HORIZONTAL : VERTICAL;
                     read_next(off, tmp.decompressed);
                     read_next(on, tmp.decompressed);
+                    // All bits accounted for
                     ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK, .x = x, .y = y, .size = size, .dir = dir, .off = off, .on = on }));
                 }; break;
 
@@ -569,7 +570,10 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                     ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BIT, .on = on, .off = off, .msb = msb, .lsb = lsb }));
                 }; break;
 
-                case 0xc0:
+                case 0xc0: {
+
+                }; break;
+
                 default:
                     ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = UNKNOWN, .msb = msb, .lsb = lsb }));
             }
@@ -730,7 +734,7 @@ bool writeRoom(Room *room, FILE *fp) {
                     break;
 
                 case TOGGLE_BIT:
-                    decompressed[d_len++] = 0x40 | (chunk->on << 4) | (chunk->off << 2) | (chunk->msb & ~0xfc);
+                    decompressed[d_len++] = 0x40 | ((chunk->on & 0x3) << 4) | ((chunk->off & 0x3) << 2) | (chunk->msb & ~0xfc);
                     decompressed[d_len++] = chunk->lsb;
                     break;
 
