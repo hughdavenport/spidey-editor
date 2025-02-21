@@ -1,0 +1,46 @@
+Reading file ROOMS.SPL.
+WARNING: Room 6 (Black Thunder           ) object 0 y+height is out of bounds (22 >= 22)
+WARNING: Room 28 (The Lab                 ) object 0 y+height is out of bounds (22 >= 22)
+Room 0 @0x0082: "Test room               "
+  Tiles:
+                                                                                                   
+       [41;30;1m22[m                                                                                          
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+                                                                                                   
+    8e 8e 8e 8e 8e 8e 8e 8e 8e                                                                     
+    4e 4e 4e 4e 4e 4e 4e 4e                                                                        
+  Tile offset: 0
+  Background: 0
+  Room North: 1
+  Room East: 1
+  Room South: 1
+  Room West: 1
+  UNKNOWN (a): 1 0x01
+  Gravity vertical: 4
+  Gravity horizontal: 0
+  UNKNOWN (b): 1 0x01
+  UNKNOWN (c): 0 0x00
+  number of moving objects: 1
+  UNKNOWN (e) (num of switches << 2 | lower 3 bits for bx): 0 0x00 
+  number of switches: 0
+  UNKNOWN (f) (upper 8 bits of bx): 0 0x00
+  Moving objects (length=1):
+    [41;30;1m{.type = SPRITE, .x = 1, .y = 1, .sprite = BLUE_MAN, .damage = 2}[m
+  Switches (length=0):
+  Left over data (length=1): [0x00]

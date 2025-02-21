@@ -1,0 +1,68 @@
+unknown[c] needs to be set for first sprite to show up
+movertab.dat seems to control other sprites (first set of 3 bytes is 0)
+
+unknown[c]
+0x00 - not there
+0x01 - going left, but x + 2
+0x02 - going right, x on the spot
+0x03 - not there
+0x04 - not there
+0x05 - going right, x on the spot
+0x06 - going right, x on the spot
+0x07 - not there
+0x08 - not there
+0x09 - not there
+0x0a - not there
+0x0b - going left, x - 1
+0x0c - going right, x on the spot
+0x0d - going right, x on the spot
+0x0e - going right, x on the spot
+0x0f - not there
+0x10 - going right, x on the spot
+0x11 - going right, x on the spot
+0x12 - not there
+0x13 - not there
+0x14 - not there
+0x15 - going right, x on the spot
+0x16 - not there
+0x17 - not there
+0x18 - not there
+0x19 - going right, x on the spot
+0x1a - facing right, x + 1, frozen
+0x1b - not there
+0x1c - not there
+0x1d - not there
+0x1e - not there
+0x1f - going right, x on the spot
+0x20 - not there
+0x21 - not there
+0x22 - not there
+0x23 - going right, x on the spot, gets stuck at when turning around
+0x24 - not there
+0x25 - not there
+0x26 - not there
+0x27 - going right, x on the spot
+0x28 - not there
+0x29 - not there
+0x2a - not there
+0x2b - not there
+0x2c - facing right, x + 1, frozen
+0x2d - facing right, x + 1, frozen
+0x2e - facing right, x + 1, frozen
+0x2f - facing right, x + 1, frozen
+0x30 - going right, x on the spot
+0x31 - not there
+0x32 - going right, x on the spot
+0x33 - not there
+0x34 - going right, x on the spot, freezes at end
+0x35 - going right, x on the spot
+0x36 - not there
+0x37 - going right, x on the spot, freezes at end
+0x38 - facing right, x + 1, frozen
+0x39 - not there
+0x3a - going right, x on the spot
+0x3b - not there
+0x3c - going right, x on the spot
+0x3d - not there
+0x3e - going right, x on the spot
+0x3f - going right, x on the spot
