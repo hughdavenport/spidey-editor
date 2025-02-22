@@ -104,7 +104,7 @@ void dumpRoom(Room *room) {
                     if (x >= object->x && x < object->x + object->block.width &&
                         y >= object->y && y < object->y + object->block.height) {
 
-                        fprintf(stderr, "\033[3%ld;1m", (o % 8) + 1);
+                        fprintf(stderr, "\033[3%ld;1m", (o % 7) + 1);
                         colored = true;
                         assert(object->tiles != NULL);
                         int o_x = x - object->x;
@@ -115,7 +115,7 @@ void dumpRoom(Room *room) {
 
                 case SPRITE:
                     if (x == object->x && y == object->y) {
-                        fprintf(stderr, "\033[4%ld;30;1m", (o % 3) + 1);
+                        fprintf(stderr, "\033[4%ld;30;1m", (o % 7) + 1);
                         colored = true;
                         tile = object->sprite.type << 4 | object->sprite.damage;
                     }
@@ -126,7 +126,7 @@ void dumpRoom(Room *room) {
             struct SwitchObject *sw = room->data.switches + s;
             assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
             if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
-                fprintf(stderr, "\033[4%ld;30;1m", (s % 3) + 4);
+                fprintf(stderr, "\033[4%ld;30;1m", ((s + room->data.num_objects) % 7) + 1);
                 colored = true;
             }
         }
@@ -152,29 +152,29 @@ void dumpRoom(Room *room) {
     fprintf(stderr, "  Gravity vertical: %u\n", room->data.gravity_vertical);
     fprintf(stderr, "  Gravity horizontal: %u\n", room->data.gravity_horizontal);
 
-    fprintf(stderr, "  UNKNOWN (b): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
+    fprintf(stderr, "  UNKNOWN (b) (base offset / 3 (i.e. index) into movertab.dat): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
     fprintf(stderr, "  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
     fprintf(stderr, "  number of moving objects: %d\n", room->data.num_objects);
     fprintf(stderr, "  number of switches: %d\n", room->data.num_switches);
-    fprintf(stderr, "  UNKNOWN (e) (without num switches, just lower 3 bits for bx): %d 0x%02x \n", room->data._num_switches & 0x7, room->data._num_switches & 0x7);
-    fprintf(stderr, "  UNKNOWN (f) (upper 8 bits of bx): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
+    fprintf(stderr, "  UNKNOWN (e) (base idx into {0x2,0x8,0x20,0x80} for bitmask for switch tests): %d 0x%02x \n", room->data._num_switches & 0x3, room->data._num_switches & 0x3);
+    fprintf(stderr, "  UNKNOWN (f) (base global_switch index): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
 
     fprintf(stderr, "  Moving objects (length=%u):\n", room->data.num_objects);
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         switch (room->data.objects[i].type) {
             case BLOCK:
-                fprintf(stderr, "    \033[3%ld;1m", (i % 8) + 1);
+                fprintf(stderr, "    \033[3%ld;1m", (i % 7) + 1);
                 fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}",
                         "BLOCK",
                         room->data.objects[i].x, room->data.objects[i].y,
                         room->data.objects[i].block.width, room->data.objects[i].block.height);
                 for (size_t y = 0; y < room->data.objects[i].block.height; y ++) {
                     fprintf(stderr, "\033[m\n");
-                    fprintf(stderr, "        \033[3%ld;1m", (i % 8) + 1);
+                    fprintf(stderr, "        \033[3%ld;1m", (i % 7) + 1);
                     for (size_t x = 0; x < room->data.objects[i].block.width; x ++) {
                         uint8_t tile = room->data.objects[i].tiles[y * room->data.objects[i].block.width + x];
                         if (tile == BLANK_TILE) {
-                            fprintf(stderr, "\033[m  \033[3%ld;1m", (i % 8) + 1);
+                            fprintf(stderr, "\033[m  \033[3%ld;1m", (i % 7) + 1);
                         } else  {
                             fprintf(stderr, "%02x", tile);
                         }
@@ -183,7 +183,7 @@ void dumpRoom(Room *room) {
                 break;
 
             case SPRITE:
-                fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 1);
+                fprintf(stderr, "    \033[4%ld;30;1m", (i % 7) + 1);
                 fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .sprite = ",
                         "SPRITE",
                         room->data.objects[i].x, room->data.objects[i].y);
@@ -211,13 +211,13 @@ void dumpRoom(Room *room) {
 
     fprintf(stderr, "  Switches (length=%u):\n", room->data.num_switches);
     for (size_t i = 0; i < room->data.num_switches; i ++) {
-        fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 4);
+        fprintf(stderr, "    \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
         assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
         fprintf(stderr, "{.x = %d, .y = %d",
                 room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y);
         fprintf(stderr, ", .chunks (num=%lu) = [", room->data.switches[i].chunks.length);
         for (size_t c = 0; c < room->data.switches[i].chunks.length; c ++) {
-            fprintf(stderr, "\033[m\n        \033[4%ld;30;1m", (i % 3) + 4);
+            fprintf(stderr, "\033[m\n        \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
             struct SwitchChunk *chunk = room->data.switches[i].chunks.data + c;
             _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
             switch (chunk->type) {
@@ -237,15 +237,40 @@ void dumpRoom(Room *room) {
                     // Note i is switch index, not chunk->index, or chunk_idx
                     fprintf(stderr, "{.type = TOGGLE_BIT, .on = %x, .off = %x, .index = %d, .bitmask = 0x%02x}",
                             chunk->on, chunk->off, chunk->index, chunk->bitmask);
-                    fprintf(stderr, " only when global_switches[%ld] has bitmask %02x",
+
+                    fprintf(stderr, "\033[m\n");
+                    fprintf(stderr, "            if global_switches[%ld] has bitmask %02x (staticly defined)\n",
                             room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]);
+                    fprintf(stderr, "                remove that mask\n");
+                    fprintf(stderr, "                *0x1d13 (flags?) is set to 0x20 when global_switches[%ld] has bitmask %02x\n",
+                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x1, 0x4, 0x10, 0x40}[((room->data._num_switches & 0x3) + i) % 4]);
+                    fprintf(stderr, "                if (*0x1d13 (flags?) is set)\n");
+                    fprintf(stderr, "                    if (.on (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n",
+                            chunk->on, chunk->index, chunk->bitmask);
+                    fprintf(stderr, "                    or (.on (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n",
+                            chunk->on, chunk->index, chunk->bitmask);
+                    fprintf(stderr, "                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)\n",
+                            chunk->bitmask, chunk->bitmask << 1);
+                    fprintf(stderr, "                else if (*0x1d13 (flags?) is not set)\n");
+                    fprintf(stderr, "                    if (.off (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n",
+                            chunk->off, chunk->index, chunk->bitmask);
+                    fprintf(stderr, "                    or (.off (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n",
+                            chunk->off, chunk->index, chunk->bitmask);
+                    fprintf(stderr, "                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)",
+                            chunk->bitmask, chunk->bitmask << 1);
                     break;
 
                 case TOGGLE_OBJECT:
                     fprintf(stderr, "{.type = TOGGLE_OBJECT, .index = %d, .test = %02x, value = 0x%02x}",
                             chunk->index, chunk->test, chunk->value);
-                    fprintf(stderr, " only when global_switches[%ld] has bitmask %02x",
+                    fprintf(stderr, "\033[m\n");
+                    fprintf(stderr, "            if global_switches[%ld] has bitmask %02x (staticly defined)\n",
                             room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]);
+                    fprintf(stderr, "                remove that mask\n");
+                    fprintf(stderr, "                *0x1d13 (flags?) is set to 0x20 when global_switches[%ld] has bitmask %02x\n",
+                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x1, 0x4, 0x10, 0x40}[((room->data._num_switches & 0x3) + i) % 4]);
+                    fprintf(stderr, "                if *0x1d13 (flags?) != %02x (.test)\n", chunk->test);
+                    fprintf(stderr, "                    set movertab entry[2] to 0x%02x (.value)\n", chunk->value);
                     break;
 
                 default:
@@ -254,7 +279,7 @@ void dumpRoom(Room *room) {
                     break;
             }
         }
-        fprintf(stderr, "\033[m\n    \033[4%ld;30;1m", (i % 3) + 4);
+        fprintf(stderr, "\033[m\n    \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
         fprintf(stderr, "]}");
         fprintf(stderr, "\033[m\n");
     }
@@ -672,6 +697,7 @@ bool writeRoom(Room *room, FILE *fp) {
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         if (room->data.objects[i].type == SPRITE) continue; // No tile data
         if (room->data.objects[i].tiles == NULL) continue;
+        if(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].block.height >= HEIGHT_TILES) continue;
         assert(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].block.height < HEIGHT_TILES);
         for (size_t y = room->data.objects[i].y; y < room->data.objects[i].y + room->data.objects[i].block.height; y ++) {
             memcpy(
