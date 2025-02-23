@@ -189,6 +189,11 @@ struct {
 0x9293 = 0x0002
 
 bp {
+    +0x00   0x92ba
+    ...
+    +0x2f   0x92e9    = 0xc0 (static, at 1000:3378)
+    +0x30   0x92ea    = 0x00 (static, just after)
+bp+0x32 {
     +0x00   0x92ec    = 0x04 (static)
     +0x01-2 0x92ed-f  = (0x00d0 + (u8)*0xab37) - 0xa = 0x00e8 (x + movertab[].delta_x + delta_table[movertab[].type & 0x7])
                       = later gets set to 0xed   // ax = delta_table[delta_table[movertab[].type & 0x7]].1 + ((x + movertab[].delta_x + delta_table[movertab[].type & 0x7] + 0xa) & 0xf8) - 0xa
