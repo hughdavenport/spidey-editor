@@ -223,7 +223,7 @@ void dumpRoom(Room *room) {
             switch (chunk->type) {
                 case PREAMBLE:
                     assert(c == 0);
-                    fprintf(stderr, "{.type = PREAMBLE, .x = %d, .y = %d, .msb_without_y = %02x, .lsb_without_x = %02x, msb i don't know mask 0x80|0x40, and 0x20, lsb the same}",
+                    fprintf(stderr, "{.type = PREAMBLE, .x = %d, .y = %d, .msb_without_y = %02x, .lsb_without_x = %02x, msb i don't know mask 0x80|0x40, and 0x20, lsb the same, i think lsb and parts of msb are used }, lsb&0x80 seems to control whether switch activates on room entry rather than touching it",
                             chunk->x, chunk->y, chunk->msb & ~0x1f, chunk->lsb & ~0x1f);
                     break;
 

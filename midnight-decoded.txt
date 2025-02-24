@@ -9,6 +9,7 @@ struct{
     u8 type;
     // bottom threee bits of type are an index into a u16 table 0xa9e3 (1000:8e11 in ghidra)
     // that table is a further delta_x/y pair
+
 }
 
 0x87 - current room, starts as 0x1
@@ -138,7 +139,7 @@ reads rooms.spl at 1000:320e
 
 memory:
 0x1b39 = 0x1b5c (points to last object)
-
+ (static, seems to be a pointer)
 struct {
     0x1b49   = 0x2f   (first byte)
     0x1b4a-b = 0x0f08 (offset to heli switch) // x = byte1 & 0x1f, y = byte2 & 0x1f
@@ -191,8 +192,11 @@ struct {
 bp {
     +0x00   0x92ba
     ...
+    +0x29   0x92e2    = 0x9b86 (static, seems to be a pointer)
     +0x2f   0x92e9    = 0xc0 (static, at 1000:3378)
     +0x30   0x92ea    = 0x00 (static, just after)
+}
+
 bp+0x32 {
     +0x00   0x92ec    = 0x04 (static)
     +0x01-2 0x92ed-f  = (0x00d0 + (u8)*0xab37) - 0xa = 0x00e8 (x + movertab[].delta_x + delta_table[movertab[].type & 0x7])
