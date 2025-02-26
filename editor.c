@@ -24,7 +24,15 @@
 #include <time.h>
 #define TIME_NEWER(t1, t2) (((t1).tv_sec > (t2).tv_sec) || (((t1).tv_sec == (t2).tv_sec) && (t1).tv_nsec > (t2).tv_nsec))
 
-#define UNREACHABLE() do { fprintf(stderr, "%s:%d: UNREACHABLE\n", __FILE__, __LINE__); exit(1); } while (false)
+#define UNREACHABLE() do { \
+    fprintf(stderr, "%s:%d: UNREACHABLE\n", __FILE__, __LINE__); \
+    if (state != NULL) { \
+        assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0); \
+        freeRoomFile(&state->rooms); \
+        free(state); \
+    } \
+    exit(1); \
+} while (false)
 
 #define LIBRARY_BUILD_CMD "cc -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c -o"
 
@@ -41,10 +49,10 @@
 
 #define RESET_GFX_MODE "\x1b[0m"
 #define CLEAR_SCREEN   "\x1b[0J"
-#define GOTO(x, y)     do { \
-    assert((x) < MIN_WIDTH && "width out of bounds"); \
-    assert((y) < MIN_HEIGHT && "height out of bounds"); \
-    printf("\x1b[%d;%dH", (y) + 1, (x) + 1); \
+#define GOTO(_x, _y)     do { \
+    assert((_x) < state->screen_dimensions.x && "width out of bounds"); \
+    assert((_y) < state->screen_dimensions.y && "height out of bounds"); \
+    printf("\x1b[%d;%dH", (_y) + 1, (_x) + 1); \
 } while (false)
 
 #define UP    "\x1b[A"
@@ -84,9 +92,14 @@
 #define F12  "\x1b[24~"
 
 #define ESCAPE '\033'
-#define CTRL_H '\010'
+#define CTRL_A "\001"
+#define CTRL_D "\004"
+#define CTRL_O "\017"
+#define CTRL_S "\023"
+#define CTRL_T "\024"
+#define CTRL_H "\010"
 
-#define MIN_HEIGHT HEIGHT_TILES + 2
+#define MIN_HEIGHT HEIGHT_TILES + 5
 #define MIN_WIDTH 2 * WIDTH_TILES
 
 #include "room.h"
@@ -97,14 +110,23 @@ typedef struct {
 } v2;
 
 typedef struct {
+    size_t size;
     v2 player;
     v2 screen_dimensions;
     struct termios original_termios;
     RoomFile rooms;
     bool resized;
-    size_t level;
+    size_t playerlevel;
+    bool help;
     bool debug;
-    bool hex;
+    bool debughex;
+    bool debugdata;
+    bool debugobjects;
+    bool debugswitches;
+    bool tileedit;
+    size_t editlevel;
+    v2 tileeditpos;
+    uint16_t editbyte;
 } game_state;
 game_state *state = NULL;
 
@@ -134,33 +156,98 @@ void process_input() {
         while (i < n) {
             char *match = NULL;
 #define KEY_MATCHES(key) ((strncmp(buf + i, (key), strlen((key))) == 0) && (match = key))
-            if (KEY_MATCHES("q")) {
+            v2 *thing = NULL;
+            size_t *thinglevel = NULL;
+            if (state->tileedit) {
+                thing = &state->tileeditpos;
+                thinglevel = &state->editlevel;
+            } else {
+                thing = &state->player;
+                thinglevel = &state->playerlevel;
+            }
+
+            if (state->tileedit && isxdigit(buf[i])) {
+                uint8_t b = 0;
+                if (isdigit(buf[i])) {
+                    b = *buf - '0';
+                } else {
+                    b = 10 + tolower(buf[i]) - 'a';
+                }
+                if ((state->editbyte & 0xFF00) != 0) {
+                    b = (state->editbyte & 0xFF) | b;
+                    bool obj = false;
+                    int x = state->tileeditpos.x;
+                    int y = state->tileeditpos.y;
+                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+                    for (size_t i = 0; i < room->num_objects; i ++) {
+                        struct RoomObject *object = room->objects + i;
+                        if (object->type == BLOCK &&
+                                x >= object->x && x < object->x + object->block.width &&
+                                y >= object->y && y < object->y + object->block.height) {
+                            obj = true;
+                            object->tiles[(y - object->y) * object->block.width + (x - object->x)] = b;
+                            break;
+                        }
+                    }
+                    if (!obj) room->tiles[y * WIDTH_TILES + x] = b;
+                    ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                    assert(writeRooms(&state->rooms));
+                    state->editbyte = 0;
+                } else {
+                    state->editbyte = 0xFF00 | (b << 4);
+                }
+                i += 1;
+                continue;
+            } else if (KEY_MATCHES("q")) {
                 end();
                 UNREACHABLE();
-            } else if (KEY_MATCHES("a") || KEY_MATCHES(LEFT) || KEY_MATCHES("h")) {
-                state->player.x --;
-                if (state->player.x < 0) {
-                    state->level = state->rooms.rooms[state->level].data.room_west;
-                    state->player.x = WIDTH_TILES - 1;
+            } else if (KEY_MATCHES("?")) {
+                state->help = !state->help;
+            } else if (state->editbyte == 0 || !state->tileedit) {
+                if (KEY_MATCHES("a") || KEY_MATCHES(LEFT) || KEY_MATCHES("h")) {
+                    thing->x --;
+                    if (thing->x < 0) {
+                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_west;
+                        thing->x = WIDTH_TILES - 1;
+                    }
+                } else if (KEY_MATCHES("d") || KEY_MATCHES(RIGHT) || KEY_MATCHES("l")) {
+                    thing->x ++;
+                    if (thing->x >= WIDTH_TILES) {
+                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_east;
+                        thing->x = 0;
+                    }
+                } else if (KEY_MATCHES("w") || KEY_MATCHES(UP) || KEY_MATCHES("k")) {
+                    thing->y --;
+                    if (thing->y < 0) {
+                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_north;
+                        thing->y = HEIGHT_TILES - 1;
+                    }
+                } else if (KEY_MATCHES("s") || KEY_MATCHES(DOWN) || KEY_MATCHES("j")) {
+                    thing->y ++;
+                    if (thing->y >= HEIGHT_TILES) {
+                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_south;
+                        thing->y = 0;
+                    }
+                } else if (KEY_MATCHES(CTRL_T)) {
+                    state->tileedit = !state->tileedit;
                 }
-            } else if (KEY_MATCHES("d") || KEY_MATCHES(RIGHT) || KEY_MATCHES("l")) {
-                state->player.x ++;
-                if (state->player.x >= WIDTH_TILES) {
-                    state->level = state->rooms.rooms[state->level].data.room_east;
-                    state->player.x = 0;
-                }
-            } else if (KEY_MATCHES("w") || KEY_MATCHES(UP) || KEY_MATCHES("k")) {
-                state->player.y --;
-                if (state->player.y < 0) {
-                    state->level = state->rooms.rooms[state->level].data.room_north;
-                    state->player.y = HEIGHT_TILES - 1;
-                }
-            } else if (KEY_MATCHES("s") || KEY_MATCHES(DOWN) || KEY_MATCHES("j")) {
-                state->player.y ++;
-                if (state->player.y >= HEIGHT_TILES) {
-                    state->level = state->rooms.rooms[state->level].data.room_south;
-                    state->player.y = 0;
-                }
+            }
+            if (KEY_MATCHES(CTRL_H)) {
+                state->debughex = !state->debughex;
+                state->debug = true;
+            } else if (KEY_MATCHES(CTRL_A)) {
+                state->debugdata = !state->debugdata;
+                state->debugobjects = !state->debugobjects;
+                state->debugswitches = !state->debugswitches;
+            } else if (KEY_MATCHES(CTRL_D)) {
+                state->debugdata = !state->debugdata;
+                state->debug = true;
+            } else if (KEY_MATCHES(CTRL_O)) {
+                state->debugobjects = !state->debugobjects;
+                state->debug = true;
+            } else if (KEY_MATCHES(CTRL_S)) {
+                state->debugswitches = !state->debugswitches;
+                state->debug = true;
             }
 
             if (match != NULL) {
@@ -179,25 +266,22 @@ void process_input() {
                                         while (i < n && (isdigit(buf[i]) || buf[i] == ';')) i ++;
                                         i ++;
                                     } else {
-                                        // alt
                                         UNREACHABLE();
                                     }
                                     break;
 
                                 default:
-                                    UNREACHABLE();
+                                    i += 2;
                                     break;
                             }
                         } else {
-                            state->debug = !state->debug;
+                            if ((state->editbyte & 0xFF00) != 0) {
+                                state->editbyte = 0;
+                            } else {
+                                state->debug = !state->debug;
+                            }
                             i += 1; // Single escape
                         }
-                        break;
-
-                    case CTRL_H:
-                        state->hex = !state->hex;
-                        state->debug = true;
-                        i += 1;
                         break;
 
                     default:
@@ -240,7 +324,8 @@ void redraw() {
         return;
     }
 
-    struct DecompresssedRoom room = state->rooms.rooms[state->level].data;
+    size_t level = state->tileedit ? state->editlevel : state->playerlevel;
+    struct DecompresssedRoom room = state->rooms.rooms[level].data;
     GOTO(16, 0);
     /* char name[24]; */
     /* printf("%24s", room.name); */
@@ -253,6 +338,7 @@ void redraw() {
             uint8_t tile = room.tiles[y * WIDTH_TILES + x];
             if (tile != BLANK_TILE) {
                 bool colored = false;
+                if (state->debugswitches)
                 for (int s = 0; s < room.num_switches; s ++) {
                     struct SwitchObject *sw = room.switches + s;
                     assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
@@ -269,6 +355,7 @@ void redraw() {
         }
     }
 
+    if (state->debugobjects)
     for (size_t i = 0; i < room.num_objects; i ++) {
         struct RoomObject *object = room.objects + i;
         assert(object->x >= 0);
@@ -277,8 +364,8 @@ void redraw() {
         assert(object->y < HEIGHT_TILES);
         switch (object->type) {
             case BLOCK:
-                assert(object->x + object->block.width < WIDTH_TILES);
-                assert(object->y + object->block.height < HEIGHT_TILES);
+                assert(object->x + object->block.width <= WIDTH_TILES);
+                assert(object->y + object->block.height <= HEIGHT_TILES);
                 printf("\033[3%ld;1m", (i % 8) + 1);
                 for (int y = object->y; y < object->y + object->block.height; y ++) {
                     GOTO(2 * object->x, y + 1);
@@ -301,39 +388,138 @@ void redraw() {
         printf("\033[m");
     }
 
+    if (state->tileedit) {
+        int x = state->tileeditpos.x;
+        int y = state->tileeditpos.y;
+        assert(x >= 0);
+        assert(y >= 0);
+        assert(x < WIDTH_TILES);
+        assert(y < HEIGHT_TILES);
+        GOTO(2 * x, y + 1);
+        uint8_t tile = room.tiles[y * WIDTH_TILES + x];
+        bool obj = false;
+        size_t i;
+        for (i = 0; i < room.num_objects; i ++) {
+            struct RoomObject *object = room.objects + i;
+            if (object->type == BLOCK &&
+                    x >= object->x && x < object->x + object->block.width &&
+                    y >= object->y && y < object->y + object->block.height) {
+                obj = true;
+                tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
+                printf("\033[30;4%ldm", (i % 8) + 1);
+                break;
+            }
+        }
+        if (obj) {
+            printf("%02X\033[m", tile);
+        } else {
+            printf("\033[47;30m%02X\033[m", tile);
+        }
+        if (state->editbyte) {
+            GOTO(2 * x, y + 1);
+            if (obj) {
+                printf("\033[3%ld;1m", (i % 8) + 1);
+            } else {
+                printf("\033[1m");
+            }
+            printf("%X\033[m", (state->editbyte & 0xFF) >> 4);
+        }
+    } else {
+        assert(state->player.x >= 0);
+        assert(state->player.y >= 0);
+        assert(state->player.x < WIDTH_TILES);
+        assert(state->player.y < HEIGHT_TILES);
+        if (state->player.y - 2 >= 0) {
+            GOTO(2 * state->player.x, state->player.y - 1);
+            printf("\033[41;30;1m@@\033[m");
+        }
+        if (state->player.y - 1 >= 0) {
+            GOTO(2 * state->player.x, state->player.y);
+            printf("\033[41;30;1m@@\033[m");
+        }
+        if (state->player.y >= 0) {
+            GOTO(2 * state->player.x, state->player.y + 1);
+            printf("\033[41;30;1m@@\033[m");
+        }
+    }
+
     if (state->debug) {
         GOTO(0, 0);
-        printf(state->hex ? "%02x,%02x" : "%d,%d", state->player.x, state->player.y);
-    }
+        v2 *thing = NULL;
+        if (state->tileedit) thing = &state->tileeditpos;
+        else thing = &state->player;
+        printf(state->debughex ? "%02x,%02x" : "%d,%d", thing->x, thing->y);
 
-    assert(state->player.x >= 0);
-    assert(state->player.y >= 0);
-    assert(state->player.x < WIDTH_TILES);
-    assert(state->player.y < HEIGHT_TILES);
-    if (state->player.y - 2 >= 0) {
-        GOTO(2 * state->player.x, state->player.y - 1);
-        printf("\033[41;30;1m@@\033[m");
-    }
-    if (state->player.y - 1 >= 0) {
-        GOTO(2 * state->player.x, state->player.y);
-        printf("\033[41;30;1m@@\033[m");
-    }
-    if (state->player.y >= 0) {
-        GOTO(2 * state->player.x, state->player.y + 1);
-        printf("\033[41;30;1m@@\033[m");
-    }
-
-    if (state->debug) {
-        GOTO(0, HEIGHT_TILES + 1);
-        uint8_array rest = state->rooms.rooms[state->level].rest;
+        int bottom = HEIGHT_TILES + 1;
+        if (state->debugdata) {
+            GOTO(0, bottom); bottom ++;
+            printf("UNIMPLEMENTED: debugdata");
+        }
+        if (state->debugobjects) {
+            GOTO(0, bottom); bottom ++;
+            printf("UNIMPLEMENTED: debugobjects");
+        }
+        if (state->debugswitches) {
+            GOTO(0, bottom); bottom ++;
+            printf("UNIMPLEMENTED: debugswitches");
+        }
+        GOTO(0, bottom); bottom ++;
+        uint8_array rest = state->rooms.rooms[level].rest;
         int pre = printf("Rest (length=%zu):", rest.length);
         for (size_t i = 0; i < rest.length; i ++) {
             if (pre + 3 * (i + 2) > state->screen_dimensions.x) {
                 printf("...");
                 break;
             }
-            printf(state->hex ? " %02x" : " %d", rest.data[i]);
+            printf(state->debughex ? " %02x" : " %d", rest.data[i]);
         }
+    }
+
+    if (state->help) {
+        // 35x10
+        int y = 16;
+        int x = 40;
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
+        printf("\033[47;30;1m");
+        printf("+--------------------------------------+\033[m ");
+        for (int _y = 1; _y < y - 1; _y ++) {
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + _y);
+            printf("\033[47;30;1;m|%*s|\033[40;37;1m ", x - 2, "");
+        }
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + (y - 2));
+        printf("\033[47;30;1m");
+        printf("+--------------------------------------+\033[40;37;1m ");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + (y - 1));
+        printf("\033[m \033[40;37;1m%*s", x, "");
+        printf("\033[47;30;1m");
+
+        int line = 1;
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "w/Up/k    - Move spidey up");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "a/Left/h  - Move spidey left");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "s/Down/j  - Move spidey down");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "d/Right/l - Move spidey right");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "q         - quit");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "?         - toggle help");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Escape    - toggle debug info");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-h    - toggle hex in debug info");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-d    - toggle room data display");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-o    - toggle room object display");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-s    - toggle room switch display");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-t    - toggle tile edit mode");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-a    - toggle all debug info");
     }
 
     fflush(stdout);
@@ -360,19 +546,17 @@ void setup() {
 
     state = calloc(1, sizeof(game_state));
     assert(state != NULL && "Not enough memory");
+    state->size = sizeof(game_state);
 
     state->debug = true;
-    state->hex = true;
+    state->debughex = true;
 
     assert(tcgetattr(STDIN_FILENO, &state->original_termios) == 0);
 
     struct termios new = state->original_termios;
     new.c_lflag &= ~(ICANON | ECHO);
+    new.c_iflag &= ~(IXON | IXOFF);
     assert(tcsetattr(STDIN_FILENO, TCSANOW, &new) == 0);
-
-    signal(SIGWINCH, sigwinch_handler);
-
-    signal(SIGINT, end);
 
     get_screen_dimensions();
 
@@ -381,19 +565,31 @@ void setup() {
 
     assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
 
-    state->level = 1;
+    state->playerlevel = 1;
+    state->editlevel = 1;
 }
 
 typedef void *(*main_fn)(char *library, void *call_state);
 void *loop_main(char *library, void *call_state) {
     struct stat library_stat;
     assert(stat(library, &library_stat) == 0);
+    struct stat start_rooms_stat;
+    assert(stat("ROOMS.SPL", &start_rooms_stat) == 0);
 
     state = call_state;
+    if (state != NULL && state->size != sizeof(game_state)) {
+        free(state);
+        state = NULL;
+    }
     if (state == NULL) setup();
     else get_screen_dimensions();
+
+    signal(SIGWINCH, sigwinch_handler);
+    signal(SIGINT, end);
+
     while (true) {
         struct stat file_stat;
+        struct stat rooms_stat;
         if (stat(__FILE__, &file_stat) == 0) {
             if (TIME_NEWER(file_stat.st_mtim, library_stat.st_mtim)) {
                 // rebuild
@@ -403,6 +599,13 @@ void *loop_main(char *library, void *call_state) {
                     free(build_cmd);
                     return state;
                 }
+            }
+        }
+        if (stat("ROOMS.SPL", &rooms_stat) == 0) {
+            if (TIME_NEWER(rooms_stat.st_mtim, start_rooms_stat.st_mtim)) {
+                freeRoomFile(&state->rooms);
+                assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+                start_rooms_stat = rooms_stat;
             }
         }
 

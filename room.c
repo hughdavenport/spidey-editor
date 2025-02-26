@@ -1071,7 +1071,7 @@ typedef struct {
     PatchType type;
     uint8_t room_id;
     int address;
-    uint8_t value;
+    uint16_t value;
     bool delete;
 } PatchInstruction;
 
@@ -1083,6 +1083,16 @@ bool readRooms(RoomFile *file) {
         return false;
     }
     bool ret = readFile(file, fp);
+    fclose(fp);
+    return ret;
+}
+bool writeRooms(RoomFile *file) {
+    FILE *fp = fopen(ROOMS_FILE, "wb");
+    if (fp == NULL) {
+        fprintf(stderr, "Could not open %s for writing.\n", ROOMS_FILE);
+        return false;
+    }
+    bool ret = writeFile(file, fp);
     fclose(fp);
     return ret;
 }
@@ -1295,11 +1305,45 @@ int main(int argc, char **argv) {
                                     if (arg != argv[0]) free(arg);
                                     defer_return(1);
                                 }
-                            } else if (strncmp(end, "].tile[", 7) == 0) {
+                            } else if (strncmp(end, "].tile[", 7) == 0 || strncmp(end, "].tiles[", 8) == 0) {
                                 // Read [x][y] or [idx]
-                                fprintf(stderr, "%s:%d: UNIMPLEMENTED\n", __FILE__, __LINE__);
-                                if (arg != argv[0]) free(arg);
-                                defer_return(1);
+                                addr += offsetof(struct RoomObject, tiles);
+                                idx = strtol(end + (end[6] == '[' ? 7 : 8), &end, 0);
+                                if (errno == EINVAL || *end != ']') {
+                                    fprintf(stderr, "Invalid tile address: %s\n", argv[0]);
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    if (arg != argv[0]) free(arg);
+                                    defer_return(1);
+                                }
+                                if (end[1] == '[') {
+                                    long y = strtol(end + 2, &end, 0);
+                                    if (errno == EINVAL || strcmp(end, "]") != 0) {
+                                        fprintf(stderr, "Invalid tile address for y: %s\n", argv[0]);
+                                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                        if (arg != argv[0]) free(arg);
+                                        defer_return(1);
+                                    }
+                                    idx = y * WIDTH_TILES + idx;
+                                }
+                                if (idx >= WIDTH_TILES * HEIGHT_TILES) {
+                                    fprintf(stderr, "Invalid tile address, too large: %s\n", argv[0]);
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    defer_return(1);
+                                }
+                                value = strtol(argv[1], &end, 0);
+                                if (errno == EINVAL || end == NULL || *end != '\0') {
+                                    fprintf(stderr, "Invalid number: %s\n", argv[1]);
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    if (arg != argv[0]) free(arg);
+                                    defer_return(1);
+                                }
+                                if (value < 0 || value > 0xFF) {
+                                    fprintf(stderr, "Value must be in the range 0..255\n");
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    if (arg != argv[0]) free(arg);
+                                    defer_return(1);
+                                }
+                                value = idx << 8 | value;
                             } else {
                                 fprintf(stderr, "Invalid object field: %s\n", arg);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
@@ -1315,12 +1359,12 @@ int main(int argc, char **argv) {
                                     if (arg != argv[0]) free(arg);
                                     defer_return(1);
                                 }
-                            }
-                            if (value < 0 || value > 0xFF) {
-                                fprintf(stderr, "Value must be in the range 0..255\n");
-                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                                if (arg != argv[0]) free(arg);
-                                defer_return(1);
+                                if (value < 0 || value > 0xFF) {
+                                    fprintf(stderr, "Value must be in the range 0..255\n");
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    if (arg != argv[0]) free(arg);
+                                    defer_return(1);
+                                }
                             }
                             if (last != NULL) free(last);
                             assert(asprintf(&last, "object[%ld]", idx) > 0);
@@ -1906,8 +1950,33 @@ int main(int argc, char **argv) {
                         }
                         int addr = patch.address % sizeof(struct RoomObject);
                         struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
-                        fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
-                        ((uint8_t *)object)[addr] = patch.value;
+                        if (addr == offsetof(struct RoomObject, tiles)) {
+                            assert(object->type == BLOCK);
+                            assert(object->tiles != NULL);
+                            uint8_t value = patch.value & 0xFF;
+                            int tile_idx = patch.value >> 8;
+                            int x = tile_idx % WIDTH_TILES;
+                            int y = tile_idx / WIDTH_TILES;
+                            tile_idx = y * object->block.width + x;
+                            fprintf(stderr, "Writing object %d tiles[%d][%d] with %02x\n", idx, x, y, value);
+                            assert(tile_idx < object->block.width * object->block.height);
+                            object->tiles[tile_idx] = value;
+                        } else {
+                            if (object->type == BLOCK) {
+                                if (addr == offsetof(struct RoomObject, block.width) && patch.value > object->block.width) {
+                                    object->tiles = realloc(object->tiles, patch.value * object->block.height);
+                                    assert(object->tiles != NULL);
+                                } else if (addr == offsetof(struct RoomObject, block.height) && patch.value > object->block.height) {
+                                    object->tiles = realloc(object->tiles, object->block.width * patch.value);
+                                    assert(object->tiles != NULL);
+                                }
+                            } else if (addr == offsetof(struct RoomObject, type) && patch.value == BLOCK) {
+                                object->tiles = realloc(object->tiles, object->block.width * object->block.height);
+                                assert(object->tiles != NULL);
+                            }
+                            fprintf(stderr, "Writing object %d at %d with %02x\n", idx, addr, patch.value);
+                            ((uint8_t *)object)[addr] = patch.value;
+                        }
                     }
                 }; break;
 

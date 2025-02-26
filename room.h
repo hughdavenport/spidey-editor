@@ -139,5 +139,6 @@ void freeRoomFile(RoomFile *file);
 bool readFile(RoomFile *file, FILE *fp);
 bool writeFile(RoomFile *file, FILE *fp);
 bool readRooms(RoomFile *file);
+bool writeRooms(RoomFile *file);
 
 #endif // ROOM_H
