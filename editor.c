@@ -199,8 +199,12 @@ void process_input() {
                 i += 1;
                 continue;
             } else if (KEY_MATCHES("q")) {
-                end();
-                UNREACHABLE();
+                if (state->help) {
+                    state->help = false;
+                } else {
+                    end();
+                    UNREACHABLE();
+                }
             } else if (KEY_MATCHES("?")) {
                 state->help = !state->help;
             } else if (state->editbyte == 0 || !state->tileedit) {
@@ -275,10 +279,14 @@ void process_input() {
                                     break;
                             }
                         } else {
-                            if ((state->editbyte & 0xFF00) != 0) {
-                                state->editbyte = 0;
+                            if (state->help) {
+                                state->help = false;
                             } else {
-                                state->debug = !state->debug;
+                                if ((state->editbyte & 0xFF00) != 0) {
+                                    state->editbyte = 0;
+                                } else {
+                                    state->debug = !state->debug;
+                                }
                             }
                             i += 1; // Single escape
                         }
@@ -467,7 +475,7 @@ void redraw() {
         uint8_array rest = state->rooms.rooms[level].rest;
         int pre = printf("Rest (length=%zu):", rest.length);
         for (size_t i = 0; i < rest.length; i ++) {
-            if (pre + 3 * (i + 2) > state->screen_dimensions.x) {
+            if (pre + 3 * (i + 2) > (size_t)state->screen_dimensions.x) {
                 printf("...");
                 break;
             }
@@ -478,10 +486,11 @@ void redraw() {
     if (state->help) {
         // 35x10
         int y = 16;
+        if (state->tileedit) y ++;
         int x = 40;
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
         printf("\033[47;30;1m");
-        printf("+--------------------------------------+\033[m ");
+        printf("+-----------------help-----------------+\033[m ");
         for (int _y = 1; _y < y - 1; _y ++) {
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + _y);
             printf("\033[47;30;1;m|%*s|\033[40;37;1m ", x - 2, "");
@@ -494,20 +503,28 @@ void redraw() {
         printf("\033[47;30;1m");
 
         int line = 1;
+        if (state->tileedit) {
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "0-9a-fA-F - Enter hex nibble");
+        }
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        printf("|%-*s|", x - 2, "w/Up/k    - Move spidey up");
+        printf("|%-*s|", x - 2, "w/Up/k    - Move cursor up");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        printf("|%-*s|", x - 2, "a/Left/h  - Move spidey left");
+        printf("|%-*s|", x - 2, "a/Left/h  - Move cursor left");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        printf("|%-*s|", x - 2, "s/Down/j  - Move spidey down");
+        printf("|%-*s|", x - 2, "s/Down/j  - Move cursor down");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        printf("|%-*s|", x - 2, "d/Right/l - Move spidey right");
+        printf("|%-*s|", x - 2, "d/Right/l - Move cursor right");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "q         - quit");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "?         - toggle help");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        printf("|%-*s|", x - 2, "Escape    - toggle debug info");
+        if (state->tileedit && (state->editbyte & 0xFF00) != 0) {
+            printf("|%-*s|", x - 2, "Escape    - cancel edit entry");
+        } else {
+            printf("|%-*s|", x - 2, "Escape    - toggle debug info");
+        }
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Ctrl-h    - toggle hex in debug info");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
@@ -567,6 +584,9 @@ void setup() {
 
     state->playerlevel = 1;
     state->editlevel = 1;
+
+    state->tileeditpos = state->player;
+    state->help = true;
 }
 
 typedef void *(*main_fn)(char *library, void *call_state);

@@ -7,6 +7,8 @@
 
 #include <string.h>
 
+#include <unistd.h>
+
 #include <arpa/inet.h>
 
 #define IO_IMPLEMENTATION
@@ -1064,6 +1066,7 @@ typedef enum {
     NORMAL,
     OBJECT,
     SWITCH,
+    TILESET,
 
     NUM_PATCH_TYPES // _Static_asserts depend on this being the last entry
 } PatchType;
@@ -1073,6 +1076,7 @@ typedef struct {
     int address;
     uint16_t value;
     bool delete;
+    char *filename;
 } PatchInstruction;
 
 #define ROOMS_FILE "ROOMS.SPL"
@@ -1141,7 +1145,17 @@ int main(int argc, char **argv) {
                 long addr = strtol(argv[0], &end, 0);
                 if (errno == EINVAL || end == NULL || *end != '\0') {
                     addr = -1;
-                    if ((strncmp(argv[0], "tile[", 5) == 0 && isdigit(argv[0][5])) || (strncmp(argv[0], "tiles[", 6) == 0 && isdigit(argv[0][6]))) {
+                    if (strcmp(argv[0], "tile") == 0 || strcmp(argv[0], "tiles") == 0) {
+                        if (access(argv[1], R_OK) != 0) {
+                            fprintf(stderr, "Could not open tile file: %s\n", argv[1]);
+                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            defer_return(1);
+                        }
+                        ARRAY_ADD(patches, ((PatchInstruction){ .type = TILESET, .room_id = room_id, .filename = argv[1], }));
+                        argc -= 2;
+                        argv += 2;
+                        continue;
+                    } else if ((strncmp(argv[0], "tile[", 5) == 0 && isdigit(argv[0][5])) || (strncmp(argv[0], "tiles[", 6) == 0 && isdigit(argv[0][6]))) {
                         // Read [x][y] or [idx]
                         long idx = strtol(argv[0] + (argv[0][4] == '[' ? 5 : 6), &end, 0);
                         if (errno == EINVAL || *end != ']') {
@@ -1818,7 +1832,7 @@ int main(int argc, char **argv) {
             if (file.rooms[i].valid) {
                 for (size_t idx = 0; idx < file.rooms[i].data.num_objects; idx ++) {
                     struct RoomObject *obj = &file.rooms[i].data.objects[idx];
-                    if (obj->type == SPRITE && obj->sprite.type == find_sprite) {
+                    if (obj->type == SPRITE && (int)obj->sprite.type == find_sprite) {
                         printf("Found sprite ");
                         switch ((SpriteType)find_sprite) {
                             case SHARK: fprintf(stderr, "SHARK\n"); break;
@@ -1904,11 +1918,11 @@ int main(int argc, char **argv) {
             if (!found) {
                 ARRAY_ADD(rooms, patch.room_id);
             }
-            _Static_assert(NUM_PATCH_TYPES == 3, "Unexpected number of patch types");
+            _Static_assert(NUM_PATCH_TYPES == 4, "Unexpected number of patch types");
             switch (patch.type) {
                 case NORMAL:
                     assert(patch.delete == false);
-                    if (patch.address >= offsetof(struct DecompresssedRoom, end_marker) || patch.address >= sizeof(file.rooms[patch.room_id].data)) {
+                    if ((unsigned)patch.address >= offsetof(struct DecompresssedRoom, end_marker) || (unsigned)patch.address >= sizeof(file.rooms[patch.room_id].data)) {
                         fprintf(stderr, "%s:%d: WARNING: Patching *rest* may not be stable currently\n", __FILE__, __LINE__);
                         if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
                             fprintf(stderr, "Address %d invalid\n", patch.address);
@@ -2003,7 +2017,7 @@ int main(int argc, char **argv) {
                             defer_return(1);
                         }
                         if (patch.delete) {
-                            if (chunk_idx >= sw->chunks.length) {
+                            if ((unsigned)chunk_idx >= sw->chunks.length) {
                                 fprintf(stderr, "Chunk id %d for switch %d in room %d is out of bounds\n", chunk_idx, idx, patch.room_id);
                                 defer_return(1);
                             }
@@ -2011,8 +2025,8 @@ int main(int argc, char **argv) {
                             memmove(sw->chunks.data + chunk_idx, sw->chunks.data + chunk_idx + 1, (sw->chunks.length - chunk_idx - 1) * sizeof(struct SwitchChunk));
                             sw->chunks.length --;
                         } else {
-                            if (chunk_idx >= sw->chunks.length) {
-                                ARRAY_ENSURE(sw->chunks, chunk_idx + 1);
+                            if ((unsigned)chunk_idx >= sw->chunks.length) {
+                                ARRAY_ENSURE(sw->chunks, (unsigned)chunk_idx + 1);
                                 sw->chunks.length = chunk_idx + 1;
                             }
                             fprintf(stderr, "Writing switch %d chunk[%d] at %d with %02x\n", idx, chunk_idx, addr, patch.value);
@@ -2053,6 +2067,102 @@ int main(int argc, char **argv) {
                             ((uint8_t *)sw)[addr] = patch.value;
                         }
                     }
+                }; break;
+
+                case TILESET: {
+                    fp = fopen(patch.filename, "r");
+                    if (fp == NULL) {
+                        fprintf(stderr, "Could not open file for reading: %s: %s", patch.filename, strerror(errno));
+                        defer_return(1);
+                    }
+
+                    assert(fseek(fp, 0L, SEEK_END) == 0);
+                    long ftold = ftell(fp);
+                    assert(ftold != -1);
+                    size_t filesize = ftold;
+                    assert(fseek(fp, 0L, SEEK_SET) == 0);
+
+                    uint8_t *data = malloc(filesize);
+                    assert(data != NULL);
+
+                    if (fread(data, sizeof(uint8_t), filesize, fp) != (size_t)filesize) {
+                        free(data);
+                        fprintf(stderr, "Could read file fully: %s: %s", patch.filename, strerror(errno));
+                        defer_return(1);
+                    }
+
+                    struct DecompresssedRoom *room = &file.rooms[patch.room_id].data;
+                    size_t tile_idx = 0;
+                    size_t data_idx = 0;
+                    uint16_t fullbyte = 0;
+                    while (tile_idx < sizeof(room->tiles)) {
+                        if (data_idx >= (size_t)filesize) {
+                            free(data);
+                            fprintf(stderr, "Could read full tileset from file: %s: Read %ld tiles\n", patch.filename, tile_idx);
+                            defer_return(1);
+                        }
+
+                        char c = data[data_idx++];
+                        if (c == '\033') {
+                            if (data_idx >= filesize) {
+                                free(data);
+                                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", patch.filename);
+                                defer_return(1);
+                            }
+
+                            if (data[data_idx] != '[') {
+                                free(data);
+                                fprintf(stderr, "Invalid escape sequence at %ld: %s\n", data_idx, patch.filename);
+                                defer_return(1);
+                            }
+                            while (data_idx < filesize && !isalpha(data[data_idx])) data_idx ++;
+                            if (data_idx >= filesize) {
+                                free(data);
+                                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", patch.filename);
+                                defer_return(1);
+                            }
+                            data_idx++;
+                        } else if (c == '\n') {
+                            if ((fullbyte & 0xFF00) != 0) {
+                                free(data);
+                                fprintf(stderr, "Unexpected newline at %ld: %s\n", data_idx - 1, patch.filename);
+                                defer_return(1);
+                            }
+                            if (tile_idx == 0 || (data_idx >= 2 && data[data_idx - 2] == '\n')) {
+                                room->tiles[tile_idx++] = 0;
+                            }
+                            while (tile_idx < WIDTH_TILES * HEIGHT_TILES && (tile_idx % WIDTH_TILES) != 0) {
+                                room->tiles[tile_idx++] = 0;
+                            }
+                            assert(tile_idx % WIDTH_TILES == 0);
+                        } else {
+                            if (c != ' ' && !isxdigit(c)) {
+                                free(data);
+                                fprintf(stderr, "Invalid hex digit at %ld: %s\n", data_idx - 1, patch.filename);
+                                defer_return(1);
+                            }
+
+                            uint8_t b = 0;
+                            if (c == ' ') b = 0;
+                            else if (isdigit(c)) b = c - '0';
+                            else b = 10 + tolower(c) - 'a';
+
+                            if ((fullbyte & 0xFF00) == 0) {
+                                fullbyte = 0xFF00 | (b << 4);
+                            } else {
+                                fullbyte = (fullbyte & 0xF0) | b;
+                                room->tiles[tile_idx++] = fullbyte;
+                            }
+                        }
+                    }
+
+                    if (data_idx < filesize) {
+                        fprintf(stderr, "WARNING: Still more file to read at %ld: %s\n", data_idx, patch.filename);
+                    }
+
+                    free(data);
+                    fclose(fp);
+                    fp = NULL;
                 }; break;
 
                 default:
