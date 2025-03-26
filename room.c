@@ -1067,6 +1067,7 @@ typedef enum {
     OBJECT,
     SWITCH,
     TILESET,
+    OBJECT_TILESET,
 
     NUM_PATCH_TYPES // _Static_asserts depend on this being the last entry
 } PatchType;
@@ -1075,6 +1076,7 @@ typedef struct {
     uint8_t room_id;
     int address;
     uint16_t value;
+    int object_id;
     bool delete;
     char *filename;
 } PatchInstruction;
@@ -1268,6 +1270,17 @@ int main(int argc, char **argv) {
                             }
                             addr = idx * sizeof(struct RoomObject);
                             long value = 0xFFFF;
+                            if (strcmp(end, "].tiles") == 0) {
+                                if (access(argv[1], R_OK) != 0) {
+                                    fprintf(stderr, "Could not open tile file: %s\n", argv[1]);
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    defer_return(1);
+                                }
+                                ARRAY_ADD(patches, ((PatchInstruction){ .type = OBJECT_TILESET, .room_id = room_id, .object_id = idx, .filename = argv[1], }));
+                                argc -= 2;
+                                argv += 2;
+                                continue;
+                            }
                             if (strcmp(end, "].x") == 0) {
                                 addr += offsetof(struct RoomObject, x);
                             } else if (strcmp(end, "].y") == 0) {
@@ -1918,7 +1931,7 @@ int main(int argc, char **argv) {
             if (!found) {
                 ARRAY_ADD(rooms, patch.room_id);
             }
-            _Static_assert(NUM_PATCH_TYPES == 4, "Unexpected number of patch types");
+            _Static_assert(NUM_PATCH_TYPES == 5, "Unexpected number of patch types");
             switch (patch.type) {
                 case NORMAL:
                     assert(patch.delete == false);
@@ -1938,7 +1951,6 @@ int main(int argc, char **argv) {
                     break;
 
                 case OBJECT: {
-                // FIXME: add ability to write to tiles of objects?
                     int idx = patch.address / sizeof(struct RoomObject);
                     if (idx < 0) {
                         fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
@@ -1992,6 +2004,150 @@ int main(int argc, char **argv) {
                             ((uint8_t *)object)[addr] = patch.value;
                         }
                     }
+                }; break;
+
+                case OBJECT_TILESET: {
+                    fp = fopen(patch.filename, "r");
+                    if (fp == NULL) {
+                        fprintf(stderr, "Could not open file for reading: %s: %s", patch.filename, strerror(errno));
+                        defer_return(1);
+                    }
+
+                    assert(fseek(fp, 0L, SEEK_END) == 0);
+                    long ftold = ftell(fp);
+                    assert(ftold != -1);
+                    size_t filesize = ftold;
+                    assert(fseek(fp, 0L, SEEK_SET) == 0);
+
+                    uint8_t *data = malloc(filesize);
+                    assert(data != NULL);
+
+                    if (fread(data, sizeof(uint8_t), filesize, fp) != (size_t)filesize) {
+                        free(data);
+                        fprintf(stderr, "Could read file fully: %s: %s", patch.filename, strerror(errno));
+                        defer_return(1);
+                    }
+
+                    struct DecompresssedRoom *room = &file.rooms[patch.room_id].data;
+                    struct RoomObject *object = file.rooms[patch.room_id].data.objects + patch.object_id;
+                    size_t tile_idx = 0;
+                    size_t data_idx = 0;
+                    uint16_t fullbyte = 0;
+                    size_t width = 0;
+                    size_t height = 0;
+                    while (data_idx < filesize) {
+                        char c = data[data_idx ++];
+                        if (c == '\033') {
+                            if (data_idx >= filesize || data[data_idx] != '[') {
+                                free(data);
+                                fprintf(stderr, "Invalid escape sequence at %ld: %s\n", data_idx, patch.filename);
+                                defer_return(1);
+                            }
+                            while (data_idx < filesize && !isalpha(data[data_idx])) data_idx ++;
+                            if (data_idx >= filesize) {
+                                free(data);
+                                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", patch.filename);
+                                defer_return(1);
+                            }
+                            data_idx++;
+                        } else if (c == '\n') {
+                            if (width < tile_idx / 2) {
+                                width = tile_idx / 2;
+                            }
+                            tile_idx = 0;
+                            height ++;
+                        } else {
+                            tile_idx ++;
+                        }
+                    }
+                    if (width == 0 || height == 0) {
+                        fprintf(stderr, "%s:%d: UNREACHABLE: Could not find the width or height of object tiles\n", __FILE__, __LINE__);
+                        exit(1);
+                    }
+                    if (width * height < width || width * height < height) {
+                        fprintf(stderr, "%s:%d: UNREACHABLE: Overflow of width*height\n", __FILE__, __LINE__);
+                        exit(1);
+                    }
+                    if (width * height >= sizeof(room->tiles)) {
+                        fprintf(stderr, "%s:%d: UNREACHABLE: Object tiles bigger than room\n", __FILE__, __LINE__);
+                        exit(1);
+                    }
+                    object->type = BLOCK;
+                    if (object->tiles) free(object->tiles);
+                    object->tiles = malloc(width * height);
+                    object->block.width = width;
+                    object->block.height = height;
+
+
+                    tile_idx = 0;
+                    data_idx = 0;
+                    while (tile_idx < width * height) {
+                        if (data_idx >= (size_t)filesize) {
+                            free(data);
+                            fprintf(stderr, "Could read full tileset from file: %s: Read %ld tiles\n", patch.filename, tile_idx);
+                            defer_return(1);
+                        }
+
+                        char c = data[data_idx++];
+                        if (c == '\033') {
+                            if (data_idx >= filesize) {
+                                free(data);
+                                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", patch.filename);
+                                defer_return(1);
+                            }
+
+                            if (data[data_idx] != '[') {
+                                free(data);
+                                fprintf(stderr, "Invalid escape sequence at %ld: %s\n", data_idx, patch.filename);
+                                defer_return(1);
+                            }
+                            while (data_idx < filesize && !isalpha(data[data_idx])) data_idx ++;
+                            if (data_idx >= filesize) {
+                                free(data);
+                                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", patch.filename);
+                                defer_return(1);
+                            }
+                            data_idx++;
+                        } else if (c == '\n') {
+                            if ((fullbyte & 0xFF00) != 0) {
+                                free(data);
+                                fprintf(stderr, "Unexpected newline at %ld: %s\n", data_idx - 1, patch.filename);
+                                defer_return(1);
+                            }
+                            if (tile_idx == 0 || (data_idx >= 2 && data[data_idx - 2] == '\n')) {
+                                object->tiles[tile_idx++] = 0;
+                            }
+                            while (tile_idx < width * height && (tile_idx % width) != 0) {
+                                object->tiles[tile_idx++] = 0;
+                            }
+                            assert(tile_idx % width == 0);
+                        } else {
+                            if (c != ' ' && !isxdigit(c)) {
+                                free(data);
+                                fprintf(stderr, "Invalid hex digit at %ld: %s\n", data_idx - 1, patch.filename);
+                                defer_return(1);
+                            }
+
+                            uint8_t b = 0;
+                            if (c == ' ') b = 0;
+                            else if (isdigit(c)) b = c - '0';
+                            else b = 10 + tolower(c) - 'a';
+
+                            if ((fullbyte & 0xFF00) == 0) {
+                                fullbyte = 0xFF00 | (b << 4);
+                            } else {
+                                fullbyte = (fullbyte & 0xF0) | b;
+                                object->tiles[tile_idx++] = fullbyte;
+                            }
+                        }
+                    }
+                    if (data_idx < filesize) {
+                        fprintf(stderr, "WARNING: Still more file to read at %ld: %s\n", data_idx, patch.filename);
+                    }
+
+                    free(data);
+                    fclose(fp);
+                    fp = NULL;
                 }; break;
 
                 case SWITCH: {
