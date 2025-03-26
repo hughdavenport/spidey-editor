@@ -1,0 +1,9 @@
+TOGGLE_OBJECT
+ - value 0x60 - moves up
+ - value 0x20 - moves down
+ - value 0x06 - moves left
+ - value 0x02 - moves right
+ - value 0x62 - moves up right
+ - etc
+ - test 0x20 - if not already done?
+ - test 0x00 - if already done?
