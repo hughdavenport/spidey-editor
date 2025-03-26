@@ -1,3 +1,7 @@
+PREAMBLE
+ - x/y is different to other chunks
+ - lsb 0x80 means spidey controls switch
+ - lsb 0x00 means switches on room entry
 TOGGLE_OBJECT
  - value 0x60 - moves up
  - value 0x20 - moves down

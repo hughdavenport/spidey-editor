@@ -11,6 +11,11 @@
 
 #define BLANK_TILE 0x00
 
+#define MOVE_UP    0x60
+#define MOVE_DOWN  0x20
+#define MOVE_LEFT  0x06
+#define MOVE_RIGHT 0x02
+
 typedef enum {
     SHARK,
     MUMMY,
@@ -66,6 +71,7 @@ struct SwitchChunk {
     uint8_t msb;
     uint8_t lsb;
 
+    bool room_entry;
     uint8_t x;
     uint8_t y;
     uint8_t size;

@@ -215,8 +215,8 @@ void dumpRoom(Room *room) {
     for (size_t i = 0; i < room->data.num_switches; i ++) {
         fprintf(stderr, "    \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
         assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
-        fprintf(stderr, "{.x = %d, .y = %d",
-                room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y);
+        fprintf(stderr, "{.x = %d, .y = %d, .room_entry = %s",
+                room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y, room->data.switches[i].chunks.data[0].room_entry ? "true" : "false");
         fprintf(stderr, ", .chunks (num=%lu) = [", room->data.switches[i].chunks.length);
         for (size_t c = 0; c < room->data.switches[i].chunks.length; c ++) {
             fprintf(stderr, "\033[m\n        \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
@@ -225,8 +225,8 @@ void dumpRoom(Room *room) {
             switch (chunk->type) {
                 case PREAMBLE:
                     assert(c == 0);
-                    fprintf(stderr, "{.type = PREAMBLE, .x = %d, .y = %d, .msb_without_y = %02x, .lsb_without_x = %02x, msb i don't know mask 0x80|0x40, and 0x20, lsb the same, i think lsb and parts of msb are used }, lsb&0x80 seems to control whether switch activates on room entry rather than touching it",
-                            chunk->x, chunk->y, chunk->msb & ~0x1f, chunk->lsb & ~0x1f);
+                    fprintf(stderr, "{.type = PREAMBLE, .x = %d, .y = %d, .room_entry = %s, .msb_without_y = %02x, .lsb_without_x_and_entry = %02x, msb i don't know mask 0x80|0x40, and 0x20, lsb the 0x40 and 0x20, i think lsb and parts of msb are used }",
+                            chunk->x, chunk->y, chunk->room_entry ? "true" : "false", chunk->msb & ~0x1f, chunk->lsb & ~(0x1f | 0x80));
                     break;
 
                 case TOGGLE_BLOCK:
@@ -263,8 +263,35 @@ void dumpRoom(Room *room) {
                     break;
 
                 case TOGGLE_OBJECT:
-                    fprintf(stderr, "{.type = TOGGLE_OBJECT, .index = %d, .test = %02x, value = 0x%02x}",
-                            chunk->index, chunk->test, chunk->value);
+                    fprintf(stderr, "{.type = TOGGLE_OBJECT, .index = %d, .test = %02x, .value = ",
+                            chunk->index, chunk->test);
+                    switch (chunk->value & MOVE_LEFT) {
+                        case MOVE_LEFT:
+                            switch (chunk->value & MOVE_UP) {
+                                case MOVE_UP: fprintf(stderr, "up+left"); break;
+                                case MOVE_DOWN: fprintf(stderr, "down+left"); break;
+                                case '\0': fprintf(stderr, "left"); break;
+                            }
+                            break;
+
+                        case MOVE_RIGHT:
+                            switch (chunk->value & MOVE_UP) {
+                                case MOVE_UP: fprintf(stderr, "up+right"); break;
+                                case MOVE_DOWN: fprintf(stderr, "down+right"); break;
+                                case '\0': fprintf(stderr, "right"); break;
+                            }
+                            break;
+
+                        case '\0':
+                            switch (chunk->value & MOVE_UP) {
+                                case MOVE_UP: fprintf(stderr, "up"); break;
+                                case MOVE_DOWN: fprintf(stderr, "down"); break;
+                                case '\0': fprintf(stderr, "stop"); break;
+                            }
+                            break;
+                    }
+
+                    fprintf(stderr, ", .value_without_direction = %02x}", chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
                     fprintf(stderr, "\033[m\n");
                     fprintf(stderr, "            if global_switches[%ld] has bitmask %02x (staticly defined)\n",
                             room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]);
@@ -570,7 +597,7 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         uint8_t x = lsb & 0x1f;
         // FIXME figure out what rest of bytes do
         _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
-        ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, msb = msb, .lsb = lsb }));
+        ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, .room_entry = (lsb & 0x80) == 0x00, .msb = msb, .lsb = lsb }));
 
         while (data_idx < tmp.decompressed.length && (tmp.decompressed.data[data_idx] & 0xc0) != 0x00) {
             read_next(msb, tmp.decompressed);
@@ -763,7 +790,7 @@ bool writeRoom(Room *room, FILE *fp) {
                 case PREAMBLE:
                     assert(c == 0);
                     decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->msb & ~0x1f);
-                    decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->lsb & ~0x1f);
+                    decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->room_entry ? 0x00 : 0x80) | (chunk->lsb & ~(0x1f | 0x80));
                     break;
 
                 case TOGGLE_BLOCK:
@@ -1456,7 +1483,7 @@ int main(int argc, char **argv) {
                                     }
                                 } else if (strcmp(end, "].msb") == 0 || strcmp(end, "].msb_without_y") == 0 || strcmp(end, "].msb_without_on_and_off") == 0) {
                                     addr += offsetof(struct SwitchChunk, msb);
-                                } else if (strcmp(end, "].lsb") == 0 || strcmp(end, "].lsb_without_x") == 0 || strcmp(end, "].global_switch_id") == 0) {
+                                } else if (strcmp(end, "].lsb") == 0 || strcmp(end, "].lsb_without_x") == 0 || strcmp(end, "].lsb_without_x_and_entry") == 0 || strcmp(end, "].global_switch_id") == 0) {
                                     addr += offsetof(struct SwitchChunk, lsb);
                                 } else if (strcmp(end, "].index") == 0) {
                                     addr += offsetof(struct SwitchChunk, index);
@@ -1466,6 +1493,27 @@ int main(int argc, char **argv) {
                                     addr += offsetof(struct SwitchChunk, test);
                                 } else if (strcmp(end, "].value") == 0) {
                                     addr += offsetof(struct SwitchChunk, value);
+                                    if (strcasecmp(argv[1], "") == 0 || strcasecmp(argv[1], "stop") == 0 || strcasecmp(argv[1], "stopped") == 0 || strcasecmp(argv[1], "stationary") == 0 || strcasecmp(argv[1], "stationery") == 0) {
+                                        value = 0;
+                                    } else if (strcasecmp(argv[1], "up") == 0) {
+                                        value = MOVE_UP;
+                                    } else if (strcasecmp(argv[1], "down") == 0) {
+                                        value = MOVE_DOWN;
+                                    } else if (strcasecmp(argv[1], "left") == 0) {
+                                        value = MOVE_LEFT;
+                                    } else if (strcasecmp(argv[1], "right") == 0) {
+                                        value = MOVE_RIGHT;
+                                    } else if (strcasecmp(argv[1], "up+left") == 0 || strcasecmp(argv[1], "left+up") == 0) {
+                                        value = MOVE_UP | MOVE_LEFT;
+                                    } else if (strcasecmp(argv[1], "up+right") == 0 || strcasecmp(argv[1], "right+up") == 0) {
+                                        value = MOVE_UP | MOVE_RIGHT;
+                                    } else if (strcasecmp(argv[1], "down+left") == 0 || strcasecmp(argv[1], "left+down") == 0) {
+                                        value = MOVE_DOWN | MOVE_LEFT;
+                                    } else if (strcasecmp(argv[1], "down+right") == 0 || strcasecmp(argv[1], "right+down") == 0) {
+                                        value = MOVE_DOWN | MOVE_RIGHT;
+                                    }
+                                } else if (strcmp(end, "].room_entry") == 0) {
+                                    addr += offsetof(struct SwitchChunk, room_entry);
                                 } else if (strcmp(end, "].type") == 0) {
                                     addr += offsetof(struct SwitchChunk, type);
                                     _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
