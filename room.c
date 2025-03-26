@@ -1446,6 +1446,15 @@ int main(int argc, char **argv) {
                                 // Do it on chunks[0].y
                                 addr <<= 8;
                                 addr += offsetof(struct SwitchChunk, y);
+                            } else if (strcmp(end, "].room_entry") == 0) {
+                                // Do it on chunks[0].room_entry
+                                addr <<= 8;
+                                addr += offsetof(struct SwitchChunk, room_entry);
+                                if (strcasecmp(argv[1], "false") == 0) {
+                                    value = 0;
+                                } else if (strcasecmp(argv[1], "true") == 0) {
+                                    value = 1;
+                                }
                             } else if (strncmp(end, "].chunk[", 8) == 0 || strncmp(end, "].chunks[", 9) == 0) {
                                 chunk_idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
                                 if (errno == EINVAL || *end != ']') {
@@ -1514,6 +1523,11 @@ int main(int argc, char **argv) {
                                     }
                                 } else if (strcmp(end, "].room_entry") == 0) {
                                     addr += offsetof(struct SwitchChunk, room_entry);
+                                    if (strcasecmp(argv[1], "false") == 0) {
+                                        value = 0;
+                                    } else if (strcasecmp(argv[1], "true") == 0) {
+                                        value = 1;
+                                    }
                                 } else if (strcmp(end, "].type") == 0) {
                                     addr += offsetof(struct SwitchChunk, type);
                                     _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
