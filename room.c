@@ -577,8 +577,8 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
             read_next(lsb, tmp.decompressed);
             switch (msb & 0xc0) {
                 case 0x80: {
-                    x = msb & 0x1f;
-                    y = lsb & 0x1f;
+                    x = lsb & 0x1f;
+                    y = msb & 0x1f;
                     uint8_t size = ((lsb >> 5) & 0x7) + 1;
                     uint8_t off, on;
                     enum SwitchChunkDirection dir = ((msb & 0x20) == 0) ? HORIZONTAL : VERTICAL;
@@ -767,8 +767,8 @@ bool writeRoom(Room *room, FILE *fp) {
                     break;
 
                 case TOGGLE_BLOCK:
-                    decompressed[d_len++] = 0x80 | (chunk->x & 0x1f) | (chunk->dir == VERTICAL ? 0x20 : 0);
-                    decompressed[d_len++] = (chunk->y & 0x1f) | ((chunk->size - 1) << 5);
+                    decompressed[d_len++] = 0x80 | (chunk->y & 0x1f) | (chunk->dir == VERTICAL ? 0x20 : 0);
+                    decompressed[d_len++] = (chunk->x & 0x1f) | ((chunk->size - 1) << 5);
                     decompressed[d_len++] = chunk->off;
                     decompressed[d_len++] = chunk->on;
                     break;
