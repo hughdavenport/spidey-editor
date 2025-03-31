@@ -1,6 +1,6 @@
 tiles cycle every 64 (really in chunks of 4, the game only uses tile offset 0 4 8 16 20 24 28)
 offset 0 used in room 0, 1, 2, 3, 5, 6, 7, 15, 23, 21, 47, 55, 62, 63
-first set of 64 0-0x3f - fall through
+first set of 64 0-0x3f - fall through, can't be switches
 second set 0x40-0x7f - solid
 third set 0x80-0xbf - magnetic (can't stick web to it)
 fourth set 0xc0-0xff- slippery (won't hurt)

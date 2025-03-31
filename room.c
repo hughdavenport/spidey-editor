@@ -14,6 +14,8 @@
 #define IO_IMPLEMENTATION
 #include "io.h"
 
+#define BOOL_S(b) ((b) ? "true" : "false")
+
 #include "room.h"
 
 // header of ROOMS.SPL (and BACKS.SPL also)
@@ -166,7 +168,7 @@ void dumpRoom(Room *room) {
         switch (room->data.objects[i].type) {
             case BLOCK:
                 fprintf(stderr, "    \033[3%ld;1m", (i % 7) + 1);
-                fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}",
+                fprintf(stderr, "[idx=%ld]{.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}", i,
                         "BLOCK",
                         room->data.objects[i].x, room->data.objects[i].y,
                         room->data.objects[i].block.width, room->data.objects[i].block.height);
@@ -186,7 +188,7 @@ void dumpRoom(Room *room) {
 
             case SPRITE:
                 fprintf(stderr, "    \033[4%ld;30;1m", (i % 7) + 1);
-                fprintf(stderr, "{.type = %s, .x = %d, .y = %d, .sprite = ",
+                fprintf(stderr, "[idx=%ld]{.type = %s, .x = %d, .y = %d, .sprite = ", i,
                         "SPRITE",
                         room->data.objects[i].x, room->data.objects[i].y);
                 _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
@@ -215,8 +217,8 @@ void dumpRoom(Room *room) {
     for (size_t i = 0; i < room->data.num_switches; i ++) {
         fprintf(stderr, "    \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
         assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
-        fprintf(stderr, "{.x = %d, .y = %d, .room_entry = %s",
-                room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y, room->data.switches[i].chunks.data[0].room_entry ? "true" : "false");
+        fprintf(stderr, "[idx=%ld]{.x = %d, .y = %d, .room_entry = %s, .one_time_use = %s, .side = %s", i,
+                room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y, BOOL_S(room->data.switches[i].chunks.data[0].room_entry), BOOL_S(room->data.switches[i].chunks.data[0].one_time_use), SWITCH_SIDE(room->data.switches[i].chunks.data[0].side));
         fprintf(stderr, ", .chunks (num=%lu) = [", room->data.switches[i].chunks.length);
         for (size_t c = 0; c < room->data.switches[i].chunks.length; c ++) {
             fprintf(stderr, "\033[m\n        \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
@@ -225,8 +227,8 @@ void dumpRoom(Room *room) {
             switch (chunk->type) {
                 case PREAMBLE:
                     assert(c == 0);
-                    fprintf(stderr, "{.type = PREAMBLE, .x = %d, .y = %d, .room_entry = %s, .msb_without_y = %02x, .lsb_without_x_and_entry = %02x, msb i don't know mask 0x80|0x40, and 0x20, lsb the 0x40 and 0x20, i think lsb and parts of msb are used }",
-                            chunk->x, chunk->y, chunk->room_entry ? "true" : "false", chunk->msb & ~0x1f, chunk->lsb & ~(0x1f | 0x80));
+                    fprintf(stderr, "{.type = PREAMBLE, .x = %d, .y = %d, .room_entry = %s, .one_time_use = %s, .side = %s, .msb_without_y_and_one_time_use = %02x, msb i don't know mask 0x80|0x40 }",
+                            chunk->x, chunk->y, BOOL_S(chunk->room_entry), BOOL_S(chunk->one_time_use), SWITCH_SIDE(chunk->side), chunk->msb & ~(0x1f | 0x20));
                     break;
 
                 case TOGGLE_BLOCK:
@@ -596,8 +598,9 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         uint8_t y = msb & 0x1f;
         uint8_t x = lsb & 0x1f;
         // FIXME figure out what rest of bytes do
+        // msb 0x40, 0x60 writes badly...
         _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
-        ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, .room_entry = (lsb & 0x80) == 0x00, .msb = msb, .lsb = lsb }));
+        ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, .room_entry = (lsb & 0x80) == 0x00, .one_time_use = (msb & 0x20) != 0x00, .side = (lsb & 0x60) >> 5, .msb = msb, .lsb = lsb }));
 
         while (data_idx < tmp.decompressed.length && (tmp.decompressed.data[data_idx] & 0xc0) != 0x00) {
             read_next(msb, tmp.decompressed);
@@ -789,8 +792,8 @@ bool writeRoom(Room *room, FILE *fp) {
             switch (chunk->type) {
                 case PREAMBLE:
                     assert(c == 0);
-                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->msb & ~0x1f);
-                    decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->room_entry ? 0x00 : 0x80) | (chunk->lsb & ~(0x1f | 0x80));
+                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->one_time_use ? 0x20 : 0x00) | (chunk->msb & ~0x1f);
+                    decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->room_entry ? 0x00 : 0x80) | (chunk->side << 5);
                     break;
 
                 case TOGGLE_BLOCK:
@@ -1455,6 +1458,32 @@ int main(int argc, char **argv) {
                                 } else if (strcasecmp(argv[1], "true") == 0) {
                                     value = 1;
                                 }
+                            } else if (strcmp(end, "].one_time_use") == 0) {
+                                // Do it on chunks[0].one_time_use
+                                addr <<= 8;
+                                addr += offsetof(struct SwitchChunk, one_time_use);
+                                if (strcasecmp(argv[1], "false") == 0) {
+                                    value = 0;
+                                } else if (strcasecmp(argv[1], "true") == 0) {
+                                    value = 1;
+                                }
+                            } else if (strcmp(end, "].side") == 0) {
+                                // Do it on chunks[0].side
+                                addr <<= 8;
+                                addr += offsetof(struct SwitchChunk, side);
+                                if (strcasecmp(argv[1], "top") == 0 || strcasecmp(argv[1], "up") == 0) {
+                                    value = TOP;
+                                } else if (strcasecmp(argv[1], "bottom") == 0 || strcasecmp(argv[1], "down") == 0) {
+                                    value = BOTTOM;
+                                } else if (strcasecmp(argv[1], "left") == 0) {
+                                    value = LEFT;
+                                } else if (strcasecmp(argv[1], "right") == 0) {
+                                    value = RIGHT;
+                                } else {
+                                    fprintf(stderr, "Invalid side: %s\n", argv[1]);
+                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    defer_return(1);
+                                }
                             } else if (strncmp(end, "].chunk[", 8) == 0 || strncmp(end, "].chunks[", 9) == 0) {
                                 chunk_idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
                                 if (errno == EINVAL || *end != ']') {
@@ -1490,10 +1519,8 @@ int main(int argc, char **argv) {
                                         }
                                         defer_return(1);
                                     }
-                                } else if (strcmp(end, "].msb") == 0 || strcmp(end, "].msb_without_y") == 0 || strcmp(end, "].msb_without_on_and_off") == 0) {
+                                } else if (strcmp(end, "].msb") == 0 || strcmp(end, "].msb_without_y") == 0 || strcmp(end, "].msb_without_y_and_one_time_use") == 0) {
                                     addr += offsetof(struct SwitchChunk, msb);
-                                } else if (strcmp(end, "].lsb") == 0 || strcmp(end, "].lsb_without_x") == 0 || strcmp(end, "].lsb_without_x_and_entry") == 0 || strcmp(end, "].global_switch_id") == 0) {
-                                    addr += offsetof(struct SwitchChunk, lsb);
                                 } else if (strcmp(end, "].index") == 0) {
                                     addr += offsetof(struct SwitchChunk, index);
                                 } else if (strcmp(end, "].bitmask") == 0) {
@@ -1527,6 +1554,21 @@ int main(int argc, char **argv) {
                                         value = 0;
                                     } else if (strcasecmp(argv[1], "true") == 0) {
                                         value = 1;
+                                    }
+                                } else if (strcmp(end, "].side") == 0) {
+                                    addr += offsetof(struct SwitchChunk, side);
+                                    if (strcasecmp(argv[1], "top") == 0 || strcasecmp(argv[1], "up") == 0) {
+                                        value = TOP;
+                                    } else if (strcasecmp(argv[1], "bottom") == 0 || strcasecmp(argv[1], "down") == 0) {
+                                        value = BOTTOM;
+                                    } else if (strcasecmp(argv[1], "left") == 0) {
+                                        value = LEFT;
+                                    } else if (strcasecmp(argv[1], "right") == 0) {
+                                        value = RIGHT;
+                                    } else {
+                                        fprintf(stderr, "Invalid side: %s\n", argv[1]);
+                                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                        defer_return(1);
                                     }
                                 } else if (strcmp(end, "].type") == 0) {
                                     addr += offsetof(struct SwitchChunk, type);

@@ -47,6 +47,20 @@ enum SwitchChunkDirection {
     VERTICAL
 };
 
+enum SwitchSide {
+    TOP,
+    RIGHT,
+    BOTTOM,
+    LEFT,
+};
+
+#define SWITCH_SIDE(s) (const char *[]){ \
+    "TOP", \
+    "RIGHT", \
+    "BOTTOM", \
+    "LEFT", \
+}[(size_t)(s)]
+
 struct RoomObject {
     // written as ((x << 8) | y) | ((width << 5) << 8) | (height << 5)
     uint8_t x;
@@ -82,6 +96,8 @@ struct SwitchChunk {
     uint8_t index;
     uint8_t test;
     uint8_t value;
+    enum SwitchSide side;
+    bool one_time_use;
 };
 
 struct SwitchObject {

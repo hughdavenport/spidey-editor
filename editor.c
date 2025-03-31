@@ -34,7 +34,11 @@
     exit(1); \
 } while (false)
 
+#ifdef __TINYC__
+#define LIBRARY_BUILD_CMD "tcc -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c -o"
+#else
 #define LIBRARY_BUILD_CMD "cc -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c -o"
+#endif
 
 #define SAVE_CURSOR "\x1b" "7"
 #define RESTORE_CURSOR "\x1b" "8"
@@ -55,10 +59,10 @@
     printf("\x1b[%d;%dH", (_y) + 1, (_x) + 1); \
 } while (false)
 
-#define UP    "\x1b[A"
-#define DOWN  "\x1b[B"
-#define RIGHT "\x1b[C"
-#define LEFT  "\x1b[D"
+#define KEY_UP    "\x1b[A"
+#define KEY_DOWN  "\x1b[B"
+#define KEY_RIGHT "\x1b[C"
+#define KEY_LEFT  "\x1b[D"
 
 #define HOME      "\x1b[1~"
 #define INSERT    "\x1b[2~"
@@ -208,25 +212,25 @@ void process_input() {
             } else if (KEY_MATCHES("?")) {
                 state->help = !state->help;
             } else if (state->editbyte == 0 || !state->tileedit) {
-                if (KEY_MATCHES("a") || KEY_MATCHES(LEFT) || KEY_MATCHES("h")) {
+                if (KEY_MATCHES("a") || KEY_MATCHES(KEY_LEFT) || KEY_MATCHES("h")) {
                     thing->x --;
                     if (thing->x < 0) {
                         *thinglevel = state->rooms.rooms[*thinglevel].data.room_west;
                         thing->x = WIDTH_TILES - 1;
                     }
-                } else if (KEY_MATCHES("d") || KEY_MATCHES(RIGHT) || KEY_MATCHES("l")) {
+                } else if (KEY_MATCHES("d") || KEY_MATCHES(KEY_RIGHT) || KEY_MATCHES("l")) {
                     thing->x ++;
                     if (thing->x >= WIDTH_TILES) {
                         *thinglevel = state->rooms.rooms[*thinglevel].data.room_east;
                         thing->x = 0;
                     }
-                } else if (KEY_MATCHES("w") || KEY_MATCHES(UP) || KEY_MATCHES("k")) {
+                } else if (KEY_MATCHES("w") || KEY_MATCHES(KEY_UP) || KEY_MATCHES("k")) {
                     thing->y --;
                     if (thing->y < 0) {
                         *thinglevel = state->rooms.rooms[*thinglevel].data.room_north;
                         thing->y = HEIGHT_TILES - 1;
                     }
-                } else if (KEY_MATCHES("s") || KEY_MATCHES(DOWN) || KEY_MATCHES("j")) {
+                } else if (KEY_MATCHES("s") || KEY_MATCHES(KEY_DOWN) || KEY_MATCHES("j")) {
                     thing->y ++;
                     if (thing->y >= HEIGHT_TILES) {
                         *thinglevel = state->rooms.rooms[*thinglevel].data.room_south;
