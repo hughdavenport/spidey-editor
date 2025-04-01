@@ -700,6 +700,7 @@ bool readFile(RoomFile *file, FILE *fp) {
 }
 
 #define MAX_ROOM_FILE_SIZE 0x3000
+// there is also a MAX_ROOM_SIZE, unknown yet, add a few switches to midnight and it will corrupt
 
 bool writeRoom(Room *room, FILE *fp) {
     if (fp == NULL || room == NULL || !room->valid) return false;
@@ -2019,12 +2020,8 @@ int main(int argc, char **argv) {
     if (patches.length > 0) {
         for (size_t i = 0; i < patches.length; i ++) {
             PatchInstruction patch = patches.data[i];
-            if (!file.rooms[patch.room_id].valid) {
-                fprintf(stderr, "Room ID %d invalid\n", patch.room_id);
-                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
-                defer_return(1);
-            }
             ARRAY_FREE(file.rooms[patch.room_id].compressed);
+            file.rooms[patch.room_id].valid = true;
             bool found = false;
             for (size_t r = 0; r < rooms.length; r ++) {
                 if (patch.room_id == rooms.data[r]) {

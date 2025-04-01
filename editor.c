@@ -340,7 +340,7 @@ void redraw() {
     struct DecompresssedRoom room = state->rooms.rooms[level].data;
     GOTO(16, 0);
     /* char name[24]; */
-    /* printf("%24s", room.name); */
+    printf("%d - ", level);
     for (size_t i = 0; i < C_ARRAY_LEN(room.name); i ++) {
         printf("%c", room.name[i]);
     }

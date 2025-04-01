@@ -17,7 +17,7 @@
 #define MOVE_RIGHT 0x02
 
 typedef enum {
-    SHARK,
+    SHARK, // for damage 4 this is mary jane, 3 is mysterio, 2 and 1 are sharks
     MUMMY,
     BLUE_MAN,
     WOLF,
