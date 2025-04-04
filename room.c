@@ -130,16 +130,29 @@ void dumpRoom(Room *room) {
             struct SwitchObject *sw = room->data.switches + s;
             assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
             if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
-                fprintf(stderr, "\033[4%ld;30;1m", ((s + room->data.num_objects) % 7) + 1);
+                fprintf(stderr, "\033[4%ld;30;1m", (s % 3) + 4);
                 colored = true;
+                break;
+            }
+            for (size_t c = 1; !colored && c < sw->chunks.length; c ++) {
+                struct SwitchChunk *chunk = sw->chunks.data + c;
+                if (chunk->type == TOGGLE_BLOCK) {
+                    if (chunk->dir == HORIZONTAL) {
+                        if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                            fprintf(stderr, "\033[m\033[3%ld;40;1m", (s % 3) + 4);
+                            colored = true;
+                            tile = chunk->on;
+                        }
+                    } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                        fprintf(stderr, "\033[m\033[3%ld;40;1m", (s % 3) + 4);
+                        colored = true;
+                        tile = chunk->on;
+                    }
+                }
             }
         }
 
-        if (tile == BLANK_TILE) {
-            fprintf(stderr, "  ");
-        } else {
-            fprintf(stderr, "%02x", tile);
-        }
+        fprintf(stderr, "%02x", tile);
         if (colored) fprintf(stderr, "\033[m");
     }
     fprintf(stderr, "\n");
@@ -167,18 +180,18 @@ void dumpRoom(Room *room) {
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         switch (room->data.objects[i].type) {
             case BLOCK:
-                fprintf(stderr, "    \033[3%ld;1m", (i % 7) + 1);
+                fprintf(stderr, "    \033[3%ld;1m", (i % 3) + 1);
                 fprintf(stderr, "[idx=%ld]{.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}", i,
                         "BLOCK",
                         room->data.objects[i].x, room->data.objects[i].y,
                         room->data.objects[i].block.width, room->data.objects[i].block.height);
                 for (size_t y = 0; y < room->data.objects[i].block.height; y ++) {
                     fprintf(stderr, "\033[m\n");
-                    fprintf(stderr, "        \033[3%ld;1m", (i % 7) + 1);
+                    fprintf(stderr, "        \033[3%ld;1m", (i % 3) + 1);
                     for (size_t x = 0; x < room->data.objects[i].block.width; x ++) {
                         uint8_t tile = room->data.objects[i].tiles[y * room->data.objects[i].block.width + x];
                         if (tile == BLANK_TILE) {
-                            fprintf(stderr, "\033[m  \033[3%ld;1m", (i % 7) + 1);
+                            fprintf(stderr, "\033[m  \033[3%ld;1m", (i % 3) + 1);
                         } else  {
                             fprintf(stderr, "%02x", tile);
                         }
@@ -187,7 +200,7 @@ void dumpRoom(Room *room) {
                 break;
 
             case SPRITE:
-                fprintf(stderr, "    \033[4%ld;30;1m", (i % 7) + 1);
+                fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 1);
                 fprintf(stderr, "[idx=%ld]{.type = %s, .x = %d, .y = %d, .sprite = ", i,
                         "SPRITE",
                         room->data.objects[i].x, room->data.objects[i].y);
@@ -215,13 +228,14 @@ void dumpRoom(Room *room) {
 
     fprintf(stderr, "  Switches (length=%u):\n", room->data.num_switches);
     for (size_t i = 0; i < room->data.num_switches; i ++) {
-        fprintf(stderr, "    \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
+        fprintf(stderr, "    \033[4%ld;30;1m", (i % 3) + 4);
         assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
         fprintf(stderr, "[idx=%ld]{.x = %d, .y = %d, .room_entry = %s, .one_time_use = %s, .side = %s", i,
                 room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y, BOOL_S(room->data.switches[i].chunks.data[0].room_entry), BOOL_S(room->data.switches[i].chunks.data[0].one_time_use), SWITCH_SIDE(room->data.switches[i].chunks.data[0].side));
         fprintf(stderr, ", .chunks (num=%lu) = [", room->data.switches[i].chunks.length);
         for (size_t c = 0; c < room->data.switches[i].chunks.length; c ++) {
-            fprintf(stderr, "\033[m\n        \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
+            fprintf(stderr, "\033[m\n        ");
+            /* fprintf(stderr, "\033[m\n        \033[4%ld;30;1m", (i % 3) + 4); */
             struct SwitchChunk *chunk = room->data.switches[i].chunks.data + c;
             _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
             switch (chunk->type) {
@@ -232,6 +246,7 @@ void dumpRoom(Room *room) {
                     break;
 
                 case TOGGLE_BLOCK:
+                    fprintf(stderr, "\033[m\033[3%ld;40;1m", (i % 3) + 4);
                     fprintf(stderr, "{.type = TOGGLE_BLOCK, .x = %d, .y = %d, .size = %d, .dir = %s, .off = %02x, .on = %02x}",
                             chunk->x, chunk->y, chunk->size, chunk->dir == VERTICAL ? "VERTICAL" : "HORIZONTAL", chunk->off, chunk->on);
                     break;
@@ -265,6 +280,7 @@ void dumpRoom(Room *room) {
                     break;
 
                 case TOGGLE_OBJECT:
+                    fprintf(stderr, "\033[m\033[4%d;30;1m", (chunk->index % 3) + 1);
                     fprintf(stderr, "{.type = TOGGLE_OBJECT, .index = %d, .test = %02x, .value = ",
                             chunk->index, chunk->test);
                     switch (chunk->value & MOVE_LEFT) {
@@ -310,7 +326,7 @@ void dumpRoom(Room *room) {
                     break;
             }
         }
-        fprintf(stderr, "\033[m\n    \033[4%ld;30;1m", ((i + room->data.num_objects) % 7) + 1);
+        fprintf(stderr, "\033[m\n    \033[4%ld;30;1m", (i % 3) + 4);
         fprintf(stderr, "]}");
         fprintf(stderr, "\033[m\n");
     }

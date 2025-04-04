@@ -4,11 +4,38 @@ room data before unknown (0x2c9)
 
 movertab.dat layout:
 struct{
-    u8 delta_x;
     u8 delta_y;
+    u8 delta_x;
     u8 type;
+
     // bottom threee bits of type are an index into a u16 table 0xa9e3 (1000:8e11 in ghidra)
     // that table is a further delta_x/y pair
+
+    // for a mummy, glitches on odd
+    0b10110000 - x + 1, y + 1, not moving, facing right
+    0b10110010 - x - 1, y + 1, not moving, facing left
+    0b10110100 - upside down, feet at x + 1, y - 1, not moving, facing right
+    0b10110110 - upside down, feet at x - 1, y - 1, not moving, facing left
+    0b10111000 - x + 1, y + 1, moving right
+    0b10111010 - x - 1, y + 1, moving left
+    0b10111100 - upside down at x + 1, y - 1, moving (if roof), facing right
+    0b10111110 - upside down at x - 1, y - 1, moving (if roof), facing left
+
+
+    // always y + 1
+    0b00000001 glitch missingno style bit
+    0b00000010 x - 1 and facing left if set, + 1 and right otherwise
+    0b00000100 upside down and y - 1, + 1 otherwise (referring to feet)
+    0b00001000 (moving bit, upside down needs roof, right side up needs floor)?
+
+    0b00010000 (unsure)
+    0b00100000 (makes enemy stop at wall)
+    0b01000000 (unsure)
+    0b10000000 (dead bit? no enemy, but kinda yellow glitchey)
+
+
+
+
 
 }
 

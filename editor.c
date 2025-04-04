@@ -56,13 +56,18 @@
 #define GOTO(_x, _y)     do { \
     assert((_x) < state->screen_dimensions.x && "width out of bounds"); \
     assert((_y) < state->screen_dimensions.y && "height out of bounds"); \
-    printf("\x1b[%d;%dH", (_y) + 1, (_x) + 1); \
+    printf("\033[%d;%dH", (_y) + 1, (_x) + 1); \
 } while (false)
 
 #define KEY_UP    "\x1b[A"
 #define KEY_DOWN  "\x1b[B"
 #define KEY_RIGHT "\x1b[C"
 #define KEY_LEFT  "\x1b[D"
+
+#define SHIFT_UP    "\x1b[1;2A"
+#define SHIFT_DOWN  "\x1b[1;2B"
+#define SHIFT_RIGHT "\x1b[1;2C"
+#define SHIFT_LEFT  "\x1b[1;2D"
 
 #define HOME      "\x1b[1~"
 #define INSERT    "\x1b[2~"
@@ -191,6 +196,11 @@ void process_input() {
                             obj = true;
                             object->tiles[(y - object->y) * object->block.width + (x - object->x)] = b;
                             break;
+                        } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                            obj = true;
+                            object->sprite.type = b >> 4;
+                            object->sprite.damage = b & 0xF;
+                            break;
                         }
                     }
                     if (!obj) room->tiles[y * WIDTH_TILES + x] = b;
@@ -237,7 +247,193 @@ void process_input() {
                         thing->y = 0;
                     }
                 } else if (KEY_MATCHES(CTRL_T)) {
+                    if (state->tileedit) {
+                        state->playerlevel = state->editlevel;
+                        state->player = state->tileeditpos;
+                    } else {
+                        state->editlevel = state->playerlevel;
+                        state->tileeditpos = state->player;
+                    }
                     state->tileedit = !state->tileedit;
+                }
+            }
+            if (state->tileedit) {
+                if (KEY_MATCHES(SHIFT_UP) || KEY_MATCHES("W") || KEY_MATCHES("K")) {
+                    int x = state->tileeditpos.x;
+                    int y = state->tileeditpos.y;
+                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+                    if (state->debugobjects) {
+                        struct RoomObject *object = NULL;
+                        bool obj = false;
+                        for (size_t i = 0; i < room->num_objects; i ++) {
+                            object = room->objects + i;
+                            if (object->type == BLOCK &&
+                                    x >= object->x && x < object->x + object->block.width &&
+                                    y >= object->y && y < object->y + object->block.height) {
+                                obj = true;
+                                break;
+                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                                obj = true;
+                                break;
+                            }
+                        }
+                        if (obj) {
+                            object->y --;
+                            state->tileeditpos.y --;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
+                    if (state->debugswitches) {
+                        struct SwitchObject *switcch = NULL;
+                        bool sw = false;
+                        for (size_t i = 0; i < room->num_switches; i ++) {
+                            switcch = room->switches + i;
+                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                                sw = true;
+                                break;
+                            }
+                        }
+                        if (sw) {
+                            switcch->chunks.data[0].y --;
+                            state->tileeditpos.y --;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
+                } else if (KEY_MATCHES(SHIFT_LEFT) || KEY_MATCHES("A") || KEY_MATCHES("H")) {
+                    int x = state->tileeditpos.x;
+                    int y = state->tileeditpos.y;
+                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+                    if (state->debugobjects) {
+                        bool obj = false;
+                        struct RoomObject *object = NULL;
+                        for (size_t i = 0; i < room->num_objects; i ++) {
+                            object = room->objects + i;
+                            if (object->type == BLOCK &&
+                                    x >= object->x && x < object->x + object->block.width &&
+                                    y >= object->y && y < object->y + object->block.height) {
+                                obj = true;
+                                break;
+                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                                obj = true;
+                                break;
+                            }
+                        }
+                        if (obj) {
+                            object->x --;
+                            state->tileeditpos.x --;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
+                    if (state->debugswitches) {
+                        struct SwitchObject *switcch = NULL;
+                        bool sw = false;
+                        for (size_t i = 0; i < room->num_switches; i ++) {
+                            switcch = room->switches + i;
+                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                                sw = true;
+                                break;
+                            }
+                        }
+                        if (sw) {
+                            switcch->chunks.data[0].x --;
+                            state->tileeditpos.x --;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
+                } else if (KEY_MATCHES(SHIFT_DOWN) || KEY_MATCHES("S") || KEY_MATCHES("J")) {
+                    int x = state->tileeditpos.x;
+                    int y = state->tileeditpos.y;
+                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+                    if (state->debugobjects) {
+                        bool obj = false;
+                        struct RoomObject *object = NULL;
+                        for (size_t i = 0; i < room->num_objects; i ++) {
+                            object = room->objects + i;
+                            if (object->type == BLOCK &&
+                                    x >= object->x && x < object->x + object->block.width &&
+                                    y >= object->y && y < object->y + object->block.height) {
+                                obj = true;
+                                break;
+                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                                obj = true;
+                                break;
+                            }
+                        }
+                        if (obj) {
+                            object->y ++;
+                            state->tileeditpos.y ++;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
+                    if (state->debugswitches) {
+                        struct SwitchObject *switcch = NULL;
+                        bool sw = false;
+                        for (size_t i = 0; i < room->num_switches; i ++) {
+                            switcch = room->switches + i;
+                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                                sw = true;
+                                break;
+                            }
+                        }
+                        if (sw) {
+                            switcch->chunks.data[0].y ++;
+                            state->tileeditpos.y ++;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
+                } else if (KEY_MATCHES(SHIFT_RIGHT) || KEY_MATCHES("D") || KEY_MATCHES("L")) {
+                    int x = state->tileeditpos.x;
+                    int y = state->tileeditpos.y;
+                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+                    if (state->debugobjects) {
+                        bool obj = false;
+                        struct RoomObject *object = NULL;
+                        for (size_t i = 0; i < room->num_objects; i ++) {
+                            object = room->objects + i;
+                            if (object->type == BLOCK &&
+                                    x >= object->x && x < object->x + object->block.width &&
+                                    y >= object->y && y < object->y + object->block.height) {
+                                obj = true;
+                                break;
+                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                                obj = true;
+                                break;
+                            }
+                        }
+                        if (obj) {
+                            object->x ++;
+                            state->tileeditpos.x ++;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
+                    if (state->debugswitches) {
+                        struct SwitchObject *switcch = NULL;
+                        bool sw = false;
+                        for (size_t i = 0; i < room->num_switches; i ++) {
+                            switcch = room->switches + i;
+                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                                sw = true;
+                                break;
+                            }
+                        }
+                        if (sw) {
+                            switcch->chunks.data[0].x ++;
+                            state->tileeditpos.x ++;
+                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
+                    }
                 }
             }
             if (KEY_MATCHES(CTRL_H)) {
@@ -340,7 +536,7 @@ void redraw() {
     struct DecompresssedRoom room = state->rooms.rooms[level].data;
     GOTO(16, 0);
     /* char name[24]; */
-    printf("%d - ", level);
+    printf("%ld - ", level);
     for (size_t i = 0; i < C_ARRAY_LEN(room.name); i ++) {
         printf("%c", room.name[i]);
     }
@@ -348,18 +544,34 @@ void redraw() {
     for (int y = 0; y < HEIGHT_TILES; y ++) {
         for (int x = 0; x < WIDTH_TILES; x ++) {
             uint8_t tile = room.tiles[y * WIDTH_TILES + x];
-            if (tile != BLANK_TILE) {
-                bool colored = false;
-                if (state->debugswitches)
-                for (int s = 0; s < room.num_switches; s ++) {
-                    struct SwitchObject *sw = room.switches + s;
-                    assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
-                    if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
-                        colored = true;
-                        printf("\033[4%d;30;1m", (s % 3) + 4);
-                        break;
+            bool colored = false;
+            if (state->debugswitches)
+            for (int s = 0; s < room.num_switches; s ++) {
+                struct SwitchObject *sw = room.switches + s;
+                assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
+                if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
+                    colored = true;
+                    printf("\033[4%d;30;1m", (s % 3) + 4);
+                    break;
+                }
+                for (size_t c = 1; !colored && c < sw->chunks.length; c ++) {
+                    struct SwitchChunk *chunk = sw->chunks.data + c;
+                    if (chunk->type == TOGGLE_BLOCK) {
+                        if (chunk->dir == HORIZONTAL) {
+                            if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                                printf("\033[3%d;40;1m", (s % 3) + 4);
+                                colored = true;
+                                tile = chunk->on;
+                            }
+                        } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                            printf("\033[3%d;40;1m", (s % 3) + 4);
+                            colored = true;
+                            tile = chunk->on;
+                        }
                     }
                 }
+            }
+            if (colored || tile != BLANK_TILE) {
                 GOTO(2 * x, y + 1);
                 printf("%02X", tile);
                 if (colored) printf("\033[m");
@@ -378,7 +590,7 @@ void redraw() {
             case BLOCK:
                 assert(object->x + object->block.width <= WIDTH_TILES);
                 assert(object->y + object->block.height <= HEIGHT_TILES);
-                printf("\033[3%ld;1m", (i % 8) + 1);
+                printf("\033[3%ld;1m", (i % 3) + 1);
                 for (int y = object->y; y < object->y + object->block.height; y ++) {
                     GOTO(2 * object->x, y + 1);
                     for (int x = object->x; x < object->x + object->block.width; x ++) {
@@ -410,6 +622,7 @@ void redraw() {
         GOTO(2 * x, y + 1);
         uint8_t tile = room.tiles[y * WIDTH_TILES + x];
         bool obj = false;
+        bool sprite = false;
         size_t i;
         for (i = 0; i < room.num_objects; i ++) {
             struct RoomObject *object = room.objects + i;
@@ -419,6 +632,12 @@ void redraw() {
                 obj = true;
                 tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
                 printf("\033[30;4%ldm", (i % 8) + 1);
+                break;
+            } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                obj = true;
+                sprite = true;
+                tile = (object->sprite.type << 4) | object->sprite.damage;
+                printf("\033[3%ld;40;1m", (i % 3) + 1);
                 break;
             }
         }
@@ -430,7 +649,11 @@ void redraw() {
         if (state->editbyte) {
             GOTO(2 * x, y + 1);
             if (obj) {
-                printf("\033[3%ld;1m", (i % 8) + 1);
+                if (sprite) {
+                    printf("\033[30;4%ld;1m", (i % 3) + 1);
+                } else {
+                    printf("\033[3%ld;1m", (i % 8) + 1);
+                }
             } else {
                 printf("\033[1m");
             }

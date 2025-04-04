@@ -11,6 +11,7 @@
 
 #define BLANK_TILE 0x00
 
+// This is wrong
 #define MOVE_UP    0x60
 #define MOVE_DOWN  0x20
 #define MOVE_LEFT  0x06

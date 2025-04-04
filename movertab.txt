@@ -1,0 +1,80 @@
+x and y refer to what is seen in room definition
+
+00 00 B8 is what is used for r2d2 (and many others)
+
+
+glitch tiles show up on odd ones
+
+0xB0 feet at x + 1, y + 1, not moving, facing right
+0xB2 feet at x - 1, y +1, not moving, facing left
+0xB4 upside down, feet at x + 1, y - 1, not moving, facing right
+0xB6 upside down, feet at x - 1, y - 1, not moving, facing left
+0xB8 feet at x + 1, y + 1, moving right
+0xBA feet at x - 1, y + 1, moving left
+0xBC upside down, feet at x + 1, y - 1, moving (if roof), facing right
+0xBE upside down, feet at x - 1, y - 1, moving (if roof), facing left
+
+0x80  feet at x + 1, y + 1, not moving, facing right
+0x81 glitch
+0x82 feet at x - 1, y +1, not moving, facing left
+0x84 upside down, feet at x + 1, y - 1, not moving, facing right
+0x86 upside down, feet at x - 1, y - 1, not moving, facing left
+0x88 feet at x + 1, y + 1, moving right, stops at wall
+0x8A feet at x - 1, y + 1, moving left, stops at wall
+0x8C upside down, feet at x + 1, y - 1, moving (if roof), facing right, stops at wall
+0x8E upside down, feet at x - 1, y - 1, not moving, facing left, stops at wall
+
+0xAE  upside down, feet at x - 1, y - 1, not moving, facing left, stops at wall
+
+0x0-7X yellow glitchey
+0x8X stops at wall, can fall, can web, can die
+0x9X turns around at wall, can still web, can die, can fall
+0xaX enemy stops at wall, can web, can die, turns around on edges
+0xbX turns around at wall, can web, can die, turns around on edges
+0xcX enemy *always* moves towards spidey, stops at walls, but will turn back if spidey moves, can fall, can web
+0xdX enemy *always* moves towards spidey, turns at walls back and forth (test having a wall between them and spidey, they will always turn, then reset aim to spidey), can fall, can web
+0xeX enemy *always* moves towards spidey, turns at edges back and forth, but not walls, can web
+0xfX enemy moves towards spidey, turns as both edges and walls
+
+
+0x01 is mask for glitch tiled (not the yellow one)
+0x02 is mask for x - 1 and facing left, otherwise x + 1 and right
+0x04 is mask for upside down and y - 1 (referring to feet), otherwise rightway up and y + 1
+0x08 is mask for moving, upside down needs a roof to walk
+0x10 is a mask for whether enemy stops at walls
+0x20 is a mask for whether enemy stops at edges or falls
+0x40 is mask for enemy moving towards spidey
+0x80 is mask for dead??? when not set it is yellow glitchey
+
+
+ok heli
+0x00 stationery
+0x01 moves right, stops at wall
+0x02 moves right, stops at wall faster
+0x03 moves right, stops at wall even faster
+0x04 stationary
+0x05 moves left, stops at wall
+0x06 moves left, stops at wall
+0x07 moves left, stops at wall
+0x08 stationery
+0x09 goes right, bounces off walls
+0x0a goes right, bounces off walls
+0x0b goes right, bounces off walls
+0x0c stationery
+0x0d goes left, bounces off walls
+0x0e goes left, bounces off walls
+0x0f goes left, bounces off walls
+0x10 goes down, stops at wall
+0x20 goes down, stops at wall
+0x30 goes down, stops at wall
+0x40 stationery
+0x50 goes up, stops
+0x60 goes up, stops
+0x70 goes up, stops
+0x80 stationery
+0x90 down, bounces
+0xa0 down, bounces
+0xB0 moves down, then up when hit wall, then down again when hit top
+0xc0 stationery
+0xe0 up, bounces
+0xf0 up, bounces
