@@ -127,17 +127,6 @@ bool any_source_newer(struct stat *library_stat) {
 #define F12  "\x1b[24~"
 
 #define ESCAPE '\033'
-#define CTRL_A "\001"
-#define CTRL_D "\004"
-#define CTRL_H "\010"
-#define CTRL_N "\016"
-#define CTRL_O "\017"
-#define CTRL_P "\020"
-#define CTRL_S "\023"
-#define CTRL_T "\024"
-#define CTRL_U "\025"
-
-#define ALT_h "\033h"
 
 #define MIN_HEIGHT HEIGHT_TILES
 #define MIN_WIDTH 2 * WIDTH_TILES
