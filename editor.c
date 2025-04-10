@@ -103,12 +103,15 @@
 #define ESCAPE '\033'
 #define CTRL_A "\001"
 #define CTRL_D "\004"
+#define CTRL_H "\010"
+#define CTRL_N "\016"
 #define CTRL_O "\017"
+#define CTRL_P "\020"
 #define CTRL_S "\023"
 #define CTRL_T "\024"
-#define CTRL_H "\010"
+#define CTRL_U "\025"
 
-#define MIN_HEIGHT HEIGHT_TILES + 5
+#define MIN_HEIGHT HEIGHT_TILES
 #define MIN_WIDTH 2 * WIDTH_TILES
 
 #include "room.h"
@@ -117,6 +120,17 @@ typedef struct {
     int x;
     int y;
 } v2;
+
+struct debug {
+    bool hex;
+    bool pos;
+    bool data;
+    bool neighbours;
+    bool unknowns;
+    bool objects;
+    bool switches;
+    bool all;
+};
 
 typedef struct {
     size_t size;
@@ -127,11 +141,7 @@ typedef struct {
     bool resized;
     size_t playerlevel;
     bool help;
-    bool debug;
-    bool debughex;
-    bool debugdata;
-    bool debugobjects;
-    bool debugswitches;
+    struct debug debug;
     bool tileedit;
     size_t editlevel;
     v2 tileeditpos;
@@ -148,6 +158,25 @@ void end() {
     }
     exit(0);
     UNREACHABLE();
+}
+
+void debugalltoggle() {
+    state->debug.data = !state->debug.all;
+    state->debug.objects = !state->debug.all;
+    state->debug.switches = !state->debug.all;
+    state->debug.neighbours = !state->debug.all;
+    state->debug.unknowns = !state->debug.all;
+    state->debug.pos = !state->debug.all;
+    state->debug.all = !state->debug.all;
+}
+
+bool debugany() {
+    return state->debug.data &&
+        state->debug.objects &&
+        state->debug.switches &&
+        state->debug.neighbours &&
+        state->debug.unknowns &&
+        state->debug.pos;
 }
 
 void process_input() {
@@ -262,7 +291,7 @@ void process_input() {
                     int x = state->tileeditpos.x;
                     int y = state->tileeditpos.y;
                     struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    if (state->debugobjects) {
+                    if (state->debug.objects) {
                         struct RoomObject *object = NULL;
                         bool obj = false;
                         for (size_t i = 0; i < room->num_objects; i ++) {
@@ -284,7 +313,7 @@ void process_input() {
                             assert(writeRooms(&state->rooms));
                         }
                     }
-                    if (state->debugswitches) {
+                    if (state->debug.switches) {
                         struct SwitchObject *switcch = NULL;
                         bool sw = false;
                         for (size_t i = 0; i < room->num_switches; i ++) {
@@ -306,7 +335,7 @@ void process_input() {
                     int x = state->tileeditpos.x;
                     int y = state->tileeditpos.y;
                     struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    if (state->debugobjects) {
+                    if (state->debug.objects) {
                         bool obj = false;
                         struct RoomObject *object = NULL;
                         for (size_t i = 0; i < room->num_objects; i ++) {
@@ -328,7 +357,7 @@ void process_input() {
                             assert(writeRooms(&state->rooms));
                         }
                     }
-                    if (state->debugswitches) {
+                    if (state->debug.switches) {
                         struct SwitchObject *switcch = NULL;
                         bool sw = false;
                         for (size_t i = 0; i < room->num_switches; i ++) {
@@ -350,7 +379,7 @@ void process_input() {
                     int x = state->tileeditpos.x;
                     int y = state->tileeditpos.y;
                     struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    if (state->debugobjects) {
+                    if (state->debug.objects) {
                         bool obj = false;
                         struct RoomObject *object = NULL;
                         for (size_t i = 0; i < room->num_objects; i ++) {
@@ -372,7 +401,7 @@ void process_input() {
                             assert(writeRooms(&state->rooms));
                         }
                     }
-                    if (state->debugswitches) {
+                    if (state->debug.switches) {
                         struct SwitchObject *switcch = NULL;
                         bool sw = false;
                         for (size_t i = 0; i < room->num_switches; i ++) {
@@ -394,7 +423,7 @@ void process_input() {
                     int x = state->tileeditpos.x;
                     int y = state->tileeditpos.y;
                     struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    if (state->debugobjects) {
+                    if (state->debug.objects) {
                         bool obj = false;
                         struct RoomObject *object = NULL;
                         for (size_t i = 0; i < room->num_objects; i ++) {
@@ -416,7 +445,7 @@ void process_input() {
                             assert(writeRooms(&state->rooms));
                         }
                     }
-                    if (state->debugswitches) {
+                    if (state->debug.switches) {
                         struct SwitchObject *switcch = NULL;
                         bool sw = false;
                         for (size_t i = 0; i < room->num_switches; i ++) {
@@ -437,21 +466,21 @@ void process_input() {
                 }
             }
             if (KEY_MATCHES(CTRL_H)) {
-                state->debughex = !state->debughex;
-                state->debug = true;
+                state->debug.hex = !state->debug.hex;
             } else if (KEY_MATCHES(CTRL_A)) {
-                state->debugdata = !state->debugdata;
-                state->debugobjects = !state->debugobjects;
-                state->debugswitches = !state->debugswitches;
+                debugalltoggle();
+            } else if (KEY_MATCHES(CTRL_P)) {
+                state->debug.pos = !state->debug.pos;
             } else if (KEY_MATCHES(CTRL_D)) {
-                state->debugdata = !state->debugdata;
-                state->debug = true;
+                state->debug.data = !state->debug.data;
+            } else if (KEY_MATCHES(CTRL_U)) {
+                state->debug.unknowns = !state->debug.unknowns;
+            } else if (KEY_MATCHES(CTRL_N)) {
+                state->debug.neighbours = !state->debug.neighbours;
             } else if (KEY_MATCHES(CTRL_O)) {
-                state->debugobjects = !state->debugobjects;
-                state->debug = true;
+                state->debug.objects = !state->debug.objects;
             } else if (KEY_MATCHES(CTRL_S)) {
-                state->debugswitches = !state->debugswitches;
-                state->debug = true;
+                state->debug.switches = !state->debug.switches;
             }
 
             if (match != NULL) {
@@ -484,8 +513,6 @@ void process_input() {
                             } else {
                                 if ((state->editbyte & 0xFF00) != 0) {
                                     state->editbyte = 0;
-                                } else {
-                                    state->debug = !state->debug;
                                 }
                             }
                             i += 1; // Single escape
@@ -505,21 +532,32 @@ void update() {
 
 }
 
-void dumpRoom(struct DecompresssedRoom *room);
 void redraw() {
     GOTO(0, 0);
     printf(RESET_GFX_MODE CLEAR_SCREEN);
+#define PRINTF_DATA(num) printf(state->debug.hex ? "%02x" : "%d", (num))
 
-    assert(MIN_WIDTH >= 2 * WIDTH_TILES);
-    assert(MIN_HEIGHT >= HEIGHT_TILES + 2);
-    if (state->screen_dimensions.x < MIN_WIDTH || state->screen_dimensions.y < MIN_HEIGHT) {
+    int offset_y = 0;
+    int offset_x = 0;
+    if (debugany()) offset_y ++;
+    if (state->debug.data) offset_y ++;
+    if (state->debug.unknowns) offset_y ++;
+    if (state->debug.neighbours) offset_y += 4;
+    if (state->debug.objects) offset_y ++;
+    if (state->debug.switches) offset_y ++;
+    assert(MIN_WIDTH + offset_x >= 2 * WIDTH_TILES);
+    assert(MIN_HEIGHT + offset_y >= HEIGHT_TILES);
+    if (state->screen_dimensions.x <= MIN_WIDTH + offset_x || state->screen_dimensions.y <= MIN_HEIGHT + offset_y) {
         char *message = NULL;
         assert(asprintf(&message,
-                    "Required screen dimension is %dx%d. Currently %dx%d",
-                    MIN_WIDTH, MIN_HEIGHT,
-                    state->screen_dimensions.x, state->screen_dimensions.y
+                    "Required screen dimension is %dx%d. Currently %s%d\033[mx%s%d",
+                    MIN_WIDTH + offset_x + 1, MIN_HEIGHT + offset_y + 1,
+                    (state->screen_dimensions.x < MIN_WIDTH + offset_x + 1 ? "\033[31;1m" : "\033[32m"),
+                    state->screen_dimensions.x,
+                    (state->screen_dimensions.y < MIN_HEIGHT + offset_y + 1 ? "\033[31;1m" : "\033[32m"),
+                    state->screen_dimensions.y
         ) >= 0);
-        int x = state->screen_dimensions.x / 2 - (int)strlen(message) / 2;
+        int x = state->screen_dimensions.x / 2 - (int)(strlen(message) - 7) / 2;
         int y = state->screen_dimensions.y / 2;
         if (x < 0) x = 0;
         if (x >= MIN_WIDTH) x = MIN_WIDTH - 1;
@@ -534,18 +572,27 @@ void redraw() {
 
     size_t level = state->tileedit ? state->editlevel : state->playerlevel;
     struct DecompresssedRoom room = state->rooms.rooms[level].data;
-    GOTO(16, 0);
-    /* char name[24]; */
-    printf("%ld - ", level);
-    for (size_t i = 0; i < C_ARRAY_LEN(room.name); i ++) {
-        printf("%c", room.name[i]);
+    char room_name[25] = {0};
+    assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room.name));
+    strncpy(room_name, room.name, C_ARRAY_LEN(room.name));
+    int room_name_len;
+    for (room_name_len = (int)C_ARRAY_LEN(room_name) - 1; room_name_len >= 0; room_name_len --) {
+        if (room_name[room_name_len] == '\0' || isspace(room_name[room_name_len])) {
+            room_name[room_name_len] = '\0';
+        } else {
+            room_name_len ++;
+            break;
+        }
     }
+    GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
+    PRINTF_DATA((int)level);
+    printf(" - \"%s\"", room_name);
 
     for (int y = 0; y < HEIGHT_TILES; y ++) {
         for (int x = 0; x < WIDTH_TILES; x ++) {
             uint8_t tile = room.tiles[y * WIDTH_TILES + x];
             bool colored = false;
-            if (state->debugswitches)
+            if (state->debug.switches)
             for (int s = 0; s < room.num_switches; s ++) {
                 struct SwitchObject *sw = room.switches + s;
                 assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
@@ -579,7 +626,7 @@ void redraw() {
         }
     }
 
-    if (state->debugobjects)
+    if (state->debug.objects)
     for (size_t i = 0; i < room.num_objects; i ++) {
         struct RoomObject *object = room.objects + i;
         assert(object->x >= 0);
@@ -678,42 +725,89 @@ void redraw() {
         }
     }
 
-    if (state->debug) {
+    if (state->debug.pos) {
         GOTO(0, 0);
         v2 *thing = NULL;
         if (state->tileedit) thing = &state->tileeditpos;
         else thing = &state->player;
-        printf(state->debughex ? "%02x,%02x" : "%d,%d", thing->x, thing->y);
-
-        int bottom = HEIGHT_TILES + 1;
-        if (state->debugdata) {
-            GOTO(0, bottom); bottom ++;
-            printf("UNIMPLEMENTED: debugdata");
-        }
-        if (state->debugobjects) {
-            GOTO(0, bottom); bottom ++;
-            printf("UNIMPLEMENTED: debugobjects");
-        }
-        if (state->debugswitches) {
-            GOTO(0, bottom); bottom ++;
-            printf("UNIMPLEMENTED: debugswitches");
-        }
-        GOTO(0, bottom); bottom ++;
-        uint8_array rest = state->rooms.rooms[level].rest;
-        int pre = printf("Rest (length=%zu):", rest.length);
-        for (size_t i = 0; i < rest.length; i ++) {
-            if (pre + 3 * (i + 2) > (size_t)state->screen_dimensions.x) {
-                printf("...");
-                break;
-            }
-            printf(state->debughex ? " %02x" : " %d", rest.data[i]);
-        }
+        PRINTF_DATA(thing->x);
+        printf(",");
+        PRINTF_DATA(thing->y);
     }
+
+    int bottom = HEIGHT_TILES + 1;
+    if (debugany()) bottom ++;
+    if (state->debug.data) {
+        GOTO(0, bottom); bottom ++;
+        printf("back: ");PRINTF_DATA(room.background);
+        printf(", tileset: ");PRINTF_DATA(room.tile_offset);
+        printf(", dmg: ");PRINTF_DATA(room.room_damage);
+        printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
+        printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
+    }
+    if (state->debug.unknowns) {
+        GOTO(0, bottom); bottom ++;
+        printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
+        printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
+        printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
+    }
+    if (state->debug.neighbours) {
+        char neighbour_name[25] = {0};
+        struct DecompresssedRoom neighbour_room = {0};
+#define READ_NEIGHBOUR(id) do { \
+neighbour_room = state->rooms.rooms[(id)].data; \
+assert(C_ARRAY_LEN(neighbour_name) >= C_ARRAY_LEN(neighbour_room.name)); \
+strncpy(neighbour_name, neighbour_room.name, C_ARRAY_LEN(neighbour_room.name)); \
+for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
+    if (neighbour_name[i] == '\0' || isspace(neighbour_name[i])) { \
+        neighbour_name[i] = '\0'; \
+    } else { \
+        break; \
+    } \
+} \
+} while (0)
+
+        GOTO(0, bottom); bottom ++;
+        printf("left: ");PRINTF_DATA(room.room_west);
+        READ_NEIGHBOUR(room.room_west);
+        printf(" - \"%s\"", neighbour_name);
+        GOTO(0, bottom); bottom ++;
+        printf("down: ");PRINTF_DATA(room.room_south);
+        READ_NEIGHBOUR(room.room_south);
+        printf(" - \"%s\"", neighbour_name);
+        GOTO(0, bottom); bottom ++;
+        printf("up: ");PRINTF_DATA(room.room_north);
+        READ_NEIGHBOUR(room.room_north);
+        printf(" - \"%s\"", neighbour_name);
+        GOTO(0, bottom); bottom ++;
+        printf("right: ");PRINTF_DATA(room.room_east);
+        READ_NEIGHBOUR(room.room_east);
+        printf(" - \"%s\"", neighbour_name);
+    }
+    if (state->debug.objects) {
+        GOTO(0, bottom); bottom ++;
+        printf("UNIMPLEMENTED: debugobjects");
+    }
+    if (state->debug.switches) {
+        GOTO(0, bottom); bottom ++;
+        printf("UNIMPLEMENTED: debugswitches");
+    }
+    /* GOTO(0, bottom); bottom ++; */
+    /* uint8_array rest = state->rooms.rooms[level].rest; */
+    /* int pre = printf("Rest (length=%zu):", rest.length); */
+    /* for (size_t i = 0; i < rest.length; i ++) { */
+    /*     if (pre + 3 * (i + 2) > (size_t)state->screen_dimensions.x) { */
+    /*         printf("..."); */
+    /*         break; */
+    /*     } */
+    /*     printf(" "); */
+    /*     PRINTF_DATA(rest.data[i]); */
+    /* } */
 
     if (state->help) {
         // 35x10
-        int y = 16;
-        if (state->tileedit) y ++;
+        int y = 19;
+        if (state->tileedit) y +=2;
         int x = 40;
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
         printf("\033[47;30;1m");
@@ -733,6 +827,8 @@ void redraw() {
         if (state->tileedit) {
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
             printf("|%-*s|", x - 2, "0-9a-fA-F - Enter hex nibble");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "Shift+dir - Move object/switch around");
         }
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "w/Up/k    - Move cursor up");
@@ -747,15 +843,17 @@ void redraw() {
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "?         - toggle help");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        if (state->tileedit && (state->editbyte & 0xFF00) != 0) {
-            printf("|%-*s|", x - 2, "Escape    - cancel edit entry");
-        } else {
-            printf("|%-*s|", x - 2, "Escape    - toggle debug info");
-        }
+        printf("|%-*s|", x - 2, "Escape    - close/cancel");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Ctrl-h    - toggle hex in debug info");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-p    - toggle position display");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Ctrl-d    - toggle room data display");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-u    - toggle unknown display");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "Ctrl-n    - toggle neighbour display");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Ctrl-o    - toggle room object display");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
@@ -792,8 +890,7 @@ void setup() {
     assert(state != NULL && "Not enough memory");
     state->size = sizeof(game_state);
 
-    state->debug = true;
-    state->debughex = true;
+    debugalltoggle(state);
 
     assert(tcgetattr(STDIN_FILENO, &state->original_termios) == 0);
 

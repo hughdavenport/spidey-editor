@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define ROOMS_FILE "ROOMS.SPL"
+
 #define WIDTH_TILES 32
 #define HEIGHT_TILES 22
 
@@ -122,7 +124,7 @@ struct __attribute__((__packed__)) DecompresssedRoom {
     uint8_t room_south;
     uint8_t room_west;
 
-    uint8_t UNKNOWN_a;
+    uint8_t room_damage;
 
     uint8_t gravity_vertical;
     uint8_t gravity_horizontal;
@@ -163,5 +165,6 @@ bool readFile(RoomFile *file, FILE *fp);
 bool writeFile(RoomFile *file, FILE *fp);
 bool readRooms(RoomFile *file);
 bool writeRooms(RoomFile *file);
+void dumpRoom(Room *room);
 
 #endif // ROOM_H
