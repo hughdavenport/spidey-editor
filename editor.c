@@ -256,10 +256,13 @@ void move(int dx, int dy) {
                 for (size_t c = 1; c < switcch->chunks.length; c ++) {
                     chunk = switcch->chunks.data + c;
                     if (chunk->type == TOGGLE_BLOCK &&
-                            y >= chunk->y && y < chunk->y + chunk->size &&
-                            x >= chunk->x && x < chunk->x + chunk->size &&
-                            chunk->x + dx >= 0 && chunk->x + chunk->size + dx < WIDTH_TILES &&
-                            chunk->y + dy >= 0 && chunk->y + chunk->size + dy < HEIGHT_TILES) {
+                            (chunk->dir == HORIZONTAL ?
+                                 y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size :
+                                 x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) &&
+                             chunk->x + dx >= 0 && chunk->y + dy >= 0 &&
+                            (chunk->dir == HORIZONTAL ?
+                                 chunk->x + chunk->size + dx <= WIDTH_TILES && chunk->y + dy <= HEIGHT_TILES :
+                                 chunk->y + chunk->size + dy <= HEIGHT_TILES && chunk->x + dx <= WIDTH_TILES)) {
                         ch = true;
                         break;
                     }
