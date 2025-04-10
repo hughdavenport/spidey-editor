@@ -197,6 +197,7 @@ bool debugany() {
 void move(int dx, int dy) {
     int x = state->tileeditpos.x;
     int y = state->tileeditpos.y;
+    if (x + dx < 0 || x + dx >= WIDTH_TILES || y + dy < 0 || y + dy >= HEIGHT_TILES) return;
     struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
     bool moved = false;
     if (state->debug.objects) {
@@ -211,10 +212,7 @@ void move(int dx, int dy) {
                     (int)object->y + dy >= 0 && (int)object->y + object->block.height + dy <= HEIGHT_TILES) {
                 obj = true;
                 break;
-            } else if (object->type == SPRITE &&
-                        x == object->x && y == object->y &&
-                        x + dx >= 0 && x + dx < WIDTH_TILES &&
-                        y + dy >= 0 && y + dy < HEIGHT_TILES) {
+            } else if (object->type == SPRITE && x == object->x && y == object->y) {
                 obj = true;
                 break;
             }
@@ -235,14 +233,14 @@ void move(int dx, int dy) {
         for (size_t i = 0; i < room->num_switches; i ++) {
             switcch = room->switches + i;
             if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y &&
-                    x + dx >= 0 && x + dx < WIDTH_TILES &&
-                    y + dy >= 0 && y + dy < HEIGHT_TILES) {
+                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
                 sw = true;
                 break;
             }
         }
         if (sw) {
+            room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
+            room->tiles[TILE_IDX(x, y)] = 0;
             switcch->chunks.data[0].x += dx;
             switcch->chunks.data[0].y += dy;
             state->tileeditpos.x += dx;
@@ -250,8 +248,34 @@ void move(int dx, int dy) {
             ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
             assert(writeRooms(&state->rooms));
             moved = true;
+        } else {
+            struct SwitchChunk *chunk = NULL;
+            bool ch = false;
+            for (size_t i = 0; i < room->num_switches; i ++) {
+                switcch = room->switches + i;
+                for (size_t c = 1; c < switcch->chunks.length; c ++) {
+                    chunk = switcch->chunks.data + c;
+                    if (chunk->type == TOGGLE_BLOCK &&
+                            y >= chunk->y && y < chunk->y + chunk->size &&
+                            x >= chunk->x && x < chunk->x + chunk->size &&
+                            chunk->x + dx >= 0 && chunk->x + chunk->size + dx < WIDTH_TILES &&
+                            chunk->y + dy >= 0 && chunk->y + chunk->size + dy < HEIGHT_TILES) {
+                        ch = true;
+                        break;
+                    }
+                }
+                if (ch) {
+                    chunk->x += dx;
+                    chunk->y += dy;
+                    state->tileeditpos.x += dx;
+                    state->tileeditpos.y += dy;
+                    ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                    assert(writeRooms(&state->rooms));
+                    moved = true;
+                    break;
+                }
+            }
         }
-        // FIXME look for TOGGLE_BLOCK chunks, move them about
     }
     if (!moved && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
         room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
@@ -267,7 +291,7 @@ void drag(int dx, int dy) {
     int x = state->tileeditpos.x;
     int y = state->tileeditpos.y;
     struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-    bool moved = false;
+    bool dragged = false;
     if (state->debug.objects) {
         struct RoomObject *object = NULL;
         bool obj = false;
@@ -285,47 +309,41 @@ void drag(int dx, int dy) {
         }
         if (obj) {
             assert(object->type == BLOCK);
-            /* object->x += dx; */
-            /* object->y += dy; */
             // FIXME drag object
             // if getting bigger (how to know? maybe a flag to func?)
+            // I reckon assume this is increaseing, and have a sep shrink func
             // make a new row/column, copy current row/column
-
-            /* state->tileeditpos.x += dx; */
-            /* state->tileeditpos.y += dy; */
-            /* ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed); */
-            /* assert(writeRooms(&state->rooms)); */
-            /* moved = true; */
+            fprintf(stderr, "%s:%d: UNIMPLEMENTED: drag object", __FILE__, __LINE__);
+            abort();
         }
     }
-    if (!moved && state->debug.switches) {
+    if (!dragged && state->debug.switches) {
         struct SwitchObject *switcch = NULL;
-        bool sw = false;
+        struct SwitchChunk *chunk = NULL;
+        bool ch = false;
+        for (size_t i = 0; i < room->num_switches; i ++) {
+            switcch = room->switches + i;
+            for (size_t c = 1; c < switcch->chunks.length; c ++) {
+                chunk = switcch->chunks.data + c;
+                if (chunk->type == TOGGLE_BLOCK &&
+                        y >= chunk->y && y < chunk->y + chunk->size &&
+                        x >= chunk->x && x < chunk->x + chunk->size &&
+                        chunk->x + dx >= 0 && chunk->x + chunk->size + dx < WIDTH_TILES &&
+                        chunk->y + dy >= 0 && chunk->y + chunk->size + dy < HEIGHT_TILES) {
+                    ch = true;
+                    break;
+                }
+            }
+            if (ch) {
         // FIXME look for TOGGLE_BLOCK chunks, drag them about
         // might need to extend length, or add another chunk added if wrong orientation
-
-        // This doesn't make sense for drag, copy
-        /* for (size_t i = 0; i < room->num_switches; i ++) { */
-        /*     switcch = room->switches + i; */
-        /*     if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE && */
-        /*             x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y && */
-        /*             x + dx >= 0 && x + dx < WIDTH_TILES && */
-        /*             y + dy >= 0 && y + dy < HEIGHT_TILES) { */
-        /*         sw = true; */
-        /*         break; */
-        /*     } */
-        /* } */
-        /* if (sw) { */
-        /*     switcch->chunks.data[0].x += dx; */
-        /*     switcch->chunks.data[0].y += dy; */
-        /*     state->tileeditpos.x += dx; */
-        /*     state->tileeditpos.y += dy; */
-        /*     ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed); */
-        /*     assert(writeRooms(&state->rooms)); */
-        /*     moved = true; */
-        /* } */
+                fprintf(stderr, "%s:%d: UNIMPLEMENTED: update drag toggle block chunk", __FILE__, __LINE__);
+                abort();
+                dragged = true;
+            }
+        }
     }
-    if (!moved && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
+    if (!dragged && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
         room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
         state->tileeditpos.x += dx;
         state->tileeditpos.y += dy;
@@ -369,6 +387,8 @@ void process_input() {
                 if ((state->editbyte & 0xFF00) != 0) {
                     b = (state->editbyte & 0xFF) | b;
                     bool obj = false;
+                    bool sw = false;
+                    bool ch = false;
                     int x = state->tileeditpos.x;
                     int y = state->tileeditpos.y;
                     struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
@@ -387,7 +407,31 @@ void process_input() {
                             break;
                         }
                     }
-                    if (!obj) room->tiles[TILE_IDX(x, y)] = b;
+                    if (!obj) {
+                        struct SwitchObject *switcch = NULL;
+                        struct SwitchChunk *chunk = NULL;
+                        for (size_t i = 0; i < room->num_switches; i ++) {
+                            switcch = room->switches + i;
+                            for (size_t c = 1; c < switcch->chunks.length; c ++) {
+                                chunk = switcch->chunks.data + c;
+                                if (chunk->type == TOGGLE_BLOCK &&
+                                        y >= chunk->y && y < chunk->y + chunk->size &&
+                                        x >= chunk->x && x < chunk->x + chunk->size) {
+                                    ch = true;
+                                    break;
+                                }
+                            }
+                            if (ch) {
+                                // FIXME see if at ends
+                                // if so, then just move chunk x,y and decrease size, and update tile
+                                // if not, then split into 2 chunks, one to just before here, and one starting after, and update tile
+                                fprintf(stderr, "%s:%d: UNIMPLEMENTED: update switch toggle_block chunks", __FILE__, __LINE__);
+                                abort();
+                                break;
+                            }
+                        }
+                    }
+                    if (!obj && !ch) room->tiles[TILE_IDX(x, y)] = b;
                     ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
                     assert(writeRooms(&state->rooms));
                     state->editbyte = 0;
