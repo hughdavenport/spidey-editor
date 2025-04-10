@@ -12,8 +12,14 @@
 /* Only for ntohs, perhaps write our own? */
 #include <arpa/inet.h>
 
-#define IO_IMPLEMENTATION
-#include "io.h"
+#include <stdio.h>
+long filesize(FILE *fp) {
+    long tell = ftell(fp);
+    if (fseek(fp, 0, SEEK_END) < 0) return -1;
+    long length = ftell(fp);
+    if (fseek(fp, tell, SEEK_SET) < 0) return -1;
+    return length;
+}
 
 #define BOOL_S(b) ((b) ? "true" : "false")
 

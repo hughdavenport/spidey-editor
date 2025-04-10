@@ -40,6 +40,27 @@
 #define LIBRARY_BUILD_CMD "cc -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c -o"
 #endif
 
+#include "room.h"
+
+bool any_source_newer(struct stat *library_stat) {
+    struct stat file_stat;
+    char *files[] = {
+        __FILE__,
+        "room.c",
+        "room.h",
+        "array.h"
+    };
+    for (size_t i = 0; i < C_ARRAY_LEN(files); i ++) {
+        if (stat(files[i], &file_stat) == 0) {
+            if (TIME_NEWER(file_stat.st_mtim, library_stat->st_mtim)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+
 #define SAVE_CURSOR "\x1b" "7"
 #define RESTORE_CURSOR "\x1b" "8"
 #define HIDE_CURSOR "\x1b[?25l"
@@ -68,6 +89,11 @@
 #define SHIFT_DOWN  "\x1b[1;2B"
 #define SHIFT_RIGHT "\x1b[1;2C"
 #define SHIFT_LEFT  "\x1b[1;2D"
+
+#define ALT_UP    "\x1b[1;3A"
+#define ALT_DOWN  "\x1b[1;3B"
+#define ALT_RIGHT "\x1b[1;3C"
+#define ALT_LEFT  "\x1b[1;3D"
 
 #define HOME      "\x1b[1~"
 #define INSERT    "\x1b[2~"
@@ -111,10 +137,10 @@
 #define CTRL_T "\024"
 #define CTRL_U "\025"
 
+#define ALT_h "\033h"
+
 #define MIN_HEIGHT HEIGHT_TILES
 #define MIN_WIDTH 2 * WIDTH_TILES
-
-#include "room.h"
 
 typedef struct {
     int x;
@@ -171,12 +197,152 @@ void debugalltoggle() {
 }
 
 bool debugany() {
-    return state->debug.data &&
-        state->debug.objects &&
-        state->debug.switches &&
-        state->debug.neighbours &&
-        state->debug.unknowns &&
+    return state->debug.data ||
+        state->debug.objects ||
+        state->debug.switches ||
+        state->debug.neighbours ||
+        state->debug.unknowns ||
         state->debug.pos;
+}
+
+void move(int dx, int dy) {
+    int x = state->tileeditpos.x;
+    int y = state->tileeditpos.y;
+    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+    bool moved = false;
+    if (state->debug.objects) {
+        struct RoomObject *object = NULL;
+        bool obj = false;
+        for (size_t i = 0; i < room->num_objects; i ++) {
+            object = room->objects + i;
+            if (object->type == BLOCK &&
+                    x >= object->x && x < object->x + object->block.width &&
+                    y >= object->y && y < object->y + object->block.height &&
+                    (int)object->x + dx >= 0 && (int)object->x + object->block.width + dx <= WIDTH_TILES &&
+                    (int)object->y + dy >= 0 && (int)object->y + object->block.height + dy <= HEIGHT_TILES) {
+                obj = true;
+                break;
+            } else if (object->type == SPRITE &&
+                        x == object->x && y == object->y &&
+                        x + dx >= 0 && x + dx < WIDTH_TILES &&
+                        y + dy >= 0 && y + dy < HEIGHT_TILES) {
+                obj = true;
+                break;
+            }
+        }
+        if (obj) {
+            object->x += dx;
+            object->y += dy;
+            state->tileeditpos.x += dx;
+            state->tileeditpos.y += dy;
+            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+            assert(writeRooms(&state->rooms));
+            moved = true;
+        }
+    }
+    if (!moved && state->debug.switches) {
+        struct SwitchObject *switcch = NULL;
+        bool sw = false;
+        for (size_t i = 0; i < room->num_switches; i ++) {
+            switcch = room->switches + i;
+            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y &&
+                    x + dx >= 0 && x + dx < WIDTH_TILES &&
+                    y + dy >= 0 && y + dy < HEIGHT_TILES) {
+                sw = true;
+                break;
+            }
+        }
+        if (sw) {
+            switcch->chunks.data[0].x += dx;
+            switcch->chunks.data[0].y += dy;
+            state->tileeditpos.x += dx;
+            state->tileeditpos.y += dy;
+            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+            assert(writeRooms(&state->rooms));
+            moved = true;
+        }
+        // FIXME look for TOGGLE_BLOCK chunks, move them about
+    }
+    if (!moved && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
+        room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
+        room->tiles[TILE_IDX(x, y)] = 0;
+        state->tileeditpos.x += dx;
+        state->tileeditpos.y += dy;
+        ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+        assert(writeRooms(&state->rooms));
+    }
+}
+
+void drag(int dx, int dy) {
+    int x = state->tileeditpos.x;
+    int y = state->tileeditpos.y;
+    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+    bool moved = false;
+    if (state->debug.objects) {
+        struct RoomObject *object = NULL;
+        bool obj = false;
+        for (size_t i = 0; i < room->num_objects; i ++) {
+            object = room->objects + i;
+            if (object->type == BLOCK &&
+                    x >= object->x && x < object->x + object->block.width &&
+                    y >= object->y && y < object->y + object->block.height &&
+                    // These probably don't make sense, copy paste
+                    (int)object->x + dx >= 0 && (int)object->x + object->block.width + dx <= WIDTH_TILES &&
+                    (int)object->y + dy >= 0 && (int)object->y + object->block.height + dy <= HEIGHT_TILES) {
+                obj = true;
+                break;
+            }
+        }
+        if (obj) {
+            assert(object->type == BLOCK);
+            /* object->x += dx; */
+            /* object->y += dy; */
+            // FIXME drag object
+            // if getting bigger (how to know? maybe a flag to func?)
+            // make a new row/column, copy current row/column
+
+            /* state->tileeditpos.x += dx; */
+            /* state->tileeditpos.y += dy; */
+            /* ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed); */
+            /* assert(writeRooms(&state->rooms)); */
+            /* moved = true; */
+        }
+    }
+    if (!moved && state->debug.switches) {
+        struct SwitchObject *switcch = NULL;
+        bool sw = false;
+        // FIXME look for TOGGLE_BLOCK chunks, drag them about
+        // might need to extend length, or add another chunk added if wrong orientation
+
+        // This doesn't make sense for drag, copy
+        /* for (size_t i = 0; i < room->num_switches; i ++) { */
+        /*     switcch = room->switches + i; */
+        /*     if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE && */
+        /*             x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y && */
+        /*             x + dx >= 0 && x + dx < WIDTH_TILES && */
+        /*             y + dy >= 0 && y + dy < HEIGHT_TILES) { */
+        /*         sw = true; */
+        /*         break; */
+        /*     } */
+        /* } */
+        /* if (sw) { */
+        /*     switcch->chunks.data[0].x += dx; */
+        /*     switcch->chunks.data[0].y += dy; */
+        /*     state->tileeditpos.x += dx; */
+        /*     state->tileeditpos.y += dy; */
+        /*     ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed); */
+        /*     assert(writeRooms(&state->rooms)); */
+        /*     moved = true; */
+        /* } */
+    }
+    if (!moved && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
+        room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
+        state->tileeditpos.x += dx;
+        state->tileeditpos.y += dy;
+        ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+        assert(writeRooms(&state->rooms));
+    }
 }
 
 void process_input() {
@@ -194,14 +360,14 @@ void process_input() {
         while (i < n) {
             char *match = NULL;
 #define KEY_MATCHES(key) ((strncmp(buf + i, (key), strlen((key))) == 0) && (match = key))
-            v2 *thing = NULL;
-            size_t *thinglevel = NULL;
+            v2 *cursor = NULL;
+            size_t *cursorlevel = NULL;
             if (state->tileedit) {
-                thing = &state->tileeditpos;
-                thinglevel = &state->editlevel;
+                cursor = &state->tileeditpos;
+                cursorlevel = &state->editlevel;
             } else {
-                thing = &state->player;
-                thinglevel = &state->playerlevel;
+                cursor = &state->player;
+                cursorlevel = &state->playerlevel;
             }
 
             if (state->tileedit && isxdigit(buf[i])) {
@@ -252,280 +418,80 @@ void process_input() {
                 state->help = !state->help;
             } else if (state->editbyte == 0 || !state->tileedit) {
                 if (KEY_MATCHES(KEY_LEFT) || KEY_MATCHES("h")) {
-                    thing->x --;
-                    if (thing->x < 0) {
-                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_west;
-                        thing->x = WIDTH_TILES - 1;
-                    }
-                } else if (KEY_MATCHES(KEY_RIGHT) || KEY_MATCHES("l")) {
-                    thing->x ++;
-                    if (thing->x >= WIDTH_TILES) {
-                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_east;
-                        thing->x = 0;
-                    }
-                } else if (KEY_MATCHES(KEY_UP) || KEY_MATCHES("k")) {
-                    thing->y --;
-                    if (thing->y < 0) {
-                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_north;
-                        thing->y = HEIGHT_TILES - 1;
+                    cursor->x --;
+                    if (cursor->x < 0) {
+                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
+                        cursor->x = WIDTH_TILES - 1;
                     }
                 } else if (KEY_MATCHES(KEY_DOWN) || KEY_MATCHES("j")) {
-                    thing->y ++;
-                    if (thing->y >= HEIGHT_TILES) {
-                        *thinglevel = state->rooms.rooms[*thinglevel].data.room_south;
-                        thing->y = 0;
+                    cursor->y ++;
+                    if (cursor->y >= HEIGHT_TILES) {
+                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
+                        cursor->y = 0;
                     }
-                } else if (KEY_MATCHES(CTRL_T)) {
-                    if (state->tileedit) {
-                        state->playerlevel = state->editlevel;
-                        state->player = state->tileeditpos;
-                    } else {
-                        state->editlevel = state->playerlevel;
-                        state->tileeditpos = state->player;
+                } else if (KEY_MATCHES(KEY_UP) || KEY_MATCHES("k")) {
+                    cursor->y --;
+                    if (cursor->y < 0) {
+                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
+                        cursor->y = HEIGHT_TILES - 1;
                     }
-                    state->tileedit = !state->tileedit;
+                } else if (KEY_MATCHES(KEY_RIGHT) || KEY_MATCHES("l")) {
+                    cursor->x ++;
+                    if (cursor->x >= WIDTH_TILES) {
+                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
+                        cursor->x = 0;
+                    }
                 }
             }
             if (state->tileedit) {
-                if (KEY_MATCHES(SHIFT_UP) || KEY_MATCHES("K")) {
-                    int x = state->tileeditpos.x;
-                    int y = state->tileeditpos.y;
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    bool moved = false;
-                    if (state->debug.objects) {
-                        struct RoomObject *object = NULL;
-                        bool obj = false;
-                        for (size_t i = 0; i < room->num_objects; i ++) {
-                            object = room->objects + i;
-                            if (object->type == BLOCK &&
-                                    object->y > 0 &&
-                                    x >= object->x && x < object->x + object->block.width &&
-                                    y >= object->y && y < object->y + object->block.height) {
-                                obj = true;
-                                break;
-                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
-                                obj = true;
-                                break;
-                            }
-                        }
-                        if (obj) {
-                            object->y --;
-                            state->tileeditpos.y = y - 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && state->debug.switches) {
-                        struct SwitchObject *switcch = NULL;
-                        bool sw = false;
-                        for (size_t i = 0; i < room->num_switches; i ++) {
-                            switcch = room->switches + i;
-                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-                                sw = true;
-                                break;
-                            }
-                        }
-                        if (sw) {
-                            switcch->chunks.data[0].y --;
-                            state->tileeditpos.y = y - 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && y > 0) {
-                        room->tiles[TILE_IDX(x, y - 1)] = room->tiles[TILE_IDX(x, y)];
-                        room->tiles[TILE_IDX(x, y)] = 0;
-                        state->tileeditpos.y = y - 1;
-                        ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                        assert(writeRooms(&state->rooms));
-                    }
-                } else if (KEY_MATCHES(SHIFT_LEFT) || KEY_MATCHES("H")) {
-                    int x = state->tileeditpos.x;
-                    int y = state->tileeditpos.y;
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    bool moved = false;
-                    if (state->debug.objects) {
-                        bool obj = false;
-                        struct RoomObject *object = NULL;
-                        for (size_t i = 0; i < room->num_objects; i ++) {
-                            object = room->objects + i;
-                            if (object->type == BLOCK &&
-                                    object->x > 0 &&
-                                    x >= object->x && x < object->x + object->block.width &&
-                                    y >= object->y && y < object->y + object->block.height) {
-                                obj = true;
-                                break;
-                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
-                                obj = true;
-                                break;
-                            }
-                        }
-                        if (obj) {
-                            object->x --;
-                            state->tileeditpos.x = x - 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && state->debug.switches) {
-                        struct SwitchObject *switcch = NULL;
-                        bool sw = false;
-                        for (size_t i = 0; i < room->num_switches; i ++) {
-                            switcch = room->switches + i;
-                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-                                sw = true;
-                                break;
-                            }
-                        }
-                        if (sw) {
-                            switcch->chunks.data[0].x --;
-                            state->tileeditpos.x = x - 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && x > 0) {
-                        room->tiles[TILE_IDX(x - 1, y)] = room->tiles[TILE_IDX(x, y)];
-                        room->tiles[TILE_IDX(x, y)] = 0;
-                        state->tileeditpos.x = x - 1;
-                        ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                        assert(writeRooms(&state->rooms));
-                    }
+#define LEFT -1, 0
+#define DOWN 0, +1
+#define UP 0, -1
+#define RIGHT +1, 0
+                // FIXME Currently doesn't move objects through to neighbours
+                if (KEY_MATCHES(SHIFT_LEFT) || KEY_MATCHES("H")) {
+                    move(LEFT);
                 } else if (KEY_MATCHES(SHIFT_DOWN) || KEY_MATCHES("J")) {
-                    int x = state->tileeditpos.x;
-                    int y = state->tileeditpos.y;
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    bool moved = false;
-                    if (state->debug.objects) {
-                        bool obj = false;
-                        struct RoomObject *object = NULL;
-                        for (size_t i = 0; i < room->num_objects; i ++) {
-                            object = room->objects + i;
-                            if (object->type == BLOCK &&
-                                    object->y + object->block.height + 1 <= HEIGHT_TILES &&
-                                    x >= object->x && x < object->x + object->block.width &&
-                                    y >= object->y && y < object->y + object->block.height) {
-                                obj = true;
-                                break;
-                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
-                                obj = true;
-                                break;
-                            }
-                        }
-                        if (obj) {
-                            object->y ++;
-                            state->tileeditpos.y = y + 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && state->debug.switches) {
-                        struct SwitchObject *switcch = NULL;
-                        bool sw = false;
-                        for (size_t i = 0; i < room->num_switches; i ++) {
-                            switcch = room->switches + i;
-                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-                                sw = true;
-                                break;
-                            }
-                        }
-                        if (sw) {
-                            switcch->chunks.data[0].y ++;
-                            state->tileeditpos.y = y + 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && y + 1 < HEIGHT_TILES) {
-                        room->tiles[TILE_IDX(x, y + 1)] = room->tiles[TILE_IDX(x, y)];
-                        room->tiles[TILE_IDX(x, y)] = 0;
-                        state->tileeditpos.y = y + 1;
-                        ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                        assert(writeRooms(&state->rooms));
-                    }
+                    move(DOWN);
+                } else if (KEY_MATCHES(SHIFT_UP) || KEY_MATCHES("K")) {
+                    move(UP);
                 } else if (KEY_MATCHES(SHIFT_RIGHT) || KEY_MATCHES("L")) {
-                    int x = state->tileeditpos.x;
-                    int y = state->tileeditpos.y;
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
-                    bool moved = false;
-                    if (state->debug.objects) {
-                        bool obj = false;
-                        struct RoomObject *object = NULL;
-                        for (size_t i = 0; i < room->num_objects; i ++) {
-                            object = room->objects + i;
-                            if (object->type == BLOCK &&
-                                    object->x + object->block.width + 1 <= WIDTH_TILES &&
-                                    x >= object->x && x < object->x + object->block.width &&
-                                    y >= object->y && y < object->y + object->block.height) {
-                                obj = true;
-                                break;
-                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
-                                obj = true;
-                                break;
-                            }
-                        }
-                        if (obj) {
-                            object->x ++;
-                            state->tileeditpos.x = x + 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && state->debug.switches) {
-                        struct SwitchObject *switcch = NULL;
-                        bool sw = false;
-                        for (size_t i = 0; i < room->num_switches; i ++) {
-                            switcch = room->switches + i;
-                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-                                sw = true;
-                                break;
-                            }
-                        }
-                        if (sw) {
-                            switcch->chunks.data[0].x ++;
-                            state->tileeditpos.x = x + 1;
-                            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                            assert(writeRooms(&state->rooms));
-                            moved = true;
-                        }
-                    }
-                    if (!moved && x + 1 < WIDTH_TILES) {
-                        room->tiles[TILE_IDX(x + 1, y)] = room->tiles[TILE_IDX(x, y)];
-                        room->tiles[TILE_IDX(x, y)] = 0;
-                        state->tileeditpos.x = x + 1;
-                        ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
-                        assert(writeRooms(&state->rooms));
-                    }
+                    move(RIGHT);
+                }
+                if (KEY_MATCHES(ALT_LEFT) || KEY_MATCHES("\033h")) {
+                    drag(LEFT);
+                } else if (KEY_MATCHES(ALT_DOWN) || KEY_MATCHES("\033j")) {
+                    drag(DOWN);
+                } else if (KEY_MATCHES(ALT_UP) || KEY_MATCHES("\033k")) {
+                    drag(UP);
+                } else if (KEY_MATCHES(ALT_RIGHT) || KEY_MATCHES("\033l")) {
+                    drag(RIGHT);
                 }
             }
-            if (KEY_MATCHES(CTRL_H)) {
-                state->debug.hex = !state->debug.hex;
-            } else if (KEY_MATCHES(CTRL_A)) {
-                debugalltoggle();
-            } else if (KEY_MATCHES(CTRL_P)) {
-                state->debug.pos = !state->debug.pos;
-            } else if (KEY_MATCHES(CTRL_D)) {
-                state->debug.data = !state->debug.data;
-            } else if (KEY_MATCHES(CTRL_U)) {
-                state->debug.unknowns = !state->debug.unknowns;
-            } else if (KEY_MATCHES(CTRL_N)) {
-                state->debug.neighbours = !state->debug.neighbours;
-            } else if (KEY_MATCHES(CTRL_O)) {
-                state->debug.objects = !state->debug.objects;
-            } else if (KEY_MATCHES(CTRL_S)) {
-                state->debug.switches = !state->debug.switches;
+            if (iscntrl(buf[i]) != 0) {
+                switch (buf[i] + 'A' - 1) {
+                    case 'A': debugalltoggle(); break;
+                    case 'D': state->debug.data = !state->debug.data; break;
+                    case 'H': state->debug.hex = !state->debug.hex; break;
+                    case 'N': state->debug.neighbours = !state->debug.neighbours; break;
+                    case 'O': state->debug.objects = !state->debug.objects; break;
+                    case 'P': state->debug.pos = !state->debug.pos; break;
+                    case 'S': state->debug.switches = !state->debug.switches; break;
+                    case 'T': {
+                        if (state->tileedit) {
+                            state->playerlevel = state->editlevel;
+                            state->player = state->tileeditpos;
+                        } else {
+                            state->editlevel = state->playerlevel;
+                            state->tileeditpos = state->player;
+                        }
+                        state->tileedit = !state->tileedit;
+                        state->editbyte = 0;
+                    }; break;
+                    case 'U': state->debug.unknowns = !state->debug.unknowns; break;
+                }
             }
+
 
             if (match != NULL) {
                 i += strlen(match);
@@ -851,7 +817,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     if (state->help) {
         // 35x10
         int y = 19;
-        if (state->tileedit) y +=2;
+        if (state->tileedit) y +=3;
         int x = 40;
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
         printf("\033[47;30;1m");
@@ -872,7 +838,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
             printf("|%-*s|", x - 2, "0-9a-fA-F - Enter hex nibble");
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-            printf("|%-*s|", x - 2, "Shift+dir - Move object/switch around");
+            printf("|%-*s|", x - 2, "Shift+dir - Move thing under cursor");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "Alt+dir   - Drag thing under cursor");
         }
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Left/h    - Move cursor left");
@@ -976,17 +944,14 @@ void *loop_main(char *library, void *call_state) {
     signal(SIGINT, end);
 
     while (true) {
-        struct stat file_stat;
         struct stat rooms_stat;
-        if (stat(__FILE__, &file_stat) == 0) {
-            if (TIME_NEWER(file_stat.st_mtim, library_stat.st_mtim)) {
-                // rebuild
-                char *build_cmd = NULL;
-                assert(asprintf(&build_cmd, "%s %s %s 2>/dev/null", LIBRARY_BUILD_CMD, library, __FILE__) > 0);
-                if (system(build_cmd) == 0) {
-                    free(build_cmd);
-                    return state;
-                }
+        if (any_source_newer(&library_stat)) {
+            // rebuild
+            char *build_cmd = NULL;
+            assert(asprintf(&build_cmd, "%s %s %s 2>/dev/null", LIBRARY_BUILD_CMD, library, __FILE__) > 0);
+            if (system(build_cmd) == 0) {
+                free(build_cmd);
+                return state;
             }
         }
         if (stat("ROOMS.SPL", &rooms_stat) == 0) {
