@@ -9,6 +9,8 @@
 #define WIDTH_TILES 32
 #define HEIGHT_TILES 22
 
+#define TILE_IDX(x, y) ((y) * WIDTH_TILES + (x))
+
 #include "array.h"
 
 #define BLANK_TILE 0x00

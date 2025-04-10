@@ -569,14 +569,14 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
             assert(objects[i].block.width < WIDTH_TILES);
             assert(objects[i].x + objects[i].block.width <= WIDTH_TILES);
             if (!(objects[i].y < HEIGHT_TILES)) {
-                printf("WARNING: Room %ld (%s) object %zu y is out of bounds (%u >= %u)\n",
+                fprintf(stderr, "WARNING: Room %ld (%s) object %zu y is out of bounds (%u >= %u)\n",
                         idx, tmp.data.name, i, objects[i].y, HEIGHT_TILES);
                 continue;
             }
             assert(objects[i].y < HEIGHT_TILES);
             assert(objects[i].block.height < HEIGHT_TILES);
             if (!(objects[i].y + objects[i].block.height <= HEIGHT_TILES)) {
-                printf("WARNING: Room %ld (%s) object %zu y+height is out of bounds (%u >= %u)\n",
+                fprintf(stderr, "WARNING: Room %ld (%s) object %zu y+height is out of bounds (%u >= %u)\n",
                         idx, tmp.data.name, i, objects[i].y + objects[i].block.height, HEIGHT_TILES);
                 continue;
             }
@@ -585,11 +585,11 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
             for (size_t y = objects[i].y; y < objects[i].y + objects[i].block.height; y ++) {
                 memcpy(
                         objects[i].tiles + (y - objects[i].y) * objects[i].block.width,
-                        tmp.data.tiles + y * WIDTH_TILES + objects[i].x,
+                        tmp.data.tiles + TILE_IDX(objects[i].x, y),
                         objects[i].block.width
                       );
                 memset(
-                        tmp.data.tiles + y * WIDTH_TILES + objects[i].x,
+                        tmp.data.tiles + TILE_IDX(objects[i].x, y),
                         '\0',
                         objects[i].block.width
                       );
@@ -700,14 +700,14 @@ bool readFile(RoomFile *file, FILE *fp) {
         return false;
     }
     if (head.filesize != length) {
-        printf("Unexpected filesize %u, actual = %zu\n", head.filesize, length);
+        fprintf(stderr, "Unexpected filesize %u, actual = %zu\n", head.filesize, length);
         return false;
     }
 
     for (size_t idx = 0; idx < C_ARRAY_LEN(head.definitions); idx ++) {
         if (!readRoom(&file->rooms[idx], &head, idx, fp)) {
             file->rooms[idx].valid = false;
-            /* printf("Could not read room %lu\n", idx); */
+            /* fprintf(stderr, "Could not read room %lu\n", idx); */
             continue;
         }
         file->rooms[idx].valid = true;
@@ -748,11 +748,11 @@ bool writeRoom(Room *room, FILE *fp) {
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         if (room->data.objects[i].type == SPRITE) continue; // No tile data
         if (room->data.objects[i].tiles == NULL) continue;
-        if(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].block.height >= HEIGHT_TILES) continue;
-        assert(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].block.height < HEIGHT_TILES);
+        /* if(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].block.height >= HEIGHT_TILES) continue; */
+        assert(room->data.objects[i].y + room->data.objects[i].block.height <= HEIGHT_TILES);
         for (size_t y = room->data.objects[i].y; y < room->data.objects[i].y + room->data.objects[i].block.height; y ++) {
             memcpy(
-                    room->data.tiles + y * WIDTH_TILES + room->data.objects[i].x,
+                    room->data.tiles + TILE_IDX(room->data.objects[i].x, y),
                     room->data.objects[i].tiles + (y - room->data.objects[i].y) * room->data.objects[i].block.width,
                     room->data.objects[i].block.width
                   );
@@ -1091,16 +1091,16 @@ bool writeFile(RoomFile *file, FILE *fp) {
     for (size_t i = 0; i < C_ARRAY_LEN(file->rooms); i ++) {
         head.definitions[i] = htons(offset);
         if (!writeRoom(&file->rooms[i], fp)) {
-            /* printf("%s:%d: Not writing room %ld\n", __FILE__, __LINE__, i); */
+            /* fprintf(stderr, "%s:%d: Not writing room %ld\n", __FILE__, __LINE__, i); */
             continue;
         }
         if (ftell(fp) > MAX_ROOM_FILE_SIZE) {
-            printf("%s:%d: Can't write room %ld @ 0x%2lx within size limit. size now %lx\n",
+            fprintf(stderr, "%s:%d: Can't write room %ld @ 0x%2lx within size limit. size now %lx\n",
                     __FILE__, __LINE__, i, offset, ftell(fp));
             break;
         }
         /* printf("%s:%d: Wrote room %ld \"%s\" @ 0x%2lx length %ld\n", */
-        /*         __FILE__, __LINE__, i, file->rooms[i].data.name, offset, ftell(fp) - offset); */
+        /*        __FILE__, __LINE__, i, file->rooms[i].data.name, offset, ftell(fp) - offset); */
 
         offset = ftell(fp);
     }
@@ -1114,7 +1114,7 @@ bool writeFile(RoomFile *file, FILE *fp) {
 bool readRooms(RoomFile *file) {
     FILE *fp = fopen(ROOMS_FILE, "rb");
     if (fp == NULL) {
-        printf("Could not open %s for reading.\n", ROOMS_FILE);
+        fprintf(stderr, "Could not open %s for reading.\n", ROOMS_FILE);
         return false;
     }
     bool ret = readFile(file, fp);
@@ -1124,12 +1124,10 @@ bool readRooms(RoomFile *file) {
 bool writeRooms(RoomFile *file) {
     FILE *fp = fopen(ROOMS_FILE, "wb");
     if (fp == NULL) {
-        printf("Could not open %s for writing.\n", ROOMS_FILE);
+        fprintf(stderr, "Could not open %s for writing.\n", ROOMS_FILE);
         return false;
     }
     bool ret = writeFile(file, fp);
     fclose(fp);
     return ret;
 }
-
-

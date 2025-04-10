@@ -80,7 +80,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         return false;
                     }
-                    idx = y * WIDTH_TILES + idx;
+                    idx = TILE_IDX(idx, y);
                 }
                 if (idx >= WIDTH_TILES * HEIGHT_TILES) {
                     fprintf(stderr, "Invalid tile address, too large: %s\n", (*argv)[0]);
@@ -258,7 +258,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 if (arg != (*argv)[0]) free(arg);
                                 return false;
                             }
-                            idx = y * WIDTH_TILES + idx;
+                            idx = TILE_IDX(idx, y);
                         }
                         if (idx >= WIDTH_TILES * HEIGHT_TILES) {
                             fprintf(stderr, "Invalid tile address, too large: %s\n", (*argv)[0]);
