@@ -829,13 +829,13 @@ void redraw() {
                     if (chunk->type == TOGGLE_BLOCK) {
                         if (chunk->dir == HORIZONTAL) {
                             if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                                printf("\033[4%d;30;1m", (i % 3) + 4);
+                                printf("\033[4%ld;30;1m", (i % 3) + 4);
                                 tile = chunk->on;
                                 ch = true;
                                 break;
                             }
                         } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                            printf("\033[4%d;30;1m", (i % 3) + 4);
+                            printf("\033[4%ld;30;1m", (i % 3) + 4);
                             tile = chunk->on;
                             ch = true;
                             break;
@@ -910,6 +910,7 @@ void redraw() {
         GOTO(0, bottom); bottom ++;
         printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
         printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
+        printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
         printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
     }
     if (state->debug.neighbours) {

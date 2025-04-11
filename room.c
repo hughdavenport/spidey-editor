@@ -100,11 +100,11 @@ void dumpRoom(Room *room) {
     /* } */
     /* printf("]\n"); */
 
-    printf("  Tiles:");
+    printf("Tiles:");
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.tiles); i ++) {
         uint8_t x = i % WIDTH_TILES;
         uint8_t y = i / WIDTH_TILES;
-        if (x == 0) printf("\n    ");
+        if (x == 0) printf("\n");
         bool colored = false;
         bool obj = false;
         uint8_t tile = room->data.tiles[i];
@@ -167,23 +167,26 @@ void dumpRoom(Room *room) {
         if (colored) printf("\033[m");
     }
     printf("\n");
+    printf("\n");
 
-    printf("  Tile offset: %u\n", room->data.tile_offset);
-    printf("  Background: %u\n", room->data.background);
-    printf("  Room North: %u\n", room->data.room_north);
-    printf("  Room East: %u\n", room->data.room_east);
-    printf("  Room South: %u\n", room->data.room_south);
-    printf("  Room West: %u\n", room->data.room_west);
+    printf("back: %u", room->data.background);
+    printf(", tileset: %u", room->data.tile_offset);
+    printf(", dmg: %d", room->data.room_damage);
+    printf(", gravity (|): %u", room->data.gravity_vertical);
+    printf(", gravity (-): %u", room->data.gravity_horizontal);
+    printf("\n");
 
-    printf("  Room Damage: %d 0x%02x\n", room->data.room_damage, room->data.room_damage);
-
-    printf("  Gravity vertical: %u\n", room->data.gravity_vertical);
-    printf("  Gravity horizontal: %u\n", room->data.gravity_horizontal);
+    printf("left: %u", room->data.room_west);
+    printf(" - TODO name\n");
+    printf("down: %u", room->data.room_south);
+    printf(" - TODO name\n");
+    printf("up: %u", room->data.room_north);
+    printf(" - TODO name\n");
+    printf("right: %u", room->data.room_east);
+    printf(" - TODO name\n");
 
     printf("  UNKNOWN (b) (base offset / 3 (i.e. index) into movertab.dat): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
     printf("  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
-    printf("  number of moving objects: %d\n", room->data.num_objects);
-    printf("  number of switches: %d\n", room->data.num_switches);
     printf("  UNKNOWN (e) (base idx into {0x2,0x8,0x20,0x80} for bitmask for switch tests): %d 0x%02x \n", room->data._num_switches & 0x3, room->data._num_switches & 0x3);
     printf("  UNKNOWN (f) (base global_switch index): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
 
@@ -269,25 +272,25 @@ void dumpRoom(Room *room) {
                             chunk->on, chunk->off, chunk->index, chunk->bitmask);
 
                     printf("\033[m\n");
-                    printf("            if global_switches[%ld] has bitmask %02x (staticly defined)\n",
-                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]);
-                    printf("                remove that mask\n");
-                    printf("                *0x1d13 (flags?) is set to 0x20 when global_switches[%ld] has bitmask %02x\n",
-                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x1, 0x4, 0x10, 0x40}[((room->data._num_switches & 0x3) + i) % 4]);
-                    printf("                if (*0x1d13 (flags?) is set)\n");
-                    printf("                    if (.on (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n",
-                            chunk->on, chunk->index, chunk->bitmask);
-                    printf("                    or (.on (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n",
-                            chunk->on, chunk->index, chunk->bitmask);
-                    printf("                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)\n",
-                            chunk->bitmask, chunk->bitmask << 1);
-                    printf("                else if (*0x1d13 (flags?) is not set)\n");
-                    printf("                    if (.off (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n",
-                            chunk->off, chunk->index, chunk->bitmask);
-                    printf("                    or (.off (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n",
-                            chunk->off, chunk->index, chunk->bitmask);
-                    printf("                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)",
-                            chunk->bitmask, chunk->bitmask << 1);
+                    /* printf("            if global_switches[%ld] has bitmask %02x (staticly defined)\n", */
+                    /*         room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]); */
+                    /* printf("                remove that mask\n"); */
+                    /* printf("                *0x1d13 (flags?) is set to 0x20 when global_switches[%ld] has bitmask %02x\n", */
+                    /*         room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x1, 0x4, 0x10, 0x40}[((room->data._num_switches & 0x3) + i) % 4]); */
+                    /* printf("                if (*0x1d13 (flags?) is set)\n"); */
+                    /* printf("                    if (.on (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n", */
+                    /*         chunk->on, chunk->index, chunk->bitmask); */
+                    /* printf("                    or (.on (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n", */
+                    /*         chunk->on, chunk->index, chunk->bitmask); */
+                    /* printf("                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)\n", */
+                    /*         chunk->bitmask, chunk->bitmask << 1); */
+                    /* printf("                else if (*0x1d13 (flags?) is not set)\n"); */
+                    /* printf("                    if (.off (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n", */
+                    /*         chunk->off, chunk->index, chunk->bitmask); */
+                    /* printf("                    or (.off (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n", */
+                    /*         chunk->off, chunk->index, chunk->bitmask); */
+                    /* printf("                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)", */
+                    /*         chunk->bitmask, chunk->bitmask << 1); */
                     break;
 
                 case TOGGLE_OBJECT:

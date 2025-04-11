@@ -119,12 +119,12 @@ struct __attribute__((__packed__)) DecompresssedRoom {
 //  + 24
 //  =742 (0x2e6) - start of rest
     uint8_t tiles[WIDTH_TILES * HEIGHT_TILES];
-    uint8_t tile_offset;
+    uint8_t tile_offset; // DEPRECATED for tileset
     uint8_t background;
-    uint8_t room_north;
-    uint8_t room_east;
-    uint8_t room_south;
-    uint8_t room_west;
+    uint8_t room_north; // DEPRECATED for room_up
+    uint8_t room_east; // DEPRECATED for room_right
+    uint8_t room_south; // DEPRECATED for room_down
+    uint8_t room_west; // DEPRECATED for room_left
 
     uint8_t room_damage;
 

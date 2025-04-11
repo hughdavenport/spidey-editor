@@ -9,6 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#define DEPRECATED(str) do { fprintf(stderr, "%s:%d: DEPRECATED: %s", __FILE__, __LINE__, (str)); } while (0)
+
 typedef enum {
     NORMAL,
     OBJECT,
@@ -55,7 +57,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
         long addr = strtol((*argv)[0], &end, 0);
         if (errno == EINVAL || end == NULL || *end != '\0') {
             addr = -1;
-            if (strcmp((*argv)[0], "tile") == 0 || strcmp((*argv)[0], "tiles") == 0) {
+            if (strcasecmp((*argv)[0], "tile") == 0 || strcasecmp((*argv)[0], "tiles") == 0) {
                 if (access((*argv)[1], R_OK) != 0) {
                     fprintf(stderr, "Could not open tile file: %s\n", (*argv)[1]);
                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
@@ -65,7 +67,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                 *argc -= 2;
                 *argv += 2;
                 continue;
-            } else if ((strncmp((*argv)[0], "tile[", 5) == 0 && isdigit((*argv)[0][5])) || (strncmp((*argv)[0], "tiles[", 6) == 0 && isdigit((*argv)[0][6]))) {
+            } else if ((strncasecmp((*argv)[0], "tile[", 5) == 0 && isdigit((*argv)[0][5])) || (strncasecmp((*argv)[0], "tiles[", 6) == 0 && isdigit((*argv)[0][6]))) {
                 // Read [x][y] or [idx]
                 long idx = strtol((*argv)[0] + ((*argv)[0][4] == '[' ? 5 : 6), &end, 0);
                 if (errno == EINVAL || *end != ']') {
@@ -75,7 +77,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                 }
                 if (end[1] == '[') {
                     long y = strtol(end + 2, &end, 0);
-                    if (errno == EINVAL || strcmp(end, "]") != 0) {
+                    if (errno == EINVAL || strcasecmp(end, "]") != 0) {
                         fprintf(stderr, "Invalid tile address for y: %s\n", (*argv)[0]);
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         return false;
@@ -88,23 +90,43 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     return false;
                 }
                 addr = offsetof(struct DecompresssedRoom, tiles) + idx;
-            } else if (strcmp((*argv)[0], "tile_offset") == 0) {
+            } else if (strcasecmp((*argv)[0], "tile_offset") == 0) {
+                DEPRECATED("tile_offset is now tileset");
                 addr = offsetof(struct DecompresssedRoom, tile_offset);
-            } else if (strcmp((*argv)[0], "background") == 0) {
+            } else if (strcasecmp((*argv)[0], "tileset") == 0) {
+                addr = offsetof(struct DecompresssedRoom, tile_offset);
+            } else if (strcasecmp((*argv)[0], "background") == 0 || strcasecmp((*argv)[0], "back") == 0) {
                 addr = offsetof(struct DecompresssedRoom, background);
-            } else if (strcmp((*argv)[0], "room_north") == 0) {
+            } else if (strcasecmp((*argv)[0], "room_north") == 0) {
+                DEPRECATED("room_north is now room_up");
                 addr = offsetof(struct DecompresssedRoom, room_north);
-            } else if (strcmp((*argv)[0], "room_east") == 0) {
+            } else if (strcasecmp((*argv)[0], "room_up") == 0) {
+                addr = offsetof(struct DecompresssedRoom, room_north);
+            } else if (strcasecmp((*argv)[0], "room_east") == 0) {
+                DEPRECATED("room_east is now room_right");
                 addr = offsetof(struct DecompresssedRoom, room_east);
-            } else if (strcmp((*argv)[0], "room_south") == 0) {
+            } else if (strcasecmp((*argv)[0], "room_right") == 0) {
+                addr = offsetof(struct DecompresssedRoom, room_east);
+            } else if (strcasecmp((*argv)[0], "room_south") == 0) {
+                DEPRECATED("room_south is now room_down");
                 addr = offsetof(struct DecompresssedRoom, room_south);
-            } else if (strcmp((*argv)[0], "room_west") == 0) {
+            } else if (strcasecmp((*argv)[0], "room_down") == 0) {
+                addr = offsetof(struct DecompresssedRoom, room_south);
+            } else if (strcasecmp((*argv)[0], "room_west") == 0) {
+                DEPRECATED("room_west is now room_left");
                 addr = offsetof(struct DecompresssedRoom, room_west);
-            } else if (strcasecmp((*argv)[0], "room_damage") == 0) {
+            } else if (strcasecmp((*argv)[0], "room_left") == 0) {
+                addr = offsetof(struct DecompresssedRoom, room_west);
+            } else if (strcasecmp((*argv)[0], "UNKNOWN_a") == 0) {
+                DEPRECATED("UNKNOWN_a is now room_damage");
                 addr = offsetof(struct DecompresssedRoom, room_damage);
-            } else if (strcmp((*argv)[0], "gravity_vertical") == 0) {
+            } else if (strcasecmp((*argv)[0], "room_damage") == 0 ||
+                    strcasecmp((*argv)[0], "damage") == 0 ||
+                    strcasecmp((*argv)[0], "dmg") == 0) {
+                addr = offsetof(struct DecompresssedRoom, room_damage);
+            } else if (strcasecmp((*argv)[0], "gravity_vertical") == 0) {
                 addr = offsetof(struct DecompresssedRoom, gravity_vertical);
-            } else if (strcmp((*argv)[0], "gravity_horizontal") == 0) {
+            } else if (strcasecmp((*argv)[0], "gravity_horizontal") == 0) {
                 addr = offsetof(struct DecompresssedRoom, gravity_horizontal);
             } else if (strncasecmp((*argv)[0], "UNKNOWN2[", 9) == 0 && isdigit((*argv)[0][9])) {
                 long idx = strtol((*argv)[0] + 9, &end, 0);
@@ -128,7 +150,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                 addr = offsetof(struct DecompresssedRoom, _num_switches);
             } else if (strcasecmp((*argv)[0], "UNKNOWN_f") == 0 || strcasecmp((*argv)[0], "UNKNOWN[f]") == 0) {
                 addr = offsetof(struct DecompresssedRoom, UNKNOWN_f);
-            } else if (strcmp((*argv)[0], "name") == 0) {
+            } else if (strcasecmp((*argv)[0], "name") == 0) {
                 size_t len = strlen((*argv)[1]);
                 if (len > 20) {
                     fprintf(stderr, "Invalid name. Max 20 characters: %s\n", (*argv)[1]);
@@ -167,7 +189,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     }
                     assert(asprintf(&arg, "%s%s", last, arg) >= 0);
                 }
-                if ((strncmp(arg, "object[", 7) == 0 && isdigit(arg[7])) || (strncmp(arg, "objects[", 8) == 0 && isdigit(arg[8]))) {
+                if ((strncasecmp(arg, "object[", 7) == 0 && isdigit(arg[7])) || (strncasecmp(arg, "objects[", 8) == 0 && isdigit(arg[8]))) {
                     long idx = strtol(arg + (arg[6] == '[' ? 7 : 8), &end, 0);
                     if (errno == EINVAL || *end != ']') {
                         fprintf(stderr, "Invalid object id: %s\n", arg);
@@ -177,7 +199,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     }
                     addr = idx * sizeof(struct RoomObject);
                     long value = 0xFFFF;
-                    if (strcmp(end, "].tiles") == 0) {
+                    if (strcasecmp(end, "].tiles") == 0) {
                         if (access((*argv)[1], R_OK) != 0) {
                             fprintf(stderr, "Could not open tile file: %s\n", (*argv)[1]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
@@ -189,13 +211,13 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         *argv += 2;
                         continue;
                     }
-                    if (strcmp(end, "].x") == 0) {
+                    if (strcasecmp(end, "].x") == 0) {
                         addr += offsetof(struct RoomObject, x);
-                    } else if (strcmp(end, "].y") == 0) {
+                    } else if (strcasecmp(end, "].y") == 0) {
                         addr += offsetof(struct RoomObject, y);
-                    } else if (strcmp(end, "].width") == 0) {
+                    } else if (strcasecmp(end, "].width") == 0) {
                         addr += offsetof(struct RoomObject, block.width);
-                    } else if (strcmp(end, "].sprite") == 0) {
+                    } else if (strcasecmp(end, "].sprite") == 0) {
                         addr += offsetof(struct RoomObject, sprite.type);
                         _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
 
@@ -224,11 +246,11 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 return false;
                             }
                         }
-                    } else if (strcmp(end, "].height") == 0) {
+                    } else if (strcasecmp(end, "].height") == 0) {
                         addr += offsetof(struct RoomObject, block.height);
-                    } else if (strcmp(end, "].damage") == 0) {
+                    } else if (strcasecmp(end, "].damage") == 0) {
                         addr += offsetof(struct RoomObject, sprite.damage);
-                    } else if (strcmp(end, "].type") == 0) {
+                    } else if (strcasecmp(end, "].type") == 0) {
                         addr += offsetof(struct RoomObject, type);
                         if (strcasecmp((*argv)[1], "static") == 0 || strcasecmp((*argv)[1], "block") == 0) {
                             value = BLOCK;
@@ -240,7 +262,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
-                    } else if (strncmp(end, "].tile[", 7) == 0 || strncmp(end, "].tiles[", 8) == 0) {
+                    } else if (strncasecmp(end, "].tile[", 7) == 0 || strncasecmp(end, "].tiles[", 8) == 0) {
                         // Read [x][y] or [idx]
                         addr += offsetof(struct RoomObject, tiles);
                         idx = strtol(end + (end[6] == '[' ? 7 : 8), &end, 0);
@@ -252,7 +274,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         }
                         if (end[1] == '[') {
                             long y = strtol(end + 2, &end, 0);
-                            if (errno == EINVAL || strcmp(end, "]") != 0) {
+                            if (errno == EINVAL || strcasecmp(end, "]") != 0) {
                                 fprintf(stderr, "Invalid tile address for y: %s\n", (*argv)[0]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                 if (arg != (*argv)[0]) free(arg);
@@ -310,7 +332,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     *argv += 2;
                     *argc -= 2;
                     continue;
-                } else if ((strncmp(arg, "switch[", 7) == 0 && isdigit(arg[7])) || (strncmp(arg, "switchs[", 8) == 0 && isdigit(arg[8])) || (strncmp(arg, "switches[", 9) == 0 && isdigit(arg[9]))) {
+                } else if ((strncasecmp(arg, "switch[", 7) == 0 && isdigit(arg[7])) || (strncasecmp(arg, "switchs[", 8) == 0 && isdigit(arg[8])) || (strncasecmp(arg, "switches[", 9) == 0 && isdigit(arg[9]))) {
                     long idx = strtol(arg + (arg[6] == '[' ? 7 : (arg[7] == '[' ? 8 : 9)), &end, 0);
                     if (errno == EINVAL || *end != ']') {
                         fprintf(stderr, "Invalid switch id: %s\n", arg);
@@ -321,15 +343,15 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     addr = (idx + 1) * sizeof(struct SwitchObject);
                     long value = 0xFFFF;
                     long chunk_idx = -1;
-                    if (strcmp(end, "].x") == 0) {
+                    if (strcasecmp(end, "].x") == 0) {
                         // Do it on chunks[0].x
                         addr <<= 8;
                         addr += offsetof(struct SwitchChunk, x);
-                    } else if (strcmp(end, "].y") == 0) {
+                    } else if (strcasecmp(end, "].y") == 0) {
                         // Do it on chunks[0].y
                         addr <<= 8;
                         addr += offsetof(struct SwitchChunk, y);
-                    } else if (strcmp(end, "].room_entry") == 0) {
+                    } else if (strcasecmp(end, "].room_entry") == 0) {
                         // Do it on chunks[0].room_entry
                         addr <<= 8;
                         addr += offsetof(struct SwitchChunk, room_entry);
@@ -338,7 +360,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         } else if (strcasecmp((*argv)[1], "true") == 0) {
                             value = 1;
                         }
-                    } else if (strcmp(end, "].one_time_use") == 0) {
+                    } else if (strcasecmp(end, "].one_time_use") == 0) {
                         // Do it on chunks[0].one_time_use
                         addr <<= 8;
                         addr += offsetof(struct SwitchChunk, one_time_use);
@@ -347,7 +369,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         } else if (strcasecmp((*argv)[1], "true") == 0) {
                             value = 1;
                         }
-                    } else if (strcmp(end, "].side") == 0) {
+                    } else if (strcasecmp(end, "].side") == 0) {
                         // Do it on chunks[0].side
                         addr <<= 8;
                         addr += offsetof(struct SwitchChunk, side);
@@ -365,7 +387,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
-                    } else if (strncmp(end, "].chunk[", 8) == 0 || strncmp(end, "].chunks[", 9) == 0) {
+                    } else if (strncasecmp(end, "].chunk[", 8) == 0 || strncasecmp(end, "].chunks[", 9) == 0) {
                         chunk_idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid chunk index: %s\n", arg);
@@ -375,17 +397,17 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         }
                         addr <<= 8;
                         addr += chunk_idx * sizeof(struct SwitchChunk);
-                        if (strcmp(end, "].x") == 0) {
+                        if (strcasecmp(end, "].x") == 0) {
                             addr += offsetof(struct SwitchChunk, x);
-                        } else if (strcmp(end, "].y") == 0) {
+                        } else if (strcasecmp(end, "].y") == 0) {
                             addr += offsetof(struct SwitchChunk, y);
-                        } else if (strcmp(end, "].size") == 0) {
+                        } else if (strcasecmp(end, "].size") == 0) {
                             addr += offsetof(struct SwitchChunk, size);
-                        } else if (strcmp(end, "].off") == 0) {
+                        } else if (strcasecmp(end, "].off") == 0) {
                             addr += offsetof(struct SwitchChunk, off);
-                        } else if (strcmp(end, "].on") == 0) {
+                        } else if (strcasecmp(end, "].on") == 0) {
                             addr += offsetof(struct SwitchChunk, on);
-                        } else if (strcmp(end, "].dir") == 0) {
+                        } else if (strcasecmp(end, "].dir") == 0) {
                             addr += offsetof(struct SwitchChunk, dir);
                             if (strcasecmp((*argv)[1], "VERTICAL") == 0) {
                                 value = VERTICAL;
@@ -403,15 +425,15 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 if (arg != (*argv)[0]) free(arg);
                                 return false;
                             }
-                        } else if (strcmp(end, "].msb") == 0 || strcmp(end, "].msb_without_y") == 0 || strcmp(end, "].msb_without_y_and_one_time_use") == 0) {
+                        } else if (strcasecmp(end, "].msb") == 0 || strcasecmp(end, "].msb_without_y") == 0 || strcasecmp(end, "].msb_without_y_and_one_time_use") == 0) {
                             addr += offsetof(struct SwitchChunk, msb);
-                        } else if (strcmp(end, "].index") == 0) {
+                        } else if (strcasecmp(end, "].index") == 0) {
                             addr += offsetof(struct SwitchChunk, index);
-                        } else if (strcmp(end, "].bitmask") == 0) {
+                        } else if (strcasecmp(end, "].bitmask") == 0) {
                             addr += offsetof(struct SwitchChunk, bitmask);
-                        } else if (strcmp(end, "].test") == 0) {
+                        } else if (strcasecmp(end, "].test") == 0) {
                             addr += offsetof(struct SwitchChunk, test);
-                        } else if (strcmp(end, "].value") == 0) {
+                        } else if (strcasecmp(end, "].value") == 0) {
                             addr += offsetof(struct SwitchChunk, value);
                             if (strcasecmp((*argv)[1], "") == 0 || strcasecmp((*argv)[1], "stop") == 0 || strcasecmp((*argv)[1], "stopped") == 0 || strcasecmp((*argv)[1], "stationary") == 0 || strcasecmp((*argv)[1], "stationery") == 0) {
                                 value = 0;
@@ -432,14 +454,14 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             } else if (strcasecmp((*argv)[1], "down+right") == 0 || strcasecmp((*argv)[1], "right+down") == 0) {
                                 value = MOVE_DOWN | MOVE_RIGHT;
                             }
-                        } else if (strcmp(end, "].room_entry") == 0) {
+                        } else if (strcasecmp(end, "].room_entry") == 0) {
                             addr += offsetof(struct SwitchChunk, room_entry);
                             if (strcasecmp((*argv)[1], "false") == 0) {
                                 value = 0;
                             } else if (strcasecmp((*argv)[1], "true") == 0) {
                                 value = 1;
                             }
-                        } else if (strcmp(end, "].side") == 0) {
+                        } else if (strcasecmp(end, "].side") == 0) {
                             addr += offsetof(struct SwitchChunk, side);
                             if (strcasecmp((*argv)[1], "top") == 0 || strcasecmp((*argv)[1], "up") == 0) {
                                 value = TOP;
@@ -455,7 +477,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 if (arg != (*argv)[0]) free(arg);
                                 return false;
                             }
-                        } else if (strcmp(end, "].type") == 0) {
+                        } else if (strcasecmp(end, "].type") == 0) {
                             addr += offsetof(struct SwitchChunk, type);
                             _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
                             if (strcasecmp((*argv)[1], "PREAMBLE") == 0) {
@@ -587,7 +609,7 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
     *argc -= 2;
     while (*argc >= 1) {
         long addr = 0xFFFF;
-        if ((strncmp((*argv)[0], "object[", 7) == 0 && isdigit((*argv)[0][7])) || (strncmp((*argv)[0], "objects[", 8) == 0 && isdigit((*argv)[0][8]))) {
+        if ((strncasecmp((*argv)[0], "object[", 7) == 0 && isdigit((*argv)[0][7])) || (strncasecmp((*argv)[0], "objects[", 8) == 0 && isdigit((*argv)[0][8]))) {
             long idx = strtol((*argv)[0] + ((*argv)[0][6] == '[' ? 7 : 8), &end, 0);
             if (errno == EINVAL || *end != ']') {
                 fprintf(stderr, "Invalid object id: %s\n", (*argv)[0]);
@@ -596,7 +618,7 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
             }
             addr = idx * sizeof(struct RoomObject);
             ARRAY_ADD(*patches, ((PatchInstruction){ .type = OBJECT, .room_id = room_id, .address = addr, .delete = true }));
-        } else if ((strncmp((*argv)[0], "switch[", 7) == 0 && isdigit((*argv)[0][7])) || (strncmp((*argv)[0], "switchs[", 8) == 0 && isdigit((*argv)[0][8])) || (strncmp((*argv)[0], "switches[", 9) == 0 && isdigit((*argv)[0][9]))) {
+        } else if ((strncasecmp((*argv)[0], "switch[", 7) == 0 && isdigit((*argv)[0][7])) || (strncasecmp((*argv)[0], "switchs[", 8) == 0 && isdigit((*argv)[0][8])) || (strncasecmp((*argv)[0], "switches[", 9) == 0 && isdigit((*argv)[0][9]))) {
             long idx = strtol((*argv)[0] + ((*argv)[0][6] == '[' ? 7 : ((*argv)[0][7] == '[' ? 8 : 9)), &end, 0);
             if (errno == EINVAL || *end != ']') {
                 fprintf(stderr, "Invalid switch id: %s\n", (*argv)[0]);
@@ -604,7 +626,7 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
                 return false;
             }
             addr = (idx + 1) * sizeof(struct SwitchObject);
-            if (strncmp(end, "].chunk[", 8) == 0 || strncmp(end, "].chunks[", 9) == 0) {
+            if (strncasecmp(end, "].chunk[", 8) == 0 || strncasecmp(end, "].chunks[", 9) == 0) {
                 idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
                 if (errno == EINVAL || *end != ']') {
                     fprintf(stderr, "Invalid chunk index: %s\n", (*argv)[0]);
@@ -805,37 +827,37 @@ int main(int argc, char **argv) {
     argc --;
     argv ++;
     while (argc > 0) {
-        if (strcmp(argv[0], "patch") == 0) {
+        if (strcasecmp(argv[0], "patch") == 0) {
             if (!main_patch(&argc, &argv, program, &file, &patches)) {
                 defer_return(1);
             }
-        } else if (strcmp(argv[0], "delete") == 0) {
+        } else if (strcasecmp(argv[0], "delete") == 0) {
             if (!main_delete(&argc, &argv, program, &file, &patches)) {
                 defer_return(1);
             }
-        } else if (strcmp(argv[0], "recompress") == 0) {
+        } else if (strcasecmp(argv[0], "recompress") == 0) {
             if (!main_recompress(&argc, &argv, program, &file, &recompress, &recompress_room)) {
                 defer_return(1);
             }
-        } else if (strcmp(argv[0], "display") == 0) {
+        } else if (strcasecmp(argv[0], "display") == 0) {
             if (!main_display(&argc, &argv, program, &file, &display, &display_room)) {
                 defer_return(1);
             }
-        } else if (strcmp(argv[0], "find_tile") == 0) {
+        } else if (strcasecmp(argv[0], "find_tile") == 0) {
             if (!main_find_tile(&argc, &argv, program, &find_tile, &find_tile_offset)) {
                 defer_return(1);
             }
-        } else if (strcmp(argv[0], "find_sprite") == 0) {
+        } else if (strcasecmp(argv[0], "find_sprite") == 0) {
             if (!main_find_sprite(&argc, &argv, program, &find_sprite)) {
                 defer_return(1);
             }
-        } else if (strcmp(argv[0], "editor") == 0) {
+        } else if (strcasecmp(argv[0], "editor") == 0) {
             defer_return(editor_main());
-        } else if (strcmp(argv[0], "rooms") == 0) {
+        } else if (strcasecmp(argv[0], "rooms") == 0) {
             list = true;
             argv ++;
             argc --;
-        } else if (strcmp(argv[0], "help") == 0) {
+        } else if (strcasecmp(argv[0], "help") == 0) {
             fprintf(stderr, "Subcommands:\n");
             fprintf(stderr, "    rooms                                - List rooms\n");
             fprintf(stderr, "    display [ROOMID]                     - Defaults to all rooms\n");
