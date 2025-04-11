@@ -497,18 +497,15 @@ void process_input() {
                             for (size_t c = 1; c < switcch->chunks.length; c ++) {
                                 chunk = switcch->chunks.data + c;
                                 if (chunk->type == TOGGLE_BLOCK &&
-                                        y >= chunk->y && y < chunk->y + chunk->size &&
-                                        x >= chunk->x && x < chunk->x + chunk->size) {
+                                        ((chunk->dir == VERTICAL && x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) ||
+                                         (chunk->dir == HORIZONTAL && y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size))) {
                                     ch = true;
                                     break;
                                 }
                             }
                             if (ch) {
-                                // FIXME see if at ends
-                                // if so, then just move chunk x,y and decrease size, and update tile
-                                // if not, then split into 2 chunks, one to just before here, and one starting after, and update tile
-                                fprintf(stderr, "%s:%d: UNIMPLEMENTED: update switch toggle_block chunks", __FILE__, __LINE__);
-                                abort();
+                                // FIXME split up chunks, need one for this byte, and potentially 2 more for either end
+                                chunk->on = b;
                                 break;
                             }
                         }
@@ -723,7 +720,7 @@ void redraw() {
                 assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
                 if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
                     colored = true;
-                    printf("\033[4%d;30;1m", (s % 3) + 4);
+                    printf("\033[4%d;30m", (s % 3) + 4);
                     break;
                 }
                 for (size_t c = 1; !colored && c < sw->chunks.length; c ++) {
@@ -731,12 +728,12 @@ void redraw() {
                     if (chunk->type == TOGGLE_BLOCK) {
                         if (chunk->dir == HORIZONTAL) {
                             if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                                printf("\033[3%d;40;1m", (s % 3) + 4);
+                                printf("\033[3%d;40m", (s % 3) + 4);
                                 colored = true;
                                 tile = chunk->on;
                             }
                         } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                            printf("\033[3%d;40;1m", (s % 3) + 4);
+                            printf("\033[3%d;40m", (s % 3) + 4);
                             colored = true;
                             tile = chunk->on;
                         }
@@ -762,7 +759,7 @@ void redraw() {
             case BLOCK:
                 assert(object->x + object->block.width <= WIDTH_TILES);
                 assert(object->y + object->block.height <= HEIGHT_TILES);
-                printf("\033[3%ld;1m", (i % 3) + 1);
+                printf("\033[3%ldm", (i % 3) + 1);
                 for (int y = object->y; y < object->y + object->block.height; y ++) {
                     GOTO(2 * object->x, y + 1);
                     for (int x = object->x; x < object->x + object->block.width; x ++) {
@@ -778,7 +775,7 @@ void redraw() {
 
             case SPRITE:
                 GOTO(2 * object->x, object->y + 1);
-                printf("\033[4%ld;30;1m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
+                printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
                 break;
         }
         printf("\033[m");
@@ -794,6 +791,8 @@ void redraw() {
         GOTO(2 * x, y + 1);
         uint8_t tile = room.tiles[TILE_IDX(x, y)];
         bool obj = false;
+        bool sw = false;
+        bool ch = false;
         bool sprite = false;
         size_t i;
         for (i = 0; i < room.num_objects; i ++) {
@@ -803,7 +802,7 @@ void redraw() {
                     y >= object->y && y < object->y + object->block.height) {
                 obj = true;
                 tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-                printf("\033[30;4%ldm", (i % 8) + 1);
+                printf("\033[30;4%ld;1m", (i % 8) + 1);
                 break;
             } else if (object->type == SPRITE && x == object->x && y == object->y) {
                 obj = true;
@@ -813,10 +812,41 @@ void redraw() {
                 break;
             }
         }
-        if (obj) {
+        if (!obj) {
+            for (i = 0; i < room.num_switches; i ++) {
+                struct SwitchObject *switcch = room.switches + i;
+                if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                        x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                    printf("\033[3%ld;1m", (i % 3) + 4);
+                    sw = true;
+                    break;
+                }
+                size_t c;
+                for (c = 1; c < switcch->chunks.length; c ++) {
+                    struct SwitchChunk *chunk = switcch->chunks.data + c;
+                    if (chunk->type == TOGGLE_BLOCK) {
+                        if (chunk->dir == HORIZONTAL) {
+                            if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                                printf("\033[4%d;30;1m", (i % 3) + 4);
+                                tile = chunk->on;
+                                ch = true;
+                                break;
+                            }
+                        } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                            printf("\033[4%d;30;1m", (i % 3) + 4);
+                            tile = chunk->on;
+                            ch = true;
+                            break;
+                        }
+                    }
+                }
+                if (ch) break;
+            }
+        }
+        if (obj || sw || ch) {
             printf("%02X\033[m", tile);
         } else {
-            printf("\033[47;30m%02X\033[m", tile);
+            printf("\033[47;30;1m%02X\033[m", tile);
         }
         if (state->editbyte) {
             GOTO(2 * x, y + 1);
@@ -826,6 +856,10 @@ void redraw() {
                 } else {
                     printf("\033[3%ld;1m", (i % 8) + 1);
                 }
+            } else if (sw) {
+                printf("\033[30;4%ld;1m", (i % 3) + 4);
+            } else if (ch) {
+                printf("\033[40;3%ld;1m", (i % 3) + 4);
             } else {
                 printf("\033[1m");
             }
@@ -1018,6 +1052,8 @@ void setup() {
     state->size = sizeof(game_state);
 
     debugalltoggle(state);
+    state->tileedit = true;
+    state->editbyte = 0;
 
     assert(tcgetattr(STDIN_FILENO, &state->original_termios) == 0);
 
