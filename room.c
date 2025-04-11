@@ -106,6 +106,7 @@ void dumpRoom(Room *room) {
         uint8_t y = i / WIDTH_TILES;
         if (x == 0) printf("\n    ");
         bool colored = false;
+        bool obj = false;
         uint8_t tile = room->data.tiles[i];
         /* if (x != 0) printf(" "); */
         for (size_t o = 0; o < room->data.num_objects; o ++) {
@@ -115,20 +116,22 @@ void dumpRoom(Room *room) {
                     if (x >= object->x && x < object->x + object->block.width &&
                         y >= object->y && y < object->y + object->block.height) {
 
-                        printf("\033[3%ld;1m", (o % 7) + 1);
+                        printf("\033[3%ldm", (o % 7) + 1);
                         colored = true;
                         assert(object->tiles != NULL);
                         int o_x = x - object->x;
                         int o_y = y - object->y;
                         tile = object->tiles[o_y * object->block.width + o_x];
+                        obj = true;
                     }
                     break;
 
                 case SPRITE:
                     if (x == object->x && y == object->y) {
-                        printf("\033[4%ld;30;1m", (o % 7) + 1);
+                        printf("\033[4%ld;30m", (o % 7) + 1);
                         colored = true;
                         tile = object->sprite.type << 4 | object->sprite.damage;
+                        obj = true;
                     }
             }
             if (colored) break;
@@ -137,7 +140,7 @@ void dumpRoom(Room *room) {
             struct SwitchObject *sw = room->data.switches + s;
             assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
             if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
-                printf("\033[4%ld;30;1m", (s % 3) + 4);
+                printf("\033[4%ld;30m", (s % 3) + 4);
                 colored = true;
                 break;
             }
@@ -146,12 +149,12 @@ void dumpRoom(Room *room) {
                 if (chunk->type == TOGGLE_BLOCK) {
                     if (chunk->dir == HORIZONTAL) {
                         if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                            printf("\033[m\033[3%ld;40;1m", (s % 3) + 4);
+                            printf("\033[m\033[3%ld;40m", (s % 3) + 4);
                             colored = true;
                             tile = chunk->on;
                         }
                     } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                        printf("\033[m\033[3%ld;40;1m", (s % 3) + 4);
+                        printf("\033[m\033[3%ld;40m", (s % 3) + 4);
                         colored = true;
                         tile = chunk->on;
                     }
@@ -159,7 +162,7 @@ void dumpRoom(Room *room) {
             }
         }
 
-        if (tile != BLANK_TILE || colored) printf("%02x", tile);
+        if (tile != BLANK_TILE || (colored && !obj)) printf("%02X", tile);
         else printf("  ");
         if (colored) printf("\033[m");
     }
