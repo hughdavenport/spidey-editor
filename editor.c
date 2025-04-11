@@ -528,31 +528,33 @@ void process_input() {
                 }
             } else if (KEY_MATCHES("?")) {
                 state->help = !state->help;
-            } else if (state->editbyte == 0 || !state->tileedit) {
-                if (KEY_MATCHES(KEY_LEFT) || KEY_MATCHES("h")) {
-                    cursor->x --;
-                    if (cursor->x < 0) {
-                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
-                        cursor->x = WIDTH_TILES - 1;
-                    }
-                } else if (KEY_MATCHES(KEY_DOWN) || KEY_MATCHES("j")) {
-                    cursor->y ++;
-                    if (cursor->y >= HEIGHT_TILES) {
-                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
-                        cursor->y = 0;
-                    }
-                } else if (KEY_MATCHES(KEY_UP) || KEY_MATCHES("k")) {
-                    cursor->y --;
-                    if (cursor->y < 0) {
-                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
-                        cursor->y = HEIGHT_TILES - 1;
-                    }
-                } else if (KEY_MATCHES(KEY_RIGHT) || KEY_MATCHES("l")) {
-                    cursor->x ++;
-                    if (cursor->x >= WIDTH_TILES) {
-                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
-                        cursor->x = 0;
-                    }
+            } else if (KEY_MATCHES(KEY_LEFT) || KEY_MATCHES("h")) {
+                cursor->x --;
+                state->editbyte = 0;
+                if (cursor->x < 0) {
+                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
+                    cursor->x = WIDTH_TILES - 1;
+                }
+            } else if (KEY_MATCHES(KEY_DOWN) || KEY_MATCHES("j")) {
+                cursor->y ++;
+                state->editbyte = 0;
+                if (cursor->y >= HEIGHT_TILES) {
+                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
+                    cursor->y = 0;
+                }
+            } else if (KEY_MATCHES(KEY_UP) || KEY_MATCHES("k")) {
+                cursor->y --;
+                state->editbyte = 0;
+                if (cursor->y < 0) {
+                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
+                    cursor->y = HEIGHT_TILES - 1;
+                }
+            } else if (KEY_MATCHES(KEY_RIGHT) || KEY_MATCHES("l")) {
+                cursor->x ++;
+                state->editbyte = 0;
+                if (cursor->x >= WIDTH_TILES) {
+                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
+                    cursor->x = 0;
                 }
             }
             if (state->tileedit) {
