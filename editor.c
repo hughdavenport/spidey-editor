@@ -912,7 +912,7 @@ void redraw() {
 
             case SPRITE:
                 GOTO(2 * object->x, object->y + 1);
-                assert(object->y * MIN_WIDTH + object->x < sizeof(dirty));
+                assert((unsigned)(object->y * MIN_WIDTH + object->x) < sizeof(dirty));
                 if (dirty[object->y * MIN_WIDTH + object->x] == 1) continue;
                 dirty[object->y * MIN_WIDTH + object->x] = 1;
                 printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);

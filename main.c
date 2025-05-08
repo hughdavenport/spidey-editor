@@ -200,9 +200,8 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         return false;
                     }
                     if (end == str) {
-                        if (arg != (*argv)[0]) free(arg);
-                        UNIMPLEMENTED("patch object [] indices");
-                        return false;
+                        idx = file->rooms[room_id].data.num_objects;
+                        fprintf(stderr, "Choosing new object[%ld] over object[]\n", idx);
                     }
                     addr = idx * sizeof(struct RoomObject);
                     long value = 0xFFFF;
@@ -332,7 +331,11 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         }
                     }
                     if (last != NULL) free(last);
-                    assert(asprintf(&last, "object[%ld]", idx) > 0);
+                    if (idx < 0) {
+                        assert(asprintf(&last, "object[]") > 0);
+                    } else {
+                        assert(asprintf(&last, "object[%ld]", idx) > 0);
+                    }
                     if (arg != (*argv)[0]) free(arg);
 
                     ARRAY_ADD(*patches, ((PatchInstruction){ .type = OBJECT, .room_id = room_id, .address = addr, .value = value, }));
@@ -349,9 +352,8 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         return false;
                     }
                     if (end == str) {
-                        if (arg != (*argv)[0]) free(arg);
-                        UNIMPLEMENTED("patch switch [] indices");
-                        return false;
+                        idx = file->rooms[room_id].data.num_switches;
+                        fprintf(stderr, "Choosing new switch[%ld] over switch[]\n", idx);
                     }
                     addr = (idx + 1) * sizeof(struct SwitchObject);
                     long value = 0xFFFF;
@@ -400,7 +402,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
-                    } else if ((strncasecmp(end, "].chunk[", 8) == 0 && (isdigit(end[8]) || end[8] == ']')) || (strncasecmp(end, "].chunks[", 9) == 0 && (isdigit(end[8]) || end[8] == ']'))) {
+                    } else if ((strncasecmp(end, "].chunk[", 8) == 0 && (isdigit(end[8]) || end[8] == ']')) || (strncasecmp(end, "].chunks[", 9) == 0 && (isdigit(end[9]) || end[9] == ']'))) {
                         char *str = end + (end[7] == '[' ? 8 : 9);
                         chunk_idx = strtol(str, &end, 0);
                         if (errno == EINVAL || *end != ']') {
@@ -410,9 +412,14 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             return false;
                         }
                         if (end == str) {
-                            if (arg != (*argv)[0]) free(arg);
-                            UNIMPLEMENTED("patch switch chunk [] indices");
-                            return false;
+                            if (idx >= file->rooms[room_id].data.num_switches) {
+                                // This may have issues if we do .switches[].chunks[] ..chunks[]. Intention would likely be chunks[0] and chunks[1] on switches[last]
+                                chunk_idx = 1;
+                            } else {
+                                struct SwitchObject *sw = file->rooms[room_id].data.switches + idx;
+                                chunk_idx = sw->chunks.length;
+                            }
+                            fprintf(stderr, "Choosing new chunk[%ld] over chunk[]\n", chunk_idx);
                         }
                         addr <<= 8;
                         addr += chunk_idx * sizeof(struct SwitchChunk);
@@ -537,6 +544,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             return false;
                         }
                     } else {
+                        fprintf(stderr, "end: %s\n", end);
                         fprintf(stderr, "Invalid switch field: %s\n", arg);
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         if (arg != (*argv)[0]) free(arg);
@@ -637,8 +645,13 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
                 return false;
             }
             if (end == str) {
-                UNIMPLEMENTED("delete object [] indices");
-                return false;
+                if (file->rooms[room_id].data.num_objects == 0) {
+                    fprintf(stderr, "No objects left to match object[]\n");
+                    fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                    return false;
+                }
+                idx = file->rooms[room_id].data.num_objects - 1;
+                fprintf(stderr, "Choosing object[%ld] over object[]\n", idx);
             }
             addr = idx * sizeof(struct RoomObject);
             ARRAY_ADD(*patches, ((PatchInstruction){ .type = OBJECT, .room_id = room_id, .address = addr, .delete = true }));
@@ -651,24 +664,34 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
                 return false;
             }
             if (end == str) {
-                UNIMPLEMENTED("delete switch [] indices");
-                return false;
+                if (file->rooms[room_id].data.num_switches == 0) {
+                    fprintf(stderr, "No switches left to match switch[]\n");
+                    fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                    return false;
+                }
+                idx = file->rooms[room_id].data.num_switches - 1;
+                fprintf(stderr, "Choosing switch[%ld] over switch[]\n", idx);
             }
             addr = (idx + 1) * sizeof(struct SwitchObject);
             if ((strncasecmp(end, "].chunk[", 8) == 0 && (isdigit(end[8]) || end[8] == ']')) || (strncasecmp(end, "].chunks[", 9) == 0) || (isdigit(end[9]) || end[9] == ']')) {
                 char *str = end + (end[7] == '[' ? 8 : 9);
-                idx = strtol(str, &end, 0);
+                long chunk_idx = strtol(str, &end, 0);
                 if (errno == EINVAL || *end != ']') {
                     fprintf(stderr, "Invalid chunk index: %s\n", (*argv)[0]);
                     fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
                     return false;
                 }
                 if (end == str) {
-                    UNIMPLEMENTED("delete switch chunk [] indices");
-                    return false;
+                    if (file->rooms[room_id].data.switches[idx].chunks.length == 0) {
+                        fprintf(stderr, "No chunks left to match chunk[]\n");
+                        fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                        return false;
+                    }
+                    chunk_idx = file->rooms[room_id].data.switches[idx].chunks.length - 1;
+                    fprintf(stderr, "Choosing chunk[%ld] over chunk[]\n", chunk_idx);
                 }
                 addr <<= 8;
-                addr += idx * sizeof(struct SwitchChunk);
+                addr += chunk_idx * sizeof(struct SwitchChunk);
             }
             ARRAY_ADD(*patches, ((PatchInstruction){ .type = SWITCH, .room_id = room_id, .address = addr, .delete = true }));
         }
@@ -858,6 +881,15 @@ int main(int argc, char **argv) {
     FILE *fp = NULL;
     int ret = 0;
 #define defer_return(code) { ret = code; goto defer; }
+    fp = fopen(fileName, "rb");
+    if (fp == NULL) {
+        fprintf(stderr, "Could not open %s for reading.\n", fileName);
+        defer_return(1);
+    }
+    fprintf(stderr, "Reading file %s.\n", fileName);
+    if (!readFile(&file, fp)) defer_return(1);
+    fclose(fp);
+    fp = NULL;
     argc --;
     argv ++;
     while (argc > 0) {
@@ -924,15 +956,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "    help                                 - Display this message\n");
         defer_return(1);
     }
-    fp = fopen(fileName, "rb");
-    if (fp == NULL) {
-        fprintf(stderr, "Could not open %s for reading.\n", fileName);
-        defer_return(1);
-    }
-    fprintf(stderr, "Reading file %s.\n", fileName);
-    if (!readFile(&file, fp)) defer_return(1);
-    fclose(fp);
-    fp = NULL;
     if (find_tile != -1) {
         bool found = false;
         for (size_t i = 0; i < C_ARRAY_LEN(file.rooms); i ++) {
@@ -1075,6 +1098,21 @@ int main(int argc, char **argv) {
 
                 case OBJECT: {
                     int idx = patch.address / sizeof(struct RoomObject);
+                    if (patch.address <= -1) {
+                        Room *room = &file.rooms[patch.room_id];
+                        if (patch.delete) {
+                            if (room->data.num_objects == 0) {
+                                fprintf(stderr, "Object id [] for room %d is out of bounds for deletion\n", patch.room_id);
+                                defer_return(1);
+                            }
+                            idx = room->data.num_objects - 1;
+                        } else {
+                            idx = room->data.num_objects;
+                            patch.address += sizeof(struct RoomObject);
+                        }
+                        fprintf(stderr, "Picking object id %d in place of [] for room %d is out of bounds for deletion\n", idx, patch.room_id);
+                        fprintf(stderr, "addr = %d\n", patch.address);
+                    }
                     if (idx < 0) {
                         fprintf(stderr, "Object id %d for room %d is out of bounds\n", idx, patch.room_id);
                         defer_return(1);
@@ -1099,6 +1137,7 @@ int main(int argc, char **argv) {
                         }
                         int addr = patch.address % sizeof(struct RoomObject);
                         struct RoomObject *object = file.rooms[patch.room_id].data.objects + idx;
+                        fprintf(stderr, "addr %d idx %d\n", addr, idx);
                         if (addr == offsetof(struct RoomObject, tiles)) {
                             assert(object->type == BLOCK);
                             assert(object->tiles != NULL);
@@ -1152,6 +1191,10 @@ int main(int argc, char **argv) {
                     }
 
                     struct DecompresssedRoom *room = &file.rooms[patch.room_id].data;
+                    if (patch.object_id == -1) {
+                        fprintf(stderr, "%s:%d: UNIMPLEMENTED: object tileset patch is -ve", __FILE__, __LINE__);
+                        defer_return(1);
+                    }
                     struct RoomObject *object = file.rooms[patch.room_id].data.objects + patch.object_id;
                     size_t tile_idx = 0;
                     size_t data_idx = 0;

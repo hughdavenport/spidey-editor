@@ -53,8 +53,11 @@ You can also chain together patch instructions. `.` means operate on the same `t
  - `./a.out patch 1 switch[1].chunks[1].y 1 ..chunks[2].type TOGGLE_BLOCK`
  - `./a.out patch 1 switch[1].chunks[1].x 1 ..chunks[2].index 1 gravity_vertical 1`
 
-You can also create *new* things, by using the index exactly one above the last. More and it will corrupt your file. In the future you will be able to use `[]` for an index, which will automatically choose the 1 above.
+You can also create *new* things, by using the index exactly one above the last, or using `[]` for an index, which will automatically choose the 1 above.
  - `./a.out patch 1 switches[].x 1 .y 13 .chunks[].type TOGGLE_OBJECT .index 0 .test 0x20 .value left`
+
+You can use the same to delete things:
+ - `./a.out delete objects[]`
 
 If you make any cool room files, feel free to share them. I have the technical skills, less so much the level design skills :D
 
