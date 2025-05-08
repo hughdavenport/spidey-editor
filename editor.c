@@ -95,6 +95,11 @@ bool any_source_newer(struct stat *library_stat) {
 #define ALT_RIGHT "\x1b[1;3C"
 #define ALT_LEFT  "\x1b[1;3D"
 
+#define ALT_SHIFT_UP    "\x1b[1;4A"
+#define ALT_SHIFT_DOWN  "\x1b[1;4B"
+#define ALT_SHIFT_RIGHT "\x1b[1;4C"
+#define ALT_SHIFT_LEFT  "\x1b[1;4D"
+
 #define HOME      "\x1b[1~"
 #define INSERT    "\x1b[2~"
 #define DELETE    "\x1b[3~"
@@ -128,8 +133,8 @@ bool any_source_newer(struct stat *library_stat) {
 
 #define ESCAPE '\033'
 
-#define MIN_HEIGHT HEIGHT_TILES
-#define MIN_WIDTH 2 * WIDTH_TILES
+#define MIN_HEIGHT (HEIGHT_TILES + 1)
+#define MIN_WIDTH (2 * WIDTH_TILES)
 
 typedef struct {
     int x;
@@ -435,6 +440,124 @@ void stretch(int dx, int dy) {
     }
 }
 
+void shrink(int dx, int dy) {
+    int x = state->tileeditpos.x;
+    int y = state->tileeditpos.y;
+    struct DecompresssedRoom *room = &state->rooms.rooms[state->editlevel].data;
+    bool stretched = false;
+    if (state->debug.objects) {
+        struct RoomObject *object = NULL;
+        bool obj = false;
+        for (size_t i = 0; i < room->num_objects; i ++) {
+            object = room->objects + i;
+            if (object->type == BLOCK &&
+                    x >= object->x && x < object->x + object->block.width &&
+                    y >= object->y && y < object->y + object->block.height &&
+                    (int)object->x + dx >= 0 && (int)object->x + object->block.width + dx <= WIDTH_TILES &&
+                    (int)object->y + dy >= 0 && (int)object->y + object->block.height + dy <= HEIGHT_TILES) {
+                if ((dx && object->block.width < 8) || (dy && object->block.height < 4)) {
+                    obj = true;
+                    break;
+                }
+            }
+        }
+        if (obj) {
+            assert(object->type == BLOCK);
+            assert(object->tiles);
+            fprintf(stderr, "%s:%d: UNIMPLEMENTED: shrink object", __FILE__, __LINE__);
+            abort();
+
+            // FIXME I guess pull one end to the direction you are shrinking
+            // so if row 0 and dy -1 noop, but row 1 and dy -1 shifts rows up by one
+            // and row 2 and dy -1 will keep row 1 the same, then shift 3-N up by one
+            // and row 3 will keep row 1&2 the same, then shift 4-N up by one
+            // if dy +1, then keep bottom rows (if any), shift down by one to y
+            // dx the same but in horizontal dir
+
+            state->tileeditpos.x += dx;
+            state->tileeditpos.y += dy;
+            ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+            assert(writeRooms(&state->rooms));
+
+            stretched = true;
+        }
+    }
+    if (!stretched && state->debug.switches) {
+        struct SwitchObject *switcch = NULL;
+        struct SwitchChunk *chunk = NULL;
+        bool ch = false;
+        for (size_t i = 0; i < room->num_switches; i ++) {
+            switcch = room->switches + i;
+            for (size_t c = 1; c < switcch->chunks.length; c ++) {
+                chunk = switcch->chunks.data + c;
+                if (chunk->type == TOGGLE_BLOCK &&
+                        y >= chunk->y && x >= chunk->x &&
+                        chunk->x + dx >= 0 && chunk->y + dy >= 0) {
+                    if ((dy && chunk->dir == VERTICAL) || (dx && chunk->dir == HORIZONTAL)) {
+                        // expand this one
+                        if (chunk->size < 8 && 
+                                ((dy && x == chunk->x && y < chunk->y + chunk->size && chunk->y + chunk->size + dy <= HEIGHT_TILES) ||
+                                 (dx && y == chunk->y && x < chunk->x + chunk->size && chunk->x + chunk->size + dx <= WIDTH_TILES))) {
+                            ch = true;
+                            break;
+                        }
+                    } else if ((dy && y == chunk->y && x < chunk->x + chunk->size) ||
+                            (dx && x == chunk->x && y < chunk->y + chunk->size)) {
+                        // create new chunk
+                        ch = true;
+                        break;
+                    }
+                }
+            }
+            if (ch) {
+                if ((dy && chunk->dir == VERTICAL) || (dx && chunk->dir == HORIZONTAL)) {
+                    // Expand other blocks if next to this?
+                    chunk->size ++;
+                    if (dy < 0) chunk->y --;
+                    if (dx < 0) chunk->x --;
+                } else {
+                    // expand to the next row/column, making a new chunk
+                    // there may already be one here so find the edge of the "block"
+                    int _x = chunk->x + dx;
+                    int _y = chunk->y + dy;
+                    bool conflict = true;
+                    while (conflict) {
+                        conflict = false;
+                        for (size_t i = 1; i < switcch->chunks.length; i ++) {
+                            if (switcch->chunks.data[i].x == _x && switcch->chunks.data[i].y == _y &&
+                                    switcch->chunks.data[i].type == TOGGLE_BLOCK &&
+                                    switcch->chunks.data[i].on == chunk->on &&
+                                    switcch->chunks.data[i].off == chunk->off &&
+                                    switcch->chunks.data[i].size == chunk->size) {
+                                _x += dx;
+                                _y += dy;
+                                conflict = true;
+                                break;
+                            }
+                        }
+                    }
+                    ARRAY_ADD(switcch->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK,
+                                .x = _x, .y = _y, .size = chunk->size,
+                                .on = chunk->on, .off = chunk->off, .dir = chunk->dir }));
+                }
+                state->tileeditpos.x += dx;
+                state->tileeditpos.y += dy;
+                ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+                assert(writeRooms(&state->rooms));
+                stretched = true;
+                break;
+            }
+        }
+    }
+    if (!stretched && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
+        room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
+        state->tileeditpos.x += dx;
+        state->tileeditpos.y += dy;
+        ARRAY_FREE(state->rooms.rooms[state->editlevel].compressed);
+        assert(writeRooms(&state->rooms));
+    }
+}
+
 void process_input() {
     struct pollfd fd = {
         .fd = STDIN_FILENO,
@@ -581,6 +704,15 @@ void process_input() {
                 } else if (KEY_MATCHES(ALT_RIGHT) || KEY_MATCHES("\033l")) {
                     stretch(RIGHT);
                 }
+                if (KEY_MATCHES(ALT_SHIFT_LEFT) || KEY_MATCHES("\033H")) {
+                    shrink(LEFT);
+                } else if (KEY_MATCHES(ALT_SHIFT_DOWN) || KEY_MATCHES("\033J")) {
+                    shrink(DOWN);
+                } else if (KEY_MATCHES(ALT_SHIFT_UP) || KEY_MATCHES("\033K")) {
+                    shrink(UP);
+                } else if (KEY_MATCHES(ALT_SHIFT_RIGHT) || KEY_MATCHES("\033L")) {
+                    shrink(RIGHT);
+                }
             }
             if (iscntrl(buf[i]) != 0) {
                 switch (buf[i] + 'A' - 1) {
@@ -671,7 +803,7 @@ void redraw() {
     if (state->debug.switches) offset_y ++;
     assert(MIN_WIDTH + offset_x >= 2 * WIDTH_TILES);
     assert(MIN_HEIGHT + offset_y >= HEIGHT_TILES);
-    if (state->screen_dimensions.x <= MIN_WIDTH + offset_x || state->screen_dimensions.y <= MIN_HEIGHT + offset_y) {
+    if (state->screen_dimensions.x < MIN_WIDTH + offset_x || state->screen_dimensions.y < MIN_HEIGHT + offset_y) {
         char *message = NULL;
         assert(asprintf(&message,
                     "Required screen dimension is %dx%d. Currently %s%d\033[mx%s%d",
@@ -750,6 +882,7 @@ void redraw() {
         }
     }
 
+    uint8_t dirty[MIN_HEIGHT * MIN_WIDTH] = {0};
     if (state->debug.objects)
     for (size_t i = 0; i < room.num_objects; i ++) {
         struct RoomObject *object = room.objects + i;
@@ -765,6 +898,8 @@ void redraw() {
                 for (int y = object->y; y < object->y + object->block.height; y ++) {
                     GOTO(2 * object->x, y + 1);
                     for (int x = object->x; x < object->x + object->block.width; x ++) {
+                        if (dirty[y * MIN_WIDTH + x] == 1) continue;
+                        dirty[y * MIN_WIDTH + x] = 1;
                         uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
                         if (tile == BLANK_TILE) {
                             printf("  ");
@@ -777,12 +912,19 @@ void redraw() {
 
             case SPRITE:
                 GOTO(2 * object->x, object->y + 1);
+                assert(object->y * MIN_WIDTH + object->x < sizeof(dirty));
+                if (dirty[object->y * MIN_WIDTH + object->x] == 1) continue;
+                dirty[object->y * MIN_WIDTH + object->x] = 1;
                 printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
                 break;
         }
         printf("\033[m");
     }
 
+    struct RoomObject *object_underneath = NULL;
+    struct SwitchObject *switch_underneath = NULL;
+    struct SwitchChunk *chunk_underneath = NULL;
+    struct SwitchObject *chunk_switch_underneath = NULL;
     if (state->tileedit) {
         int x = state->tileeditpos.x;
         int y = state->tileeditpos.y;
@@ -804,46 +946,64 @@ void redraw() {
                     y >= object->y && y < object->y + object->block.height) {
                 obj = true;
                 tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-                printf("\033[30;4%ld;1m", (i % 8) + 1);
+                object_underneath = object;
                 break;
             } else if (object->type == SPRITE && x == object->x && y == object->y) {
                 obj = true;
                 sprite = true;
                 tile = (object->sprite.type << 4) | object->sprite.damage;
-                printf("\033[3%ld;40;1m", (i % 3) + 1);
+                object_underneath = object;
                 break;
             }
         }
-        if (!obj) {
-            for (i = 0; i < room.num_switches; i ++) {
-                struct SwitchObject *switcch = room.switches + i;
-                if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                        x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-                    printf("\033[3%ld;1m", (i % 3) + 4);
-                    sw = true;
-                    break;
-                }
-                size_t c;
-                for (c = 1; c < switcch->chunks.length; c ++) {
-                    struct SwitchChunk *chunk = switcch->chunks.data + c;
-                    if (chunk->type == TOGGLE_BLOCK) {
-                        if (chunk->dir == HORIZONTAL) {
-                            if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                                printf("\033[4%ld;30;1m", (i % 3) + 4);
-                                tile = chunk->on;
-                                ch = true;
-                                break;
-                            }
-                        } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                            printf("\033[4%ld;30;1m", (i % 3) + 4);
+        size_t obj_i = i;
+        for (i = 0; i < room.num_switches; i ++) {
+            struct SwitchObject *switcch = room.switches + i;
+            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                sw = true;
+                switch_underneath = switcch;
+                break;
+            }
+        }
+        size_t sw_i = i;
+        for (i = 0; i < room.num_switches; i ++) {
+            struct SwitchObject *switcch = room.switches + i;
+            size_t c;
+            for (c = 1; c < switcch->chunks.length; c ++) {
+                struct SwitchChunk *chunk = switcch->chunks.data + c;
+                if (chunk->type == TOGGLE_BLOCK) {
+                    if (chunk->dir == HORIZONTAL) {
+                        if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
                             tile = chunk->on;
                             ch = true;
+                            chunk_switch_underneath = switcch;
+                            chunk_underneath = chunk;
                             break;
                         }
+                    } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                        tile = chunk->on;
+                        ch = true;
+                        chunk_switch_underneath = switcch;
+                        chunk_underneath = chunk;
+                        break;
                     }
                 }
-                if (ch) break;
             }
+        }
+        size_t ch_i = i;
+        if (obj) {
+            if (sprite) {
+                printf("\033[3%ld;40;1m", (obj_i % 3) + 1);
+            } else {
+                printf("\033[30;4%ld;1m", (obj_i % 8) + 1);
+            }
+        }
+        if (!obj && sw) {
+            printf("\033[3%ld;1m", (sw_i % 3) + 4);
+        }
+        if (!obj && !sw && ch) {
+            printf("\033[4%ld;30;1m", (ch_i % 3) + 4);
         }
         if (obj || sw || ch) {
             printf("%02X\033[m", tile);
@@ -854,14 +1014,14 @@ void redraw() {
             GOTO(2 * x, y + 1);
             if (obj) {
                 if (sprite) {
-                    printf("\033[30;4%ld;1m", (i % 3) + 1);
+                    printf("\033[30;4%ld;1m", (obj_i % 3) + 1);
                 } else {
-                    printf("\033[3%ld;1m", (i % 8) + 1);
+                    printf("\033[3%ld;1m", (obj_i % 8) + 1);
                 }
             } else if (sw) {
-                printf("\033[30;4%ld;1m", (i % 3) + 4);
+                printf("\033[30;4%ld;1m", (sw_i % 3) + 4);
             } else if (ch) {
-                printf("\033[40;3%ld;1m", (i % 3) + 4);
+                printf("\033[40;3%ld;1m", (ch_i % 3) + 4);
             } else {
                 printf("\033[1m");
             }
@@ -895,6 +1055,9 @@ void redraw() {
         printf(",");
         PRINTF_DATA(thing->y);
     }
+
+    GOTO(6, 0);
+    printf("%s", state->debug.hex ? "[HEX]" : "[DEC]");
 
     int bottom = HEIGHT_TILES + 1;
     if (debugany()) bottom ++;
@@ -948,10 +1111,67 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
     if (state->debug.objects) {
         GOTO(0, bottom); bottom ++;
-        printf("UNIMPLEMENTED: debugobjects");
+        if (state->tileedit) {
+            if (object_underneath != NULL) {
+                switch (object_underneath->type) {
+                    case BLOCK:
+                        printf("block: (x,y)=");
+                        PRINTF_DATA(object_underneath->x);
+                        printf(",");
+                        PRINTF_DATA(object_underneath->y);
+                        printf(" (w,h)=");
+                        PRINTF_DATA(object_underneath->block.width);
+                        printf(",");
+                        PRINTF_DATA(object_underneath->block.height);
+                        break;
+
+                    case SPRITE:
+                        printf("sprite: ");
+                        switch(object_underneath->sprite.type) {
+                            case SHARK: 
+                                switch (object_underneath->sprite.damage) {
+                                    case 1:
+                                    case 2:
+                                        printf("Shark");
+                                        break;
+
+                                    case 3: printf("Mysterio"); break;
+                                    case 4: printf("Mary Jane"); break;
+
+                                    default: UNREACHABLE();
+                                }
+                                break;
+
+                            case MUMMY: printf("Mummy"); break;
+                            case BLUE_MAN: printf("Blue man"); break;
+                            case WOLF: printf("Wolf"); break;
+                            case R2D2: printf("R2D2"); break;
+                            case DINOSAUR: printf("Dinosaur"); break;
+                            case RAT: printf("Rat"); break;
+                            case SHOTGUN_LADY: printf("Shotgun_lady"); break;
+
+                            default: UNREACHABLE();
+                        }
+                        printf(" (x,y)=");
+                        PRINTF_DATA(object_underneath->x);
+                        printf(",");
+                        PRINTF_DATA(object_underneath->y);
+                        printf(" (dmg)=");
+                        PRINTF_DATA(object_underneath->sprite.damage);
+                        break;
+                }
+            } else {
+                printf("No object here, TODO create new?");
+            }
+        } else {
+            printf("UNIMPLEMENTED: debugobjects");
+        }
     }
     if (state->debug.switches) {
         GOTO(0, bottom); bottom ++;
+    (void)switch_underneath;
+    (void)chunk_switch_underneath;
+    (void)chunk_underneath;
         printf("UNIMPLEMENTED: debugswitches");
     }
     /* GOTO(0, bottom); bottom ++; */
@@ -969,7 +1189,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     if (state->help) {
         // 35x10
         int y = 19;
-        if (state->tileedit) y +=3;
+        if (state->tileedit) y += 4;
         int x = 40;
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
         printf("\033[47;30;1m");
@@ -993,6 +1213,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             printf("|%-*s|", x - 2, "Shift+dir - Move thing under cursor");
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
             printf("|%-*s|", x - 2, "Alt+dir   - Stretch thing under cursor");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "Alt+S+dir - Shrink thing under cursor");
         }
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Left/h    - Move cursor left");
