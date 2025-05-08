@@ -1,6 +1,7 @@
 a.out
 editor.so
 *.SPL
+*.spl
 *.png
 Spider/
 *.bz2
