@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #define DEPRECATED(str) do { fprintf(stderr, "%s:%d: DEPRECATED: %s", __FILE__, __LINE__, (str)); } while (0)
+#define UNIMPLEMENTED(str) do { fprintf(stderr, "%s:%d: UNIMPLEMENTED: %s", __FILE__, __LINE__, (str)); } while (0)
 
 typedef enum {
     NORMAL,
@@ -189,12 +190,18 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     }
                     assert(asprintf(&arg, "%s%s", last, arg) >= 0);
                 }
-                if ((strncasecmp(arg, "object[", 7) == 0 && isdigit(arg[7])) || (strncasecmp(arg, "objects[", 8) == 0 && isdigit(arg[8]))) {
-                    long idx = strtol(arg + (arg[6] == '[' ? 7 : 8), &end, 0);
+                if ((strncasecmp(arg, "object[", 7) == 0 && (isdigit(arg[7]) || arg[7] == ']')) || (strncasecmp(arg, "objects[", 8) == 0 && (isdigit(arg[8]) || arg[8] == ']'))) {
+                    char *str = arg + (arg[6] == '[' ? 7 : 8);
+                    long idx = strtol(str, &end, 0);
                     if (errno == EINVAL || *end != ']') {
                         fprintf(stderr, "Invalid object id: %s\n", arg);
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         if (arg != (*argv)[0]) free(arg);
+                        return false;
+                    }
+                    if (end == str) {
+                        if (arg != (*argv)[0]) free(arg);
+                        UNIMPLEMENTED("patch object [] indices");
                         return false;
                     }
                     addr = idx * sizeof(struct RoomObject);
@@ -332,12 +339,18 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     *argv += 2;
                     *argc -= 2;
                     continue;
-                } else if ((strncasecmp(arg, "switch[", 7) == 0 && isdigit(arg[7])) || (strncasecmp(arg, "switchs[", 8) == 0 && isdigit(arg[8])) || (strncasecmp(arg, "switches[", 9) == 0 && isdigit(arg[9]))) {
-                    long idx = strtol(arg + (arg[6] == '[' ? 7 : (arg[7] == '[' ? 8 : 9)), &end, 0);
+                } else if ((strncasecmp(arg, "switch[", 7) == 0 && (isdigit(arg[7]) || arg[7] == ']')) || (strncasecmp(arg, "switchs[", 8) == 0 && (isdigit(arg[8]) || arg[8] == ']')) || (strncasecmp(arg, "switches[", 9) == 0 && (isdigit(arg[9]) || arg[9] == ']'))) {
+                    char *str = arg + (arg[6] == '[' ? 7 : (arg[7] == '[' ? 8 : 9));
+                    long idx = strtol(str, &end, 0);
                     if (errno == EINVAL || *end != ']') {
                         fprintf(stderr, "Invalid switch id: %s\n", arg);
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         if (arg != (*argv)[0]) free(arg);
+                        return false;
+                    }
+                    if (end == str) {
+                        if (arg != (*argv)[0]) free(arg);
+                        UNIMPLEMENTED("patch switch [] indices");
                         return false;
                     }
                     addr = (idx + 1) * sizeof(struct SwitchObject);
@@ -387,12 +400,18 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
-                    } else if (strncasecmp(end, "].chunk[", 8) == 0 || strncasecmp(end, "].chunks[", 9) == 0) {
-                        chunk_idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
+                    } else if ((strncasecmp(end, "].chunk[", 8) == 0 && (isdigit(end[8]) || end[8] == ']')) || (strncasecmp(end, "].chunks[", 9) == 0 && (isdigit(end[8]) || end[8] == ']'))) {
+                        char *str = end + (end[7] == '[' ? 8 : 9);
+                        chunk_idx = strtol(str, &end, 0);
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid chunk index: %s\n", arg);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            return false;
+                        }
+                        if (end == str) {
+                            if (arg != (*argv)[0]) free(arg);
+                            UNIMPLEMENTED("patch switch chunk [] indices");
                             return false;
                         }
                         addr <<= 8;
@@ -609,28 +628,43 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
     *argc -= 2;
     while (*argc >= 1) {
         long addr = 0xFFFF;
-        if ((strncasecmp((*argv)[0], "object[", 7) == 0 && isdigit((*argv)[0][7])) || (strncasecmp((*argv)[0], "objects[", 8) == 0 && isdigit((*argv)[0][8]))) {
-            long idx = strtol((*argv)[0] + ((*argv)[0][6] == '[' ? 7 : 8), &end, 0);
+        if ((strncasecmp((*argv)[0], "object[", 7) == 0 && (isdigit((*argv)[0][7]) || (*argv)[0][7] == ']')) || (strncasecmp((*argv)[0], "objects[", 8) == 0 && (isdigit((*argv)[0][8]) || (*argv)[0][8] == ']'))) {
+            char *str = (*argv)[0] + ((*argv)[0][6] == '[' ? 7 : 8);
+            long idx = strtol(str, &end, 0);
             if (errno == EINVAL || *end != ']') {
                 fprintf(stderr, "Invalid object id: %s\n", (*argv)[0]);
                 fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
                 return false;
             }
+            if (end == str) {
+                UNIMPLEMENTED("delete object [] indices");
+                return false;
+            }
             addr = idx * sizeof(struct RoomObject);
             ARRAY_ADD(*patches, ((PatchInstruction){ .type = OBJECT, .room_id = room_id, .address = addr, .delete = true }));
-        } else if ((strncasecmp((*argv)[0], "switch[", 7) == 0 && isdigit((*argv)[0][7])) || (strncasecmp((*argv)[0], "switchs[", 8) == 0 && isdigit((*argv)[0][8])) || (strncasecmp((*argv)[0], "switches[", 9) == 0 && isdigit((*argv)[0][9]))) {
-            long idx = strtol((*argv)[0] + ((*argv)[0][6] == '[' ? 7 : ((*argv)[0][7] == '[' ? 8 : 9)), &end, 0);
+        } else if ((strncasecmp((*argv)[0], "switch[", 7) == 0 && (isdigit((*argv)[0][7]) || (*argv)[0][7] == ']')) || (strncasecmp((*argv)[0], "switchs[", 8) == 0 && (isdigit((*argv)[0][8]) || (*argv)[0][8] == ']')) || (strncasecmp((*argv)[0], "switches[", 9) == 0 && (isdigit((*argv)[0][9]) || (*argv)[0][9] == ']'))) {
+            char *str = (*argv)[0] + ((*argv)[0][6] == '[' ? 7 : ((*argv)[0][7] == '[' ? 8 : 9));
+            long idx = strtol(str, &end, 0);
             if (errno == EINVAL || *end != ']') {
                 fprintf(stderr, "Invalid switch id: %s\n", (*argv)[0]);
                 fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
                 return false;
             }
+            if (end == str) {
+                UNIMPLEMENTED("delete switch [] indices");
+                return false;
+            }
             addr = (idx + 1) * sizeof(struct SwitchObject);
-            if (strncasecmp(end, "].chunk[", 8) == 0 || strncasecmp(end, "].chunks[", 9) == 0) {
-                idx = strtol(end + (end[7] == '[' ? 8 : 9), &end, 0);
+            if ((strncasecmp(end, "].chunk[", 8) == 0 && (isdigit(end[8]) || end[8] == ']')) || (strncasecmp(end, "].chunks[", 9) == 0) || (isdigit(end[9]) || end[9] == ']')) {
+                char *str = end + (end[7] == '[' ? 8 : 9);
+                idx = strtol(str, &end, 0);
                 if (errno == EINVAL || *end != ']') {
                     fprintf(stderr, "Invalid chunk index: %s\n", (*argv)[0]);
                     fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                    return false;
+                }
+                if (end == str) {
+                    UNIMPLEMENTED("delete switch chunk [] indices");
                     return false;
                 }
                 addr <<= 8;
