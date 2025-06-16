@@ -800,7 +800,99 @@ void redraw() {
     if (state->debug.unknowns) offset_y ++;
     if (state->debug.neighbours) offset_y += 4;
     if (state->debug.objects) offset_y ++;
-    if (state->debug.switches) offset_y ++;
+
+    size_t level = state->tileedit ? state->editlevel : state->playerlevel;
+    struct DecompresssedRoom room = state->rooms.rooms[level].data;
+    char room_name[25] = {0};
+    assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room.name));
+    strncpy(room_name, room.name, C_ARRAY_LEN(room.name));
+    int room_name_len;
+    for (room_name_len = (int)C_ARRAY_LEN(room_name) - 1; room_name_len >= 0; room_name_len --) {
+        if (room_name[room_name_len] == '\0' || isspace(room_name[room_name_len])) {
+            room_name[room_name_len] = '\0';
+        } else {
+            room_name_len ++;
+            break;
+        }
+    }
+    struct RoomObject *object_underneath = NULL;
+    struct SwitchObject *switch_underneath = NULL;
+    struct SwitchChunk *chunk_underneath = NULL;
+    struct SwitchObject *chunk_switch_underneath = NULL;
+
+    int x = state->tileedit ? state->tileeditpos.x : state->player.x;
+    int y = state->tileedit ? state->tileeditpos.y : state->player.y;
+    assert(x >= 0);
+    assert(y >= 0);
+    assert(x < WIDTH_TILES);
+    assert(y < HEIGHT_TILES);
+    GOTO(2 * x, y + 1);
+    uint8_t tile = room.tiles[TILE_IDX(x, y)];
+    bool obj = false;
+    bool sw = false;
+    bool ch = false;
+    bool sprite = false;
+    size_t i;
+    for (i = 0; i < room.num_objects; i ++) {
+        struct RoomObject *object = room.objects + i;
+        if (object->type == BLOCK &&
+                x >= object->x && x < object->x + object->block.width &&
+                y >= object->y && y < object->y + object->block.height) {
+            obj = true;
+            tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
+            object_underneath = object;
+            break;
+        } else if (object->type == SPRITE && x == object->x && y == object->y) {
+            obj = true;
+            sprite = true;
+            tile = (object->sprite.type << 4) | object->sprite.damage;
+            object_underneath = object;
+            break;
+        }
+    }
+    size_t obj_i = i;
+    for (i = 0; i < room.num_switches; i ++) {
+        struct SwitchObject *switcch = room.switches + i;
+        if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+            sw = true;
+            switch_underneath = switcch;
+            break;
+        }
+    }
+    size_t sw_i = i;
+    for (i = 0; i < room.num_switches; i ++) {
+        struct SwitchObject *switcch = room.switches + i;
+        size_t c;
+        for (c = 1; c < switcch->chunks.length; c ++) {
+            struct SwitchChunk *chunk = switcch->chunks.data + c;
+            if (chunk->type == TOGGLE_BLOCK) {
+                if (chunk->dir == HORIZONTAL) {
+                    if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                        tile = chunk->on;
+                        ch = true;
+                        chunk_switch_underneath = switcch;
+                        chunk_underneath = chunk;
+                        break;
+                    }
+                } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                    tile = chunk->on;
+                    ch = true;
+                    chunk_switch_underneath = switcch;
+                    chunk_underneath = chunk;
+                    break;
+                }
+            }
+        }
+    }
+    if (state->debug.switches) {
+        if (switch_underneath != NULL) {
+            offset_y += 2 + switch_underneath->chunks.length;
+        } else if (state->tileedit) {
+            offset_y ++;
+        }
+    }
+
     assert(MIN_WIDTH + offset_x >= 2 * WIDTH_TILES);
     assert(MIN_HEIGHT + offset_y >= HEIGHT_TILES);
     if (state->screen_dimensions.x < MIN_WIDTH + offset_x || state->screen_dimensions.y < MIN_HEIGHT + offset_y) {
@@ -826,20 +918,6 @@ void redraw() {
         return;
     }
 
-    size_t level = state->tileedit ? state->editlevel : state->playerlevel;
-    struct DecompresssedRoom room = state->rooms.rooms[level].data;
-    char room_name[25] = {0};
-    assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room.name));
-    strncpy(room_name, room.name, C_ARRAY_LEN(room.name));
-    int room_name_len;
-    for (room_name_len = (int)C_ARRAY_LEN(room_name) - 1; room_name_len >= 0; room_name_len --) {
-        if (room_name[room_name_len] == '\0' || isspace(room_name[room_name_len])) {
-            room_name[room_name_len] = '\0';
-        } else {
-            room_name_len ++;
-            break;
-        }
-    }
     GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
     PRINTF_DATA((int)level);
     printf(" - \"%s\"", room_name);
@@ -921,78 +999,8 @@ void redraw() {
         printf("\033[m");
     }
 
-    struct RoomObject *object_underneath = NULL;
-    struct SwitchObject *switch_underneath = NULL;
-    struct SwitchChunk *chunk_underneath = NULL;
-    struct SwitchObject *chunk_switch_underneath = NULL;
-
-    int x = state->tileedit ? state->tileeditpos.x : state->player.x;
-    int y = state->tileedit ? state->tileeditpos.y : state->player.y;
-    assert(x >= 0);
-    assert(y >= 0);
-    assert(x < WIDTH_TILES);
-    assert(y < HEIGHT_TILES);
-    GOTO(2 * x, y + 1);
-    uint8_t tile = room.tiles[TILE_IDX(x, y)];
-    bool obj = false;
-    bool sw = false;
-    bool ch = false;
-    bool sprite = false;
-    size_t i;
-    for (i = 0; i < room.num_objects; i ++) {
-        struct RoomObject *object = room.objects + i;
-        if (object->type == BLOCK &&
-                x >= object->x && x < object->x + object->block.width &&
-                y >= object->y && y < object->y + object->block.height) {
-            obj = true;
-            tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-            object_underneath = object;
-            break;
-        } else if (object->type == SPRITE && x == object->x && y == object->y) {
-            obj = true;
-            sprite = true;
-            tile = (object->sprite.type << 4) | object->sprite.damage;
-            object_underneath = object;
-            break;
-        }
-    }
-    size_t obj_i = i;
-    for (i = 0; i < room.num_switches; i ++) {
-        struct SwitchObject *switcch = room.switches + i;
-        if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-            sw = true;
-            switch_underneath = switcch;
-            break;
-        }
-    }
-    size_t sw_i = i;
-    for (i = 0; i < room.num_switches; i ++) {
-        struct SwitchObject *switcch = room.switches + i;
-        size_t c;
-        for (c = 1; c < switcch->chunks.length; c ++) {
-            struct SwitchChunk *chunk = switcch->chunks.data + c;
-            if (chunk->type == TOGGLE_BLOCK) {
-                if (chunk->dir == HORIZONTAL) {
-                    if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                        tile = chunk->on;
-                        ch = true;
-                        chunk_switch_underneath = switcch;
-                        chunk_underneath = chunk;
-                        break;
-                    }
-                } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                    tile = chunk->on;
-                    ch = true;
-                    chunk_switch_underneath = switcch;
-                    chunk_underneath = chunk;
-                    break;
-                }
-            }
-        }
-    }
-
     if (state->tileedit) {
+        GOTO(2 * x, y + 1);
         size_t ch_i = i;
         if (obj) {
             if (sprite) {
@@ -1167,10 +1175,69 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
     if (state->debug.switches) {
         GOTO(0, bottom); bottom ++;
-    (void)switch_underneath;
     (void)chunk_switch_underneath;
     (void)chunk_underneath;
-        printf("UNIMPLEMENTED: debugswitches");
+        if (switch_underneath != NULL) {
+#define BOOL_S(b) ((b) ? "true" : "false")
+            assert(switch_underneath->chunks.length >= 1);
+            struct SwitchChunk *preamble = switch_underneath->chunks.data;
+            printf("switch: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                    preamble->x, preamble->y,
+                    BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
+                    SWITCH_SIDE(preamble->side));
+            printf("    unknown: (msb|0x40)=%02x\n", preamble->msb & 0x40);
+            if (switch_underneath->chunks.length > 1) {
+                printf("chunks:\n");
+                for (size_t i = 1; i < switch_underneath->chunks.length; i ++) {
+                    printf("    ");
+                    struct SwitchChunk *chunk = switch_underneath->chunks.data + i;
+                    switch (chunk->type) {
+                        case PREAMBLE: UNREACHABLE();
+                        case TOGGLE_BLOCK:
+                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                            if (point >= overflow) {
+                                printf("memory:");
+                                size_t offset = point - overflow;
+                                size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+                                if (offset >= end) {
+                                    printf("way out of bounds");
+                                    assert(false);
+                                }
+                                switch (offset) {
+                                    case 0: printf(" tile_offset"); break;
+                                    case 1: printf(" background"); break;
+                                    case 2: printf(" room_north"); break;
+                                    case 3: printf(" room_east"); break;
+                                    case 4: printf(" room_south"); break;
+                                    case 5: printf(" room_west"); break;
+                                    case 6: printf(" room_damage"); break;
+                                    case 7: printf(" gravity_vertical"); break;
+                                    case 8: printf(" gravity_horizontal"); break;
+                                    case 9: printf(" UNKNOWN_b"); break;
+                                    case 10: printf(" UNKNOWN_c"); break;
+                                    case 11: printf(" num_objects"); break;
+                                    case 12: printf(" _num_switches"); break;
+                                    case 13: printf(" UNKNOWN_f"); break;
+                                    default: printf(" somewhere inside name"); break;
+                                }
+                                printf(" (on/off)=%02x/%02x", chunk->on, chunk->off);
+                            } else {
+                                printf("block: (x,y)=%d,%d (%s)=%d (on/off)=%02x/%02x",
+                                       chunk->x, chunk->y, (chunk->dir == VERTICAL ? "height" : "width"),
+                                       chunk->size, chunk->on, chunk->off);
+                            }
+                            break;
+                        case TOGGLE_BIT: printf("bit - TODO"); break;
+                        case TOGGLE_OBJECT: printf("object - TODO"); break;
+                        default: UNREACHABLE();
+                    }
+                    if (i < switch_underneath->chunks.length - 1) printf("\n");
+                }
+            }
+        } else if (state->tileedit) {
+            printf("No switch here, TODO create new?");
+        }
     }
     /* GOTO(0, bottom); bottom ++; */
     /* uint8_array rest = state->rooms.rooms[level].rest; */
