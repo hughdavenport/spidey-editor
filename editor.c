@@ -925,72 +925,74 @@ void redraw() {
     struct SwitchObject *switch_underneath = NULL;
     struct SwitchChunk *chunk_underneath = NULL;
     struct SwitchObject *chunk_switch_underneath = NULL;
-    if (state->tileedit) {
-        int x = state->tileeditpos.x;
-        int y = state->tileeditpos.y;
-        assert(x >= 0);
-        assert(y >= 0);
-        assert(x < WIDTH_TILES);
-        assert(y < HEIGHT_TILES);
-        GOTO(2 * x, y + 1);
-        uint8_t tile = room.tiles[TILE_IDX(x, y)];
-        bool obj = false;
-        bool sw = false;
-        bool ch = false;
-        bool sprite = false;
-        size_t i;
-        for (i = 0; i < room.num_objects; i ++) {
-            struct RoomObject *object = room.objects + i;
-            if (object->type == BLOCK &&
-                    x >= object->x && x < object->x + object->block.width &&
-                    y >= object->y && y < object->y + object->block.height) {
-                obj = true;
-                tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-                object_underneath = object;
-                break;
-            } else if (object->type == SPRITE && x == object->x && y == object->y) {
-                obj = true;
-                sprite = true;
-                tile = (object->sprite.type << 4) | object->sprite.damage;
-                object_underneath = object;
-                break;
-            }
+
+    int x = state->tileedit ? state->tileeditpos.x : state->player.x;
+    int y = state->tileedit ? state->tileeditpos.y : state->player.y;
+    assert(x >= 0);
+    assert(y >= 0);
+    assert(x < WIDTH_TILES);
+    assert(y < HEIGHT_TILES);
+    GOTO(2 * x, y + 1);
+    uint8_t tile = room.tiles[TILE_IDX(x, y)];
+    bool obj = false;
+    bool sw = false;
+    bool ch = false;
+    bool sprite = false;
+    size_t i;
+    for (i = 0; i < room.num_objects; i ++) {
+        struct RoomObject *object = room.objects + i;
+        if (object->type == BLOCK &&
+                x >= object->x && x < object->x + object->block.width &&
+                y >= object->y && y < object->y + object->block.height) {
+            obj = true;
+            tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
+            object_underneath = object;
+            break;
+        } else if (object->type == SPRITE && x == object->x && y == object->y) {
+            obj = true;
+            sprite = true;
+            tile = (object->sprite.type << 4) | object->sprite.damage;
+            object_underneath = object;
+            break;
         }
-        size_t obj_i = i;
-        for (i = 0; i < room.num_switches; i ++) {
-            struct SwitchObject *switcch = room.switches + i;
-            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-                sw = true;
-                switch_underneath = switcch;
-                break;
-            }
+    }
+    size_t obj_i = i;
+    for (i = 0; i < room.num_switches; i ++) {
+        struct SwitchObject *switcch = room.switches + i;
+        if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+            sw = true;
+            switch_underneath = switcch;
+            break;
         }
-        size_t sw_i = i;
-        for (i = 0; i < room.num_switches; i ++) {
-            struct SwitchObject *switcch = room.switches + i;
-            size_t c;
-            for (c = 1; c < switcch->chunks.length; c ++) {
-                struct SwitchChunk *chunk = switcch->chunks.data + c;
-                if (chunk->type == TOGGLE_BLOCK) {
-                    if (chunk->dir == HORIZONTAL) {
-                        if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                            tile = chunk->on;
-                            ch = true;
-                            chunk_switch_underneath = switcch;
-                            chunk_underneath = chunk;
-                            break;
-                        }
-                    } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+    }
+    size_t sw_i = i;
+    for (i = 0; i < room.num_switches; i ++) {
+        struct SwitchObject *switcch = room.switches + i;
+        size_t c;
+        for (c = 1; c < switcch->chunks.length; c ++) {
+            struct SwitchChunk *chunk = switcch->chunks.data + c;
+            if (chunk->type == TOGGLE_BLOCK) {
+                if (chunk->dir == HORIZONTAL) {
+                    if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
                         tile = chunk->on;
                         ch = true;
                         chunk_switch_underneath = switcch;
                         chunk_underneath = chunk;
                         break;
                     }
+                } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                    tile = chunk->on;
+                    ch = true;
+                    chunk_switch_underneath = switcch;
+                    chunk_underneath = chunk;
+                    break;
                 }
             }
         }
+    }
+
+    if (state->tileedit) {
         size_t ch_i = i;
         if (obj) {
             if (sprite) {
@@ -1111,60 +1113,56 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
     if (state->debug.objects) {
         GOTO(0, bottom); bottom ++;
-        if (state->tileedit) {
-            if (object_underneath != NULL) {
-                switch (object_underneath->type) {
-                    case BLOCK:
-                        printf("block: (x,y)=");
-                        PRINTF_DATA(object_underneath->x);
-                        printf(",");
-                        PRINTF_DATA(object_underneath->y);
-                        printf(" (w,h)=");
-                        PRINTF_DATA(object_underneath->block.width);
-                        printf(",");
-                        PRINTF_DATA(object_underneath->block.height);
-                        break;
+        if (object_underneath != NULL) {
+            switch (object_underneath->type) {
+                case BLOCK:
+                    printf("block: (x,y)=");
+                    PRINTF_DATA(object_underneath->x);
+                    printf(",");
+                    PRINTF_DATA(object_underneath->y);
+                    printf(" (w,h)=");
+                    PRINTF_DATA(object_underneath->block.width);
+                    printf(",");
+                    PRINTF_DATA(object_underneath->block.height);
+                    break;
 
-                    case SPRITE:
-                        printf("sprite: ");
-                        switch(object_underneath->sprite.type) {
-                            case SHARK: 
-                                switch (object_underneath->sprite.damage) {
-                                    case 1:
-                                    case 2:
-                                        printf("Shark");
-                                        break;
+                case SPRITE:
+                    printf("sprite: ");
+                    switch(object_underneath->sprite.type) {
+                        case SHARK: 
+                            switch (object_underneath->sprite.damage) {
+                                case 1:
+                                case 2:
+                                    printf("Shark");
+                                    break;
 
-                                    case 3: printf("Mysterio"); break;
-                                    case 4: printf("Mary Jane"); break;
+                                case 3: printf("Mysterio"); break;
+                                case 4: printf("Mary Jane"); break;
 
-                                    default: UNREACHABLE();
-                                }
-                                break;
+                                default: UNREACHABLE();
+                            }
+                            break;
 
-                            case MUMMY: printf("Mummy"); break;
-                            case BLUE_MAN: printf("Blue man"); break;
-                            case WOLF: printf("Wolf"); break;
-                            case R2D2: printf("R2D2"); break;
-                            case DINOSAUR: printf("Dinosaur"); break;
-                            case RAT: printf("Rat"); break;
-                            case SHOTGUN_LADY: printf("Shotgun_lady"); break;
+                        case MUMMY: printf("Mummy"); break;
+                        case BLUE_MAN: printf("Blue man"); break;
+                        case WOLF: printf("Wolf"); break;
+                        case R2D2: printf("R2D2"); break;
+                        case DINOSAUR: printf("Dinosaur"); break;
+                        case RAT: printf("Rat"); break;
+                        case SHOTGUN_LADY: printf("Shotgun_lady"); break;
 
-                            default: UNREACHABLE();
-                        }
-                        printf(" (x,y)=");
-                        PRINTF_DATA(object_underneath->x);
-                        printf(",");
-                        PRINTF_DATA(object_underneath->y);
-                        printf(" (dmg)=");
-                        PRINTF_DATA(object_underneath->sprite.damage);
-                        break;
-                }
-            } else {
-                printf("No object here, TODO create new?");
+                        default: UNREACHABLE();
+                    }
+                    printf(" (x,y)=");
+                    PRINTF_DATA(object_underneath->x);
+                    printf(",");
+                    PRINTF_DATA(object_underneath->y);
+                    printf(" (dmg)=");
+                    PRINTF_DATA(object_underneath->sprite.damage);
+                    break;
             }
-        } else {
-            printf("UNIMPLEMENTED: debugobjects");
+        } else if (state->tileedit) {
+            printf("No object here, TODO create new?");
         }
     }
     if (state->debug.switches) {
