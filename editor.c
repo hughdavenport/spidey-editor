@@ -169,6 +169,10 @@ typedef struct {
     bool goto_switch;
     bool goto_room;
     uint8_t halfroom;
+    bool edit_roomname;
+    char room_name[24];
+    size_t roomname_length;
+    size_t roomname_cursor;
 } game_state;
 game_state *state = NULL;
 
@@ -609,6 +613,7 @@ void process_input() {
                     }
                 } else if (iscntrl(buf[i])) {
                     switch (buf[i] + 'A' - 1) {
+                        case '_': state->help = !state->help; break;
                         case 'H': state->debug.hex = !state->debug.hex; break;
                     }
                 } else if (buf[i] == 'q') {
@@ -649,6 +654,7 @@ void process_input() {
                     }
                 } else if (iscntrl(buf[i])) {
                     switch (buf[i] + 'A' - 1) {
+                        case '_': state->help = !state->help; break;
                         case 'H':
                             state->debug.hex = !state->debug.hex;
                             if (state->halfroom) {
@@ -667,6 +673,8 @@ void process_input() {
                     }
                 } else if (buf[i] == '?') {
                     state->help = !state->help;
+                } else if (buf[i] == 0x7f) {
+                    state->halfroom = 0;
                 } else {
                     switch (buf[i]) {
                         case '[':
@@ -691,6 +699,129 @@ void process_input() {
                                 UNREACHABLE();
                             }
                             break;
+                    }
+                }
+                i ++;
+                continue;
+            }
+
+            if (state->edit_roomname) {
+                if (state->help) {
+                    switch (buf[i]) {
+                        case ESCAPE:
+                        case 'q':
+                        case 0x1f:
+                            state->help = false;
+                            break;
+                    }
+                    i ++;
+                    continue;
+                }
+
+                if (buf[i] == '\n') {
+                    // ENTER
+                    struct DecompresssedRoom *room = &state->rooms.rooms[*cursorlevel].data;
+                    assert(C_ARRAY_LEN(state->room_name) <= C_ARRAY_LEN(room->name));
+                    strncpy(room->name, state->room_name, C_ARRAY_LEN(room->name));
+                    state->edit_roomname = false;
+                } else if (isprint(buf[i])) { // Some CSI escapes don't send esc first...
+                    if (state->roomname_cursor < C_ARRAY_LEN(state->room_name) - 1) {
+                        state->room_name[state->roomname_cursor++] = buf[i];
+                    }
+                } else if (buf[i] == ESCAPE) {
+                    if (i + 1 < n) {
+                        switch (buf[i + 1]) {
+                            case '[':
+                                if (i + 2 < n) {
+                                    // CSI sequence, with leading esc
+                                    i += 2;
+                                    uint8_t arg = 0;
+                                    while (i < n) {
+                                        if (isdigit(buf[i])) {
+                                            arg = 10 * arg + buf[i] - '0';
+                                        } else if (buf[i] == ';') {
+                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: multiple csi args", __FILE__, __LINE__);
+                                            arg = 0;
+                                        } else {
+                                            switch (buf[i]) {
+                                                case '~':
+                                                {
+                                                    switch (arg) {
+                                                        case 1:
+                                                        {
+                                                            // HOME
+                                                            state->roomname_cursor = 0;
+                                                        }; break;
+
+                                                        case 3:
+                                                        {
+                                                            // DELETE
+                                                            for (size_t c = state->roomname_cursor; c < C_ARRAY_LEN(state->room_name) - 1; c ++) {
+                                                                state->room_name[c] = state->room_name[c + 1];
+                                                                state->room_name[c + 1] = '\0';
+                                                            }
+                                                            if (state->roomname_cursor) {
+                                                                state->roomname_cursor--;
+                                                            }
+                                                        }; break;
+
+                                                        case 4:
+                                                        {
+                                                            // END
+                                                            state->roomname_cursor = strlen(state->room_name);
+                                                        }; break;
+
+                                                        default:
+                                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                                    }
+                                                }; break;
+
+                                                case 'C':
+                                                {
+                                                    // RIGHT ARROW
+                                                    if (state->roomname_cursor < C_ARRAY_LEN(state->room_name) - 1 && state->room_name[state->roomname_cursor]) {
+                                                        state->roomname_cursor ++;
+                                                    }
+                                                }; break;
+
+                                                case 'D':
+                                                {
+                                                    // LEFT ARROW
+                                                    if (state->roomname_cursor > 0) {
+                                                        state->roomname_cursor --;
+                                                    }
+                                                }; break;
+
+                                                default:
+                                                    fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
+                                            }
+                                            break;
+                                        }
+                                        i ++;
+                                    }
+                                } else {
+                                    UNREACHABLE();
+                                }
+                                break;
+                        }
+                        break;
+                    } else {
+                        state->edit_roomname = false;
+                    }
+                } else if (buf[i] == 0x7f) {
+                    if (state->roomname_cursor) {
+                        for (size_t c = state->roomname_cursor - 1; c < C_ARRAY_LEN(state->room_name) - 1; c ++) {
+                            state->room_name[c] = state->room_name[c + 1];
+                            state->room_name[c + 1] = '\0';
+                        }
+                        if (state->roomname_cursor) {
+                            state->roomname_cursor--;
+                        }
+                    }
+                } else if (iscntrl(buf[i])) {
+                    switch (buf[i] + 'A' - 1) {
+                        case 'H': state->debug.hex = !state->debug.hex; break;
+                        case '_': state->help = !state->help; break;
                     }
                 }
                 i ++;
@@ -756,12 +887,17 @@ void process_input() {
                 }
                 i += 1;
                 continue;
-            } else if (KEY_MATCHES("q")) {
-                if (state->help) {
-                    state->help = false;
-                } else {
-                    end();
-                    UNREACHABLE();
+            } else if (KEY_MATCHES("R")) {
+                state->edit_roomname = true;
+                state->roomname_cursor = 0;
+                strncpy(state->room_name, state->rooms.rooms[*cursorlevel].data.name, C_ARRAY_LEN(state->room_name));
+                for (size_t i = 0; i < C_ARRAY_LEN(state->room_name); i ++) {
+                    if (state->room_name[C_ARRAY_LEN(state->room_name) - i] == '\0') continue;
+                    if (state->room_name[C_ARRAY_LEN(state->room_name) - i] == ' ') {
+                        state->room_name[C_ARRAY_LEN(state->room_name) - i] = '\0';
+                    } else {
+                        break;
+                    }
                 }
             } else if (KEY_MATCHES("?")) {
                 state->help = !state->help;
@@ -835,6 +971,7 @@ void process_input() {
             }
             if (iscntrl(buf[i]) != 0) {
                 switch (buf[i] + 'A' - 1) {
+                    case '_': state->help = !state->help; break;
                     case 'A': debugalltoggle(); break;
                     case 'D': state->debug.data = !state->debug.data; break;
                     case 'H': state->debug.hex = !state->debug.hex; break;
@@ -1053,9 +1190,9 @@ void redraw() {
                 printf("%u", state->halfroom - 1);
             }
         } else {
-            printf("\033[5m_\033[m");
+            printf("\033[4;5m_\033[m");
         }
-        printf("\033[5m_\033[m - \"???\"");
+        printf("\033[4;5m_\033[m - \"???\"");
         for (int y = 0; y < HEIGHT_TILES; y ++) {
             for (int x = 0; x < WIDTH_TILES; x ++) {
                 if (state->goto_room) {
@@ -1103,7 +1240,20 @@ void redraw() {
         goto show_help_if_needed;
     } else {
         PRINTF_DATA((int)level);
-        printf(" - \"%s\"", room_name);
+        printf(" - \"");
+        if (state->edit_roomname) {
+            for (size_t i = 0; i < state->roomname_cursor; i ++) {
+                printf("%c", state->room_name[i]);
+            }
+            printf("\033[40;4;5m%c\033[m", state->room_name[state->roomname_cursor] ? state->room_name[state->roomname_cursor] : '_');
+            for (size_t i = state->roomname_cursor + 1; i < C_ARRAY_LEN(state->room_name); i ++) {
+                if (state->room_name[i] == '\0') break;
+                printf("%c", state->room_name[i]);
+            }
+        } else {
+            printf("%s", room_name);
+        }
+        printf("\"");
     }
 
 
@@ -1338,6 +1488,12 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         printf(" - \"%s\"", neighbour_name);
     }
 
+    if (state->edit_roomname) {
+        GOTO(0, bottom); bottom +=2;
+        printf("\nEnter new room name in space highlighted at top of screen");
+        goto show_help_if_needed;
+    }
+
     if (state->goto_switch) {
         GOTO(0, bottom); bottom ++;
         printf("Enter switch id or q to go to main view");
@@ -1485,16 +1641,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 show_help_if_needed:
     if (state->help) {
         // 35x10
-        int y = 18;
+        int y = 19;
         if (state->tileedit) y += 7;
         int x = 40;
         if (state->goto_switch) {
-            y = 6;
+            y = 7;
             x = 44;
         }
         if (state->goto_room) {
-            y = 7;
+            y = 8;
             x = 44;
+        }
+        if (state->edit_roomname) {
+            y = 12;
+            x = 52;
         }
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
         printf("\033[47;30;1m");
@@ -1527,7 +1687,9 @@ show_help_if_needed:
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
             printf("|%-*s|", x - 2, "q         - go back to main view");
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-            printf("|%-*s|", x - 2, "?         - toggle help");
+            printf("|%-*s|", x - 2, "Ctrl-?    - toggle help");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "Ctrl-h    - toggle hex in debug info");
             goto flush;
         }
 
@@ -1543,7 +1705,31 @@ show_help_if_needed:
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
             printf("|%-*s|", x - 2, "q         - go back to main view");
             GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-            printf("|%-*s|", x - 2, "?         - toggle help");
+            printf("|%-*s|", x - 2, "Ctrl-?    - toggle help");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "Ctrl-h    - toggle hex in debug info");
+            goto flush;
+        }
+
+        if (state->edit_roomname) {
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "any printable char - change character under cursor");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "DEL                - delete character under cursor");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "BACKSPACE          - delete character under cursor");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "ENTER              - save room name");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "LEFT               - move cursor left");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "RIGHT              - move cursor right");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "ESC                - go back to main view");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "Ctrl-?             - toggle help");
+            GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+            printf("|%-*s|", x - 2, "Ctrl-h             - toggle hex in debug info");
             goto flush;
         }
 
@@ -1570,9 +1756,11 @@ show_help_if_needed:
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Right/l   - Move cursor right");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        printf("|%-*s|", x - 2, "R         - edit room name");
+        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "q         - quit");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        printf("|%-*s|", x - 2, "?         - toggle help");
+        printf("|%-*s|", x - 2, "Ctrl-?    - toggle help");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
         printf("|%-*s|", x - 2, "Escape    - close/cancel");
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
@@ -1645,6 +1833,7 @@ void setup() {
 
     state->tileeditpos = state->player;
     state->help = true;
+    state->debug.hex = true;
 }
 
 typedef void *(*main_fn)(char *library, void *call_state);
