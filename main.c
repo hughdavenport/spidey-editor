@@ -919,14 +919,11 @@ int main(int argc, char **argv) {
             }
         } else if (strcasecmp(argv[0], "find_switch") == 0) {
             printf("scanning\n");
-            uint8_t found = 0;
             for (size_t room = 0; room < 64; room ++) {
                 if (file.rooms[room].valid) {
+                    uint8_t found = 0;
                     for (size_t i = 0; i < file.rooms[room].data.num_switches; i ++) {
                         for (size_t chunk = 0; chunk < file.rooms[room].data.switches[i].chunks.length; chunk ++) {
-                            if (chunk > 0) break;
-                            if (file.rooms[room].data.switches[i].chunks.data[chunk].msb & (0x80|0x40)) 
-                                printf("room %lu, switch %lu, chunk %lu\n", room, i, chunk);
                             if (file.rooms[room].data.switches[i].chunks.data[chunk].type == TOGGLE_BIT) {
                                 printf("room %lu, switch %lu, chunk %lu\n", room, i, chunk);
                                 found = 1;
@@ -935,7 +932,6 @@ int main(int argc, char **argv) {
                         }
                         if (found) break;
                     }
-                    if (found) break;
                 }
             }
             argv ++;
