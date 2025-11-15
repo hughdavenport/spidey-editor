@@ -255,8 +255,8 @@ void dumpRoom(Room *room) {
             switch (chunk->type) {
                 case PREAMBLE:
                     assert(c == 0);
-                    printf("{.type = PREAMBLE, .x = %d, .y = %d, .room_entry = %s, .one_time_use = %s, .side = %s, .msb_without_y_and_one_time_use = %02x, msb i don't know mask 0x80|0x40 }",
-                            chunk->x, chunk->y, BOOL_S(chunk->room_entry), BOOL_S(chunk->one_time_use), SWITCH_SIDE(chunk->side), chunk->msb & ~(0x1f | 0x20));
+                    printf("{.type = PREAMBLE, .x = %d, .y = %d, .room_entry = %s, .one_time_use = %s, .side = %s }",
+                            chunk->x, chunk->y, BOOL_S(chunk->room_entry), BOOL_S(chunk->one_time_use), SWITCH_SIDE(chunk->side));
                     break;
 
                 case TOGGLE_BLOCK:
@@ -690,6 +690,95 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
 #undef read_next
 #undef log
     *room = tmp;
+    return true;
+}
+
+bool readRoomFromFile(Room *room, FILE *fp, const char *filename) {
+
+    assert(fseek(fp, 0L, SEEK_END) == 0);
+    long ftold = ftell(fp);
+    assert(ftold != -1);
+    size_t filesize = ftold;
+    assert(fseek(fp, 0L, SEEK_SET) == 0);
+
+    uint8_t *data = malloc(filesize);
+    assert(data != NULL);
+
+    if (fread(data, sizeof(uint8_t), filesize, fp) != (size_t)filesize) {
+        free(data);
+        fprintf(stderr, "Could read file fully: %s: %s", filename, strerror(errno));
+        return false;
+    }
+
+    size_t tile_idx = 0;
+    size_t data_idx = 0;
+    uint16_t fullbyte = 0;
+    while (tile_idx < sizeof(room->data.tiles)) {
+        if (data_idx >= (size_t)filesize) {
+            free(data);
+            fprintf(stderr, "Could read full tileset from file: %s: Read %ld tiles\n", filename, tile_idx);
+            return false;
+        }
+
+        char c = data[data_idx++];
+        if (c == '\033') {
+            if (data_idx >= filesize) {
+                free(data);
+                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", filename);
+                return false;
+            }
+
+            if (data[data_idx] != '[') {
+                free(data);
+                fprintf(stderr, "Invalid escape sequence at %ld: %s\n", data_idx, filename);
+                return false;
+            }
+            while (data_idx < filesize && !isalpha(data[data_idx])) data_idx ++;
+            if (data_idx >= filesize) {
+                free(data);
+                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", filename);
+                return false;
+            }
+            data_idx++;
+        } else if (c == '\n') {
+            if ((fullbyte & 0xFF00) != 0) {
+                free(data);
+                fprintf(stderr, "Unexpected newline at %ld: %s\n", data_idx - 1, filename);
+                return false;
+            }
+            if (tile_idx == 0 || (data_idx >= 2 && data[data_idx - 2] == '\n')) {
+                room->data.tiles[tile_idx++] = 0;
+            }
+            while (tile_idx < WIDTH_TILES * HEIGHT_TILES && (tile_idx % WIDTH_TILES) != 0) {
+                room->data.tiles[tile_idx++] = 0;
+            }
+            assert(tile_idx % WIDTH_TILES == 0);
+        } else {
+            if (c != ' ' && !isxdigit(c)) {
+                free(data);
+                fprintf(stderr, "Invalid hex digit at %ld: %s\n", data_idx - 1, filename);
+                return false;
+            }
+
+            uint8_t b = 0;
+            if (c == ' ') b = 0;
+            else if (isdigit(c)) b = c - '0';
+            else b = 10 + tolower(c) - 'a';
+
+            if ((fullbyte & 0xFF00) == 0) {
+                fullbyte = 0xFF00 | (b << 4);
+            } else {
+                fullbyte = (fullbyte & 0xF0) | b;
+                room->data.tiles[tile_idx++] = fullbyte;
+            }
+        }
+    }
+
+    if (data_idx < filesize) {
+        fprintf(stderr, "WARNING: Still more file to read at %ld: %s\n", data_idx, filename);
+    }
+
+    free(data);
     return true;
 }
 
@@ -1133,6 +1222,7 @@ bool readRooms(RoomFile *file) {
     fclose(fp);
     return ret;
 }
+
 bool writeRooms(RoomFile *file) {
     FILE *fp = fopen(ROOMS_FILE, "wb");
     if (fp == NULL) {

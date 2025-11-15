@@ -917,6 +917,29 @@ int main(int argc, char **argv) {
             if (!main_find_sprite(&argc, &argv, program, &find_sprite)) {
                 defer_return(1);
             }
+        } else if (strcasecmp(argv[0], "find_switch") == 0) {
+            printf("scanning\n");
+            uint8_t found = 0;
+            for (size_t room = 0; room < 64; room ++) {
+                if (file.rooms[room].valid) {
+                    for (size_t i = 0; i < file.rooms[room].data.num_switches; i ++) {
+                        for (size_t chunk = 0; chunk < file.rooms[room].data.switches[i].chunks.length; chunk ++) {
+                            if (chunk > 0) break;
+                            if (file.rooms[room].data.switches[i].chunks.data[chunk].msb & (0x80|0x40)) 
+                                printf("room %lu, switch %lu, chunk %lu\n", room, i, chunk);
+                            if (file.rooms[room].data.switches[i].chunks.data[chunk].type == TOGGLE_BIT) {
+                                printf("room %lu, switch %lu, chunk %lu\n", room, i, chunk);
+                                found = 1;
+                                break;
+                            }
+                        }
+                        if (found) break;
+                    }
+                    if (found) break;
+                }
+            }
+            argv ++;
+            argc = 0;
         } else if (strcasecmp(argv[0], "editor") == 0) {
             defer_return(editor_main());
         } else if (strcasecmp(argv[0], "rooms") == 0) {
@@ -1397,92 +1420,8 @@ int main(int argc, char **argv) {
                         fprintf(stderr, "Could not open file for reading: %s: %s", patch.filename, strerror(errno));
                         defer_return(1);
                     }
-
-                    assert(fseek(fp, 0L, SEEK_END) == 0);
-                    long ftold = ftell(fp);
-                    assert(ftold != -1);
-                    size_t filesize = ftold;
-                    assert(fseek(fp, 0L, SEEK_SET) == 0);
-
-                    uint8_t *data = malloc(filesize);
-                    assert(data != NULL);
-
-                    if (fread(data, sizeof(uint8_t), filesize, fp) != (size_t)filesize) {
-                        free(data);
-                        fprintf(stderr, "Could read file fully: %s: %s", patch.filename, strerror(errno));
-                        defer_return(1);
-                    }
-
-                    struct DecompresssedRoom *room = &file.rooms[patch.room_id].data;
-                    size_t tile_idx = 0;
-                    size_t data_idx = 0;
-                    uint16_t fullbyte = 0;
-                    while (tile_idx < sizeof(room->tiles)) {
-                        if (data_idx >= (size_t)filesize) {
-                            free(data);
-                            fprintf(stderr, "Could read full tileset from file: %s: Read %ld tiles\n", patch.filename, tile_idx);
-                            defer_return(1);
-                        }
-
-                        char c = data[data_idx++];
-                        if (c == '\033') {
-                            if (data_idx >= filesize) {
-                                free(data);
-                                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", patch.filename);
-                                defer_return(1);
-                            }
-
-                            if (data[data_idx] != '[') {
-                                free(data);
-                                fprintf(stderr, "Invalid escape sequence at %ld: %s\n", data_idx, patch.filename);
-                                defer_return(1);
-                            }
-                            while (data_idx < filesize && !isalpha(data[data_idx])) data_idx ++;
-                            if (data_idx >= filesize) {
-                                free(data);
-                                fprintf(stderr, "Incomplete escape sequence at EOF: %s\n", patch.filename);
-                                defer_return(1);
-                            }
-                            data_idx++;
-                        } else if (c == '\n') {
-                            if ((fullbyte & 0xFF00) != 0) {
-                                free(data);
-                                fprintf(stderr, "Unexpected newline at %ld: %s\n", data_idx - 1, patch.filename);
-                                defer_return(1);
-                            }
-                            if (tile_idx == 0 || (data_idx >= 2 && data[data_idx - 2] == '\n')) {
-                                room->tiles[tile_idx++] = 0;
-                            }
-                            while (tile_idx < WIDTH_TILES * HEIGHT_TILES && (tile_idx % WIDTH_TILES) != 0) {
-                                room->tiles[tile_idx++] = 0;
-                            }
-                            assert(tile_idx % WIDTH_TILES == 0);
-                        } else {
-                            if (c != ' ' && !isxdigit(c)) {
-                                free(data);
-                                fprintf(stderr, "Invalid hex digit at %ld: %s\n", data_idx - 1, patch.filename);
-                                defer_return(1);
-                            }
-
-                            uint8_t b = 0;
-                            if (c == ' ') b = 0;
-                            else if (isdigit(c)) b = c - '0';
-                            else b = 10 + tolower(c) - 'a';
-
-                            if ((fullbyte & 0xFF00) == 0) {
-                                fullbyte = 0xFF00 | (b << 4);
-                            } else {
-                                fullbyte = (fullbyte & 0xF0) | b;
-                                room->tiles[tile_idx++] = fullbyte;
-                            }
-                        }
-                    }
-
-                    if (data_idx < filesize) {
-                        fprintf(stderr, "WARNING: Still more file to read at %ld: %s\n", data_idx, patch.filename);
-                    }
-
-                    free(data);
+                    Room *room = &file.rooms[patch.room_id];
+                    readRoomFromFile(room, fp, patch.filename);
                     fclose(fp);
                     fp = NULL;
                 }; break;

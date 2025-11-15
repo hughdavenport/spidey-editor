@@ -166,6 +166,7 @@ void freeRoomFile(RoomFile *file);
 bool readFile(RoomFile *file, FILE *fp);
 bool writeFile(RoomFile *file, FILE *fp);
 bool readRooms(RoomFile *file);
+bool readRoomFromFile(Room *room, FILE *fp, const char *filename);
 bool writeRooms(RoomFile *file);
 void dumpRoom(Room *room);
 
