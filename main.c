@@ -924,7 +924,7 @@ int main(int argc, char **argv) {
                     for (size_t i = 0; i < file.rooms[room].data.num_switches; i ++) {
                         for (size_t chunk = 0; chunk < file.rooms[room].data.switches[i].chunks.length; chunk ++) {
                             if (file.rooms[room].data.switches[i].chunks.data[chunk].type == TOGGLE_BIT) {
-                                printf("room %lu, switch %lu, chunk %lu\n", room, i, chunk);
+                                printf("room %02lx %s, switch %lu\n", room, file.rooms[room].data.name, i);
                                 break;
                             }
                         }
@@ -934,7 +934,11 @@ int main(int argc, char **argv) {
             argv ++;
             argc = 0;
         } else if (strcasecmp(argv[0], "editor") == 0) {
-            defer_return(editor_main());
+            ARRAY_FREE(rooms);
+            ARRAY_FREE(patches);
+            freeRoomFile(&file);
+            if (fp) { fclose(fp); fp = NULL; }
+            return editor_main();
         } else if (strcasecmp(argv[0], "rooms") == 0) {
             list = true;
             argv ++;
