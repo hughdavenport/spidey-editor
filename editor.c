@@ -895,7 +895,11 @@ void process_input() {
                 case EDIT_ROOMDETAILS:
                 {
                     switch (buf[i]) {
-                        case 'b':
+                        case 'k':
+                        case 't':
+                        case 'd':
+                        case '|':
+                        case '-':
                         {
                             state->room_detail = buf[i];
                             state->previous_state = state->current_state;
@@ -950,7 +954,11 @@ void process_input() {
 
                             struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
                             switch (state->room_detail) {
-                                case 'b': room->background = value; break;
+                                case 'k': room->background = value; break;
+                                case 't': room->tile_offset = value; break;
+                                case 'd': room->room_damage = value; break;
+                                case '|': room->gravity_vertical = value; break;
+                                case '-': room->gravity_horizontal = value; break;
 
                                 default: UNREACHABLE();
                             }
@@ -1374,7 +1382,11 @@ help_keys help[][100] = {
     },
 
     [EDIT_ROOMDETAILS]={
-        {"b", "Edit room background"},
+        {"k", "Edit room background"},
+        {"t", "Edit room tileset"},
+        {"d", "Edit room damage"},
+        {"|", "Edit room vertical gravity"},
+        {"-", "Edit room horizontal gravity"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {0},
@@ -1437,7 +1449,7 @@ void show_help()
 void redraw() {
     GOTO(0, 0);
     printf(RESET_GFX_MODE CLEAR_SCREEN);
-#define PRINTF_DATA(num) printf(state->debug.hex ? "%02x" : "%d", (num))
+#define PRINTF_DATA(num) printf(state->debug.hex ? "%02X" : "%d", (num))
 
     int offset_y = 0;
     int offset_x = 0;
@@ -1874,15 +1886,15 @@ void redraw() {
         GOTO(0, bottom); bottom ++;
         switch (state->current_state) {
             case EDIT_ROOMDETAILS:
-                printf("\033[1;4mb\033[mkgrnd: ");PRINTF_DATA(room.background);
-                printf(", tiles: ");PRINTF_DATA(room.tile_offset);
-                printf(", dmg: ");PRINTF_DATA(room.room_damage);
-                printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
-                printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
+                printf("b\033[1;4mk\033[mgrnd: ");PRINTF_DATA(room.background);
+                printf(", \033[1;4mt\033[miles: ");PRINTF_DATA(room.tile_offset);
+                printf(", \033[1;4md\033[mmg: ");PRINTF_DATA(room.room_damage);
+                printf(", gravity (\033[1;4m|\033[m): ");PRINTF_DATA(room.gravity_vertical);
+                printf(", gravity (\033[1;4m-\033[m): ");PRINTF_DATA(room.gravity_horizontal);
                 break;
 
             case EDIT_ROOMDETAILS_NUM:
-                if (state->room_detail == 'b') {
+                if (state->room_detail == 'k') {
                     printf("\033[1;4mbkgrnd\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
@@ -1897,10 +1909,66 @@ void redraw() {
                 } else {
                     printf("bkgrnd: ");PRINTF_DATA(room.background);
                 }
-                printf(", tiles: ");PRINTF_DATA(room.tile_offset);
-                printf(", dmg: ");PRINTF_DATA(room.room_damage);
-                printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
-                printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
+                if (state->room_detail == 't') {
+                    printf(", \033[1;4mt\033[miles: ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf(", tiles: ");PRINTF_DATA(room.tile_offset);
+                }
+                if (state->room_detail == 'd') {
+                    printf(", \033[1;4md\033[mmg: ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf(", dmg: ");PRINTF_DATA(room.room_damage);
+                }
+                if (state->room_detail == '|') {
+                    printf(", gravity (\033[1;4m|\033[m): ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
+                }
+                if (state->room_detail == '-') {
+                    printf(", gravity (\033[1;4m-\033[m): ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
+                }
                 break;
 
             default:
