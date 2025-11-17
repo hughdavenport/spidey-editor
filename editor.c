@@ -900,6 +900,11 @@ void process_input() {
                         case 'd':
                         case '|':
                         case '-':
+
+                        case 'b':
+                        case 'c':
+                        case 'e':
+                        case 'f':
                         {
                             state->room_detail = buf[i];
                             state->previous_state = state->current_state;
@@ -960,13 +965,25 @@ void process_input() {
                                 case '|': room->gravity_vertical = value; break;
                                 case '-': room->gravity_horizontal = value; break;
 
+                                case 'b': room->UNKNOWN_b = value; break;
+                                case 'c': room->UNKNOWN_c = value; break;
+                                case 'e':
+                                    if ((value & ~0x3) == 0) {
+                                        room->_num_switches |= value;
+                                    }
+                                    break;
+
+                                case 'f': room->UNKNOWN_f = value; break;
+
                                 default: UNREACHABLE();
                             }
                             state->current_state = state->previous_state;
                             state->previous_state = NORMAL;
                             state->partial_byte = 0;
                         } else {
-                            state->partial_byte = 0xFF00 | digit;
+                            if (state->room_detail != 'e' || digit == 0) {
+                                state->partial_byte = 0xFF00 | digit;
+                            }
                         }
                     } else if (buf[i] == 0x7f) {
                         state->partial_byte = 0;
@@ -1387,6 +1404,12 @@ help_keys help[][100] = {
         {"d", "Edit room damage"},
         {"|", "Edit room vertical gravity"},
         {"-", "Edit room horizontal gravity"},
+
+        {"b", "Edit room UNKNOWN_b"},
+        {"c", "Edit room UNKNOWN_c"},
+        {"e", "Edit room UNKNOWN_e (only bottom two bits)"},
+        {"f", "Edit room UNKNOWN_f"},
+
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {0},
@@ -1981,10 +2004,87 @@ void redraw() {
     }
     if (state->debug.unknowns) {
         GOTO(0, bottom); bottom ++;
-        printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
-        printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
-        printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
-        printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
+        switch (state->current_state) {
+            case EDIT_ROOMDETAILS:
+                printf("UNKNOWN_\033[1;4mb\033[m: ");PRINTF_DATA(room.UNKNOWN_b);
+                printf(", UNKNOWN_\033[1;4mc\033[m: ");PRINTF_DATA(room.UNKNOWN_c);
+                printf(", UNKNOWN_\033[1;4me\033[m: ");PRINTF_DATA(room._num_switches & 0x3);
+                printf(", UNKNOWN_\033[1;4mf\033[m: ");PRINTF_DATA(room.UNKNOWN_f);
+                break;
+
+            case EDIT_ROOMDETAILS_NUM:
+                if (state->room_detail == 'b') {
+                    printf("UNKNOWN_\033[1;4mb\033[m: ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
+                }
+
+                if (state->room_detail == 'c') {
+                    printf(", UNKNOWN_\033[1;4mc\033[m: ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
+                }
+
+                if (state->room_detail == 'e') {
+                    printf(", UNKNOWN_\033[1;4me\033[m: ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
+                }
+
+                if (state->room_detail == 'f') {
+                    printf(", UNKNOWN_\033[1;4mf\033[m: ");
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            printf("%x", state->partial_byte & 0xFF);
+                        } else {
+                            printf("%u", state->partial_byte & 0xFF);
+                        }
+                    } else {
+                        printf("\033[4;5m_\033[m");
+                    }
+                    printf("\033[4;5m_\033[m");
+                } else {
+                    printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
+                }
+
+                break;
+
+            default:
+                printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
+                printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
+                printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
+                printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
+        }
     }
     if (state->debug.neighbours) {
         char neighbour_name[25] = {0};
