@@ -164,6 +164,7 @@ typedef enum {
     GOTO_SWITCH,
     GOTO_ROOM,
     EDIT_ROOMNAME,
+    TOGGLE_DISPLAY,
     NUM_STATES
 } game_state_state;
 
@@ -645,7 +646,6 @@ void process_input() {
                         state->help = !state->help;
                     }
                     i ++;
-                    continue;
                 }; break;
 
                 case GOTO_ROOM:
@@ -733,7 +733,6 @@ void process_input() {
                         }
                     }
                     i ++;
-                    continue;
                 }; break;
 
                 case EDIT_ROOMNAME:
@@ -860,7 +859,31 @@ void process_input() {
                         }
                     }
                     i ++;
-                    continue;
+                }; break;
+
+                case TOGGLE_DISPLAY:
+                {
+                    uint8_t changed = 1;
+                    switch (buf[i]) {
+                        case 'a': debugalltoggle(); break;
+                        case 'd': state->debug.data = !state->debug.data; break;
+                        case 'n': state->debug.neighbours = !state->debug.neighbours; break;
+                        case 'o': state->debug.objects = !state->debug.objects; break;
+                        case 'p': state->debug.pos = !state->debug.pos; break;
+                        case 's': state->debug.switches = !state->debug.switches; break;
+                        case 'u': state->debug.unknowns = !state->debug.unknowns; break;
+
+                        case 'q':
+                        case ESCAPE:
+                              break;
+
+                        default: changed = 0;
+                    }
+                    i++;
+                    if (changed) {
+                        state->current_state = state->previous_state;
+                        state->previous_state = NORMAL;
+                    }
                 }; break;
 
                 case TILE_EDIT:
@@ -1042,13 +1065,11 @@ void process_input() {
                     if (iscntrl(buf[i]) != 0) {
                         switch (buf[i] + 'A' - 1) {
                             case '_': state->help = !state->help; break;
-                            case 'A': debugalltoggle(); break;
-                            case 'D': state->debug.data = !state->debug.data; break;
+                            case 'D':
+                                  state->previous_state = state->current_state;
+                                  state->current_state = TOGGLE_DISPLAY;
+                                  break;
                             case 'H': state->debug.hex = !state->debug.hex; break;
-                            case 'N': state->debug.neighbours = !state->debug.neighbours; break;
-                            case 'O': state->debug.objects = !state->debug.objects; break;
-                            case 'P': state->debug.pos = !state->debug.pos; break;
-                            case 'S': state->debug.switches = !state->debug.switches; break;
                             case 'R': state->edit_roomdetails = true; break;
                             case 'T': {
                                 switch (state->current_state) {
@@ -1066,7 +1087,6 @@ void process_input() {
                                     default: UNREACHABLE();
                                 }
                             }; break;
-                            case 'U': state->debug.unknowns = !state->debug.unknowns; break;
                         }
                     }
 
@@ -1144,14 +1164,8 @@ help_keys help[][100] = {
         {"Ctrl-?", "toggle help"},
         {"Escape", "close/cancel"},
         {"Ctrl-h", "toggle hex in debug info"},
-        {"Ctrl-p", "toggle position display"},
-        {"Ctrl-d", "toggle room data display"},
-        {"Ctrl-u", "toggle unknown display"},
-        {"Ctrl-n", "toggle neighbour display"},
-        {"Ctrl-o", "toggle room object display"},
-        {"Ctrl-s", "toggle room switch display"},
         {"Ctrl-t", "toggle tile edit mode"},
-        {"Ctrl-a", "toggle all debug info"},
+        {"Ctrl-d[adnopsu]", "toggle display element"},
         {0},
     },
 
@@ -1170,14 +1184,8 @@ help_keys help[][100] = {
         {"Ctrl-?", "toggle help"},
         {"Escape", "close/cancel"},
         {"Ctrl-h", "toggle hex in debug info"},
-        {"Ctrl-p", "toggle position display"},
-        {"Ctrl-d", "toggle room data display"},
-        {"Ctrl-u", "toggle unknown display"},
-        {"Ctrl-n", "toggle neighbour display"},
-        {"Ctrl-o", "toggle room object display"},
-        {"Ctrl-s", "toggle room switch display"},
         {"Ctrl-t", "toggle tile edit mode"},
-        {"Ctrl-a", "toggle all debug info"},
+        {"Ctrl-d[adnopsu]", "toggle display element"},
         {0},
     },
 
@@ -1210,6 +1218,19 @@ help_keys help[][100] = {
         {"ESC", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
+        {0},
+    },
+
+    [TOGGLE_DISPLAY]={
+        {"a", "toggle all debug info"},
+        {"d", "toggle room data display"},
+        {"n", "toggle neighbour display"},
+        {"o", "toggle room object display"},
+        {"p", "toggle position display"},
+        {"s", "toggle room switch display"},
+        {"u", "toggle unknown display"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
         {0},
     },
 };
