@@ -166,6 +166,7 @@ typedef enum {
     EDIT_ROOMNAME,
     EDIT_ROOMDETAILS,
     EDIT_ROOMDETAILS_NUM,
+    EDIT_ROOMDETAILS_ROOM,
     TOGGLE_DISPLAY,
     NUM_STATES
 } game_state_state;
@@ -684,7 +685,24 @@ void process_input() {
                     } else if (buf[i] == 0x7f) {
                         state->partial_byte = 0;
                     } else if (buf[i] == ESCAPE) {
-                        if (state->help) {
+                        if (i + 1 < n && buf[i+1] == '[' && i + 2 < n) {
+                            // CSI sequence
+                            i += 2;
+                            uint8_t arg = 0;
+                            while (i < n) {
+                                if (isdigit(buf[i])) {
+                                    arg = 10 * arg + buf[i] - '0';
+                                } else if (buf[i] == ';') {
+                                    arg = 0;
+                                } else {
+                                    if (buf[i] == '~' && arg == 3) {
+                                        state->partial_byte = 0;
+                                    }
+                                    break;
+                                }
+                                i ++;
+                            }
+                        } else if (state->help) {
                             state->help = false;
                         } else {
                             state->current_state = state->previous_state;
@@ -869,6 +887,19 @@ void process_input() {
 
                 case TOGGLE_DISPLAY:
                 {
+                    if (state->help) {
+                        switch (buf[i]) {
+                            case ESCAPE:
+                            case 'q':
+                            case 0x1f:
+                            case '?':
+                                state->help = false;
+                                break;
+                        }
+                        i ++;
+                        continue;
+                    }
+
                     uint8_t changed = 1;
                     switch (buf[i]) {
                         case 'a': debugalltoggle(); break;
@@ -883,6 +914,10 @@ void process_input() {
                         case ESCAPE:
                               break;
 
+                        case '?':
+                        case 0x1F:
+                              state->help = !state->help;
+                              fallthrough;
                         default: changed = 0;
                     }
                     i++;
@@ -894,48 +929,76 @@ void process_input() {
 
                 case EDIT_ROOMDETAILS:
                 {
-                    switch (buf[i]) {
-                        case 'k':
-                        case 't':
-                        case 'd':
-                        case '|':
-                        case '-':
-
-                        case 'b':
-                        case 'c':
-                        case 'e':
-                        case 'f':
-                        {
-                            state->room_detail = buf[i];
-                            state->previous_state = state->current_state;
-                            state->current_state = EDIT_ROOMDETAILS_NUM;
-                        }; break;
-
-                        case 'q':
-                        case ESCAPE:
-                            if (state->help) {
-                                state->help = false;
+                    if (buf[i] == ESCAPE && i + 1 < n && buf[i + 1] == '[') {
+                        // CSI sequence
+                        i += 2;
+                        uint8_t arg = 0;
+                        while (i < n) {
+                            if (isdigit(buf[i])) {
+                                arg = 10 * arg + buf[i] - '0';
+                            } else if (buf[i] == ';') {
+                                arg = 0;
                             } else {
-                                state->current_state = state->previous_state;
-                                state->previous_state = NORMAL;
-                            }
-                            break;
-
-                        default:
-                            if (iscntrl(buf[i])) {
-                                switch (buf[i] + 'A' - 1) {
-                                    case '_': state->help = !state->help; break;
-                                    case 'H':
-                                        state->debug.hex = !state->debug.hex;
-                                        if (state->partial_byte) {
-                                            if (state->debug.hex) {
-                                                state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
-                                            } else {
-                                                state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
-                                            }
-                                        }
+                                switch (buf[i]) {
+                                    case 'A':
+                                    case 'B':
+                                    case 'C':
+                                    case 'D':
+                                        state->previous_state = state->current_state;
+                                        state->current_state = EDIT_ROOMDETAILS_ROOM;
+                                        state->room_detail = buf[i];
+                                        break;
                                 }
+                                break;
                             }
+                            i ++;
+                        }
+                    } else {
+                        switch (buf[i]) {
+                            case 'k':
+                            case 't':
+                            case 'd':
+                            case '|':
+                            case '-':
+
+                            case 'b':
+                            case 'c':
+                            case 'e':
+                            case 'f':
+                            {
+                                state->room_detail = buf[i];
+                                state->previous_state = state->current_state;
+                                state->current_state = EDIT_ROOMDETAILS_NUM;
+                            }; break;
+
+                            case 'q':
+                            case ESCAPE:
+                                if (state->help) {
+                                    state->help = false;
+                                } else {
+                                    state->current_state = state->previous_state;
+                                    state->previous_state = NORMAL;
+                                }
+                                break;
+
+                            default:
+                                if (buf[i] == '?') {
+                                    state->help = !state->help;
+                                } else if (iscntrl(buf[i])) {
+                                    switch (buf[i] + 'A' - 1) {
+                                        case '_': state->help = !state->help; break;
+                                        case 'H':
+                                            state->debug.hex = !state->debug.hex;
+                                            if (state->partial_byte) {
+                                                if (state->debug.hex) {
+                                                    state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
+                                                } else {
+                                                    state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
+                                                }
+                                            }
+                                    }
+                                }
+                        }
                     }
                     i++;
                 }; break;
@@ -980,6 +1043,7 @@ void process_input() {
                             state->current_state = state->previous_state;
                             state->previous_state = NORMAL;
                             state->partial_byte = 0;
+                            state->room_detail = 0;
                         } else {
                             if (state->room_detail != 'e' || digit == 0) {
                                 state->partial_byte = 0xFF00 | digit;
@@ -988,6 +1052,102 @@ void process_input() {
                     } else if (buf[i] == 0x7f) {
                         state->partial_byte = 0;
                     } else if (buf[i] == ESCAPE) {
+                        if (state->help) {
+                            state->help = false;
+                        } else {
+                            state->current_state = state->previous_state;
+                            state->previous_state = NORMAL;
+                        }
+                    } else if (iscntrl(buf[i])) {
+                        switch (buf[i] + 'A' - 1) {
+                            case '_': state->help = !state->help; break;
+                            case 'H':
+                                state->debug.hex = !state->debug.hex;
+                                if (state->partial_byte) {
+                                    if (state->debug.hex) {
+                                        state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
+                                    } else {
+                                        state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
+                                    }
+                                }
+                        }
+                    } else if (buf[i] == 'q') {
+                        if (state->help) {
+                            state->help = !state->help;
+                        } else {
+                            state->current_state = state->previous_state;
+                            state->previous_state = NORMAL;
+                        }
+                    } else if (buf[i] == '?') {
+                        state->help = !state->help;
+                    } else {
+                        switch (buf[i]) {
+                            case '[':
+                                if (i + 1 < n) {
+                                    // CSI sequence
+                                    i += 1;
+                                    uint8_t arg = 0;
+                                    while (i < n) {
+                                        if (isdigit(buf[i])) {
+                                            arg = 10 * arg + buf[i] - '0';
+                                        } else if (buf[i] == ';') {
+                                            arg = 0;
+                                        } else {
+                                            if (arg == 3 && buf[i] == '~') {
+                                                state->partial_byte = 0;
+                                            }
+                                            break;
+                                        }
+                                        i ++;
+                                    }
+                                } else {
+                                    UNREACHABLE();
+                                }
+                                break;
+                        }
+                    }
+                    i ++;
+                }; break;
+
+                case EDIT_ROOMDETAILS_ROOM:
+                {
+                    if ((state->debug.hex && isxdigit(buf[i])) || (!state->debug.hex && isdigit(buf[i]))) {
+                        int digit;
+                        if (buf[i] > '9') {
+                            digit = tolower(buf[i]) - 'a' + 10;
+                        } else {
+                            digit = buf[i] - '0';
+                        }
+                        if (state->partial_byte) {
+                            size_t room_id = digit;
+                            if (state->debug.hex) {
+                                room_id += 16 * (state->partial_byte & 0xFF);
+                            } else {
+                                room_id += 10 * (state->partial_byte & 0xFF);
+                            }
+                            if (room_id < C_ARRAY_LEN(state->rooms.rooms)) {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                switch (state->room_detail) {
+                                    case 'A': room->room_north = room_id; break;
+                                    case 'B': room->room_south = room_id; break;
+                                    case 'C': room->room_east = room_id; break;
+                                    case 'D': room->room_west = room_id; break;
+                                    default: UNREACHABLE();
+                                }
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
+                                state->partial_byte = 0;
+                                state->room_detail = 0;
+                            }
+                        } else {
+                            if ((unsigned)(digit * (state->debug.hex ? 16 : 10)) < C_ARRAY_LEN(state->rooms.rooms)) {
+                                state->partial_byte = 0xFF00 | digit;
+                            }
+                        }
+                    } else if (buf[i] == 0x7f) {
+                        state->partial_byte = 0;
+                    } else if (buf[i] == ESCAPE) {
+                        /* FIXME detect csi sequence for left/right/up/down, change the neighbour to edit? */
                         if (state->help) {
                             state->help = false;
                         } else {
@@ -1119,7 +1279,13 @@ void process_input() {
                                 break;
                             }
                         }
+                    } else if (buf[i] == 0x12) {
+                        state->previous_state = state->current_state;
+                        state->current_state = EDIT_ROOMDETAILS;
+                        i++;
+                        continue;
                     }
+
                 }; fallthrough;
 
                 case NORMAL:
@@ -1152,29 +1318,41 @@ void process_input() {
                         cursor->x --;
                         state->partial_byte = 0;
                         if (cursor->x < 0) {
-                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
-                            cursor->x = WIDTH_TILES - 1;
+                            cursor->x ++;
+                            size_t level = state->rooms.rooms[*cursorlevel].data.room_west;
+                            state->cursors[level].y = state->cursors[*cursorlevel].y;
+                            state->cursors[level].x = WIDTH_TILES - 1;
+                            *cursorlevel = level;
                         }
                     } else if (KEY_MATCHES(KEY_DOWN) || KEY_MATCHES("j")) {
                         cursor->y ++;
                         state->partial_byte = 0;
                         if (cursor->y >= HEIGHT_TILES) {
-                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
-                            cursor->y = 0;
+                            cursor->y --;
+                            size_t level = state->rooms.rooms[*cursorlevel].data.room_south;
+                            state->cursors[level].y = 0;
+                            state->cursors[level].x = state->cursors[*cursorlevel].x;
+                            *cursorlevel = level;
                         }
                     } else if (KEY_MATCHES(KEY_UP) || KEY_MATCHES("k")) {
                         cursor->y --;
                         state->partial_byte = 0;
                         if (cursor->y < 0) {
-                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
-                            cursor->y = HEIGHT_TILES - 1;
+                            cursor->y ++;
+                            size_t level = state->rooms.rooms[*cursorlevel].data.room_north;
+                            state->cursors[level].y = HEIGHT_TILES - 1;
+                            state->cursors[level].x = state->cursors[*cursorlevel].x;
+                            *cursorlevel = level;
                         }
                     } else if (KEY_MATCHES(KEY_RIGHT) || KEY_MATCHES("l")) {
                         cursor->x ++;
                         state->partial_byte = 0;
                         if (cursor->x >= WIDTH_TILES) {
-                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
-                            cursor->x = 0;
+                            cursor->x --;
+                            size_t level = state->rooms.rooms[*cursorlevel].data.room_east;
+                            state->cursors[level].x = 0;
+                            state->cursors[level].y = state->cursors[*cursorlevel].y;
+                            *cursorlevel = level;
                         }
                     } else if (KEY_MATCHES("r")) {
                         state->previous_state = state->current_state;
@@ -1228,11 +1406,6 @@ void process_input() {
                                   break;
 
                             case 'H': state->debug.hex = !state->debug.hex; break;
-                            case 'R':
-                                  state->previous_state = state->current_state;
-                                  state->current_state = EDIT_ROOMDETAILS;
-                                  break;
-
                             case 'T': {
                                 switch (state->current_state) {
                                     case NORMAL:
@@ -1341,7 +1514,7 @@ help_keys help[][100] = {
         {"Right/l", "Move cursor right"},
         {"R", "edit room name"},
         {"r[nn]", "goto room"},
-        {"Ctrl-r[b]", "edit room detail"},
+        {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"s[n]", "goto switch"},
         {"p", "play (runs play.sh)"},
         {"q", "quit"},
@@ -1393,6 +1566,7 @@ help_keys help[][100] = {
         {"p", "toggle position display"},
         {"s", "toggle room switch display"},
         {"u", "toggle unknown display"},
+        {"Ctrl-?", "toggle help"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {0},
@@ -1410,6 +1584,12 @@ help_keys help[][100] = {
         {"e", "Edit room UNKNOWN_e (only bottom two bits)"},
         {"f", "Edit room UNKNOWN_f"},
 
+        {"LEFT", "Edit room to left"},
+        {"RIGHT", "Edit room to right"},
+        {"UP", "Edit room above"},
+        {"DOWN", "Edit room below"},
+
+        {"Ctrl-?", "toggle help"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {0},
@@ -1417,11 +1597,22 @@ help_keys help[][100] = {
 
     [EDIT_ROOMDETAILS_NUM]={
         {"0-9a-fA-F", "value"},
+        {"Ctrl-?", "toggle help"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {0},
     },
 
+    [EDIT_ROOMDETAILS_ROOM]={
+        {"0-9a-fA-F", "room number"},
+        {"DEL", "delete character under cursor"},
+        {"BACKSPACE", "delete character under cursor"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
+        {0},
+    },
 };
 _Static_assert(C_ARRAY_LEN(help) == NUM_STATES, "Unhandled for all states");
 
@@ -1607,7 +1798,16 @@ void redraw() {
     printf("%s", state->debug.hex ? "[HEX]" : "[DEC]");
 
     GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
-    if (state->current_state == GOTO_ROOM) {
+    if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM) {
+        if (state->current_state == EDIT_ROOMDETAILS_ROOM) {
+            switch (state->room_detail) {
+                case 'A': printf("up: "); break;
+                case 'B': printf("down: "); break;
+                case 'C': printf("right: "); break;
+                case 'D': printf("left: "); break;
+                default: UNREACHABLE();
+            }
+        }
         if (state->partial_byte) {
             if (state->debug.hex) {
                 printf("%x", state->partial_byte & 0xFF);
@@ -1617,12 +1817,41 @@ void redraw() {
         } else {
             printf("\033[4;5m_\033[m");
         }
-        printf("\033[4;5m_\033[m - \"???\"");
+        switch (state->current_state) {
+            case GOTO_ROOM: printf("\033[4;5m_\033[m - \"???\""); break;
+            case EDIT_ROOMDETAILS_ROOM:
+            {
+#define READ_NEIGHBOUR(id) do { \
+neighbour_room = state->rooms.rooms[(id)].data; \
+assert(C_ARRAY_LEN(neighbour_name) >= C_ARRAY_LEN(neighbour_room.name)); \
+strncpy(neighbour_name, neighbour_room.name, C_ARRAY_LEN(neighbour_room.name)); \
+for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
+    if (neighbour_name[i] == '\0' || isspace(neighbour_name[i])) { \
+        neighbour_name[i] = '\0'; \
+    } else { \
+        break; \
+    } \
+} \
+} while (0)
+                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompresssedRoom neighbour_room = {0};
+                char neighbour_name[25] = {0};
+                switch (state->room_detail) {
+                    case 'A': READ_NEIGHBOUR(room->room_north); break;
+                    case 'B': READ_NEIGHBOUR(room->room_south); break;
+                    case 'C': READ_NEIGHBOUR(room->room_east); break;
+                    case 'D': READ_NEIGHBOUR(room->room_west); break;
+                    default: UNREACHABLE();
+                }
+                printf("\033[4;5m_\033[m - \"%s\"", neighbour_name);
+#undef READ_NEIGHBOUR
+            }; break;
+
+            default: UNREACHABLE();
+        }
         for (int y = 0; y < HEIGHT_TILES; y ++) {
             for (int x = 0; x < WIDTH_TILES; x ++) {
-                if (state->current_state == GOTO_ROOM) {
-                    printf("  ");
-                }
+                printf("  ");
             }
             printf("\n");
         }
@@ -1834,7 +2063,7 @@ void redraw() {
         printf("\033[m");
     }
 
-    if (state->current_state != NORMAL) {
+    if (state->current_state == TILE_EDIT || (state->current_state != NORMAL && state->previous_state == TILE_EDIT)) {
         GOTO(2 * x, y + 1);
         size_t ch_i = i;
         if (obj) {
@@ -2102,22 +2331,41 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 } \
 } while (0)
 
-        GOTO(0, bottom); bottom ++;
-        printf("left: ");PRINTF_DATA(room.room_west);
-        READ_NEIGHBOUR(room.room_west);
-        printf(" - \"%s\"", neighbour_name);
-        GOTO(0, bottom); bottom ++;
-        printf("down: ");PRINTF_DATA(room.room_south);
-        READ_NEIGHBOUR(room.room_south);
-        printf(" - \"%s\"", neighbour_name);
-        GOTO(0, bottom); bottom ++;
-        printf("up: ");PRINTF_DATA(room.room_north);
-        READ_NEIGHBOUR(room.room_north);
-        printf(" - \"%s\"", neighbour_name);
-        GOTO(0, bottom); bottom ++;
-        printf("right: ");PRINTF_DATA(room.room_east);
-        READ_NEIGHBOUR(room.room_east);
-        printf(" - \"%s\"", neighbour_name);
+        if (state->current_state == EDIT_ROOMDETAILS) {
+            GOTO(0, bottom); bottom ++;
+            printf("\033[1;4mLEFT\033[m: ");PRINTF_DATA(room.room_west);
+            READ_NEIGHBOUR(room.room_west);
+            printf(" - \"%s\"", neighbour_name);
+            GOTO(0, bottom); bottom ++;
+            printf("\033[1;4mDOWN\033[m: ");PRINTF_DATA(room.room_south);
+            READ_NEIGHBOUR(room.room_south);
+            printf(" - \"%s\"", neighbour_name);
+            GOTO(0, bottom); bottom ++;
+            printf("\033[1;4mUP\033[m: ");PRINTF_DATA(room.room_north);
+            READ_NEIGHBOUR(room.room_north);
+            printf(" - \"%s\"", neighbour_name);
+            GOTO(0, bottom); bottom ++;
+            printf("\033[1;4mRIGHT\033[m: ");PRINTF_DATA(room.room_east);
+            READ_NEIGHBOUR(room.room_east);
+            printf(" - \"%s\"", neighbour_name);
+        } else {
+            GOTO(0, bottom); bottom ++;
+            printf("left: ");PRINTF_DATA(room.room_west);
+            READ_NEIGHBOUR(room.room_west);
+            printf(" - \"%s\"", neighbour_name);
+            GOTO(0, bottom); bottom ++;
+            printf("down: ");PRINTF_DATA(room.room_south);
+            READ_NEIGHBOUR(room.room_south);
+            printf(" - \"%s\"", neighbour_name);
+            GOTO(0, bottom); bottom ++;
+            printf("up: ");PRINTF_DATA(room.room_north);
+            READ_NEIGHBOUR(room.room_north);
+            printf(" - \"%s\"", neighbour_name);
+            GOTO(0, bottom); bottom ++;
+            printf("right: ");PRINTF_DATA(room.room_east);
+            READ_NEIGHBOUR(room.room_east);
+            printf(" - \"%s\"", neighbour_name);
+            }
     }
 
     if (state->current_state == EDIT_ROOMNAME) {
@@ -2129,6 +2377,18 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     if (state->current_state == GOTO_SWITCH) {
         GOTO(0, bottom); bottom +=2;
         printf("\nEnter switch id or q to go to main view");
+        goto show_help_if_needed;
+    }
+
+    if (state->current_state == TOGGLE_DISPLAY) {
+        GOTO(0, bottom); bottom +=2;
+        printf("\nEnter type to toggle, a for all, Ctrl-? for help");
+        goto show_help_if_needed;
+    }
+
+    if (state->current_state == EDIT_ROOMDETAILS) {
+        GOTO(0, bottom); bottom +=2;
+        printf("\nEnter element to edit, Ctrl-? for help");
         goto show_help_if_needed;
     }
 
