@@ -1071,7 +1071,7 @@ int main(int argc, char **argv) {
         if (display_room == -1) {
             for (size_t i = 0; i < C_ARRAY_LEN(file.rooms); i ++) {
                 if (file.rooms[i].valid) {
-                    dumpRoom(&file.rooms[i]);
+                    dumpRoom(&file.rooms[i], &file);
                 }
             }
         } else {
@@ -1079,7 +1079,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Room %d is invalid\n", display_room);
                 defer_return(1);
             }
-            dumpRoom(&file.rooms[display_room]);
+            dumpRoom(&file.rooms[display_room], &file);
         }
     }
     if (patches.length > 0) {
@@ -1434,7 +1434,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Room %d is invalid\n", rooms.data[i]);
                 defer_return(1);
             }
-            dumpRoom(&file.rooms[rooms.data[i]]);
+            dumpRoom(&file.rooms[rooms.data[i]], &file);
         }
     }
     if (patches.length > 0 || recompress) {

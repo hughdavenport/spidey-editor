@@ -81,7 +81,7 @@ bool readHeader(Header *head, FILE *fp) {
     return true;
 }
 
-void dumpRoom(Room *room) {
+void dumpRoom(Room *room, RoomFile *file) {
     printf("Room %u @0x%04X: \"%s\"\n", room->index, room->address, room->data.name);
 
     /* printf("  Compressed room (length=%zu): [", room->compressed.length); */
@@ -176,14 +176,32 @@ void dumpRoom(Room *room) {
     printf(", gravity (-): %u", room->data.gravity_horizontal);
     printf("\n");
 
+#define READ_NEIGHBOUR(id) do { \
+neighbour_room = file->rooms[(id)].data; \
+assert(C_ARRAY_LEN(neighbour_name) >= C_ARRAY_LEN(neighbour_room.name)); \
+strncpy(neighbour_name, neighbour_room.name, C_ARRAY_LEN(neighbour_room.name)); \
+for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
+    if (neighbour_name[i] == '\0' || isspace(neighbour_name[i])) { \
+        neighbour_name[i] = '\0'; \
+    } else { \
+        break; \
+    } \
+} \
+} while (0)
+    struct DecompresssedRoom neighbour_room = {0};
+    char neighbour_name[25] = {0};
     printf("left: %u", room->data.room_west);
-    printf(" - TODO name\n");
+    READ_NEIGHBOUR(room->data.room_west);
+    printf(" - \"%s\"\n", neighbour_name);
     printf("down: %u", room->data.room_south);
-    printf(" - TODO name\n");
+    READ_NEIGHBOUR(room->data.room_south);
+    printf(" - \"%s\"\n", neighbour_name);
     printf("up: %u", room->data.room_north);
-    printf(" - TODO name\n");
+    READ_NEIGHBOUR(room->data.room_north);
+    printf(" - \"%s\"\n", neighbour_name);
     printf("right: %u", room->data.room_east);
-    printf(" - TODO name\n");
+    READ_NEIGHBOUR(room->data.room_east);
+    printf(" - \"%s\"\n", neighbour_name);
 
     printf("  UNKNOWN (b) (base offset / 3 (i.e. index) into movertab.dat): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
     printf("  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
