@@ -1512,10 +1512,10 @@ void redraw() {
     }
 
 
-    for (int y = 0; y < HEIGHT_TILES; y ++) {
-        for (int x = 0; x < WIDTH_TILES; x ++) {
-            uint8_t tile = room.tiles[TILE_IDX(x, y)];
-            if (state->current_state == GOTO_SWITCH) {
+    if (state->current_state == GOTO_SWITCH) {
+        for (int y = 0; y < HEIGHT_TILES; y ++) {
+            for (int x = 0; x < WIDTH_TILES; x ++) {
+                uint8_t tile = room.tiles[TILE_IDX(x, y)];
                 struct SwitchObject *found_switch = NULL;
                 int s;
                 for (s = 0; s < room.num_switches; s ++) {
@@ -1542,40 +1542,44 @@ void redraw() {
                         printf("%02X", tile);
                     }
                 }
-                continue;
             }
-
-            bool colored = false;
-            if (state->debug.switches)
-            for (int s = 0; s < room.num_switches; s ++) {
-                struct SwitchObject *sw = room.switches + s;
-                assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
-                if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
-                    colored = true;
-                    printf("\033[4%d;30m", (s % 3) + 4);
-                    break;
-                }
-                for (size_t c = 1; !colored && c < sw->chunks.length; c ++) {
-                    struct SwitchChunk *chunk = sw->chunks.data + c;
-                    if (chunk->type == TOGGLE_BLOCK) {
-                        if (chunk->dir == HORIZONTAL) {
-                            if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+        }
+    } else {
+        for (int y = 0; y < HEIGHT_TILES; y ++) {
+            for (int x = 0; x < WIDTH_TILES; x ++) {
+                uint8_t tile = room.tiles[TILE_IDX(x, y)];
+                bool colored = false;
+                if (state->debug.switches)
+                for (int s = 0; s < room.num_switches; s ++) {
+                    struct SwitchObject *sw = room.switches + s;
+                    assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
+                    if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
+                        colored = true;
+                        printf("\033[4%d;30m", (s % 3) + 4);
+                        break;
+                    }
+                    for (size_t c = 1; !colored && c < sw->chunks.length; c ++) {
+                        struct SwitchChunk *chunk = sw->chunks.data + c;
+                        if (chunk->type == TOGGLE_BLOCK) {
+                            if (chunk->dir == HORIZONTAL) {
+                                if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                                    printf("\033[3%d;40m", (s % 3) + 4);
+                                    colored = true;
+                                    tile = chunk->on;
+                                }
+                            } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
                                 printf("\033[3%d;40m", (s % 3) + 4);
                                 colored = true;
                                 tile = chunk->on;
                             }
-                        } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                            printf("\033[3%d;40m", (s % 3) + 4);
-                            colored = true;
-                            tile = chunk->on;
                         }
                     }
                 }
-            }
-            if (colored || tile != BLANK_TILE) {
-                GOTO(2 * x, y + 1);
-                printf("%02X", tile);
-                if (colored) printf("\033[m");
+                if (colored || tile != BLANK_TILE) {
+                    GOTO(2 * x, y + 1);
+                    printf("%02X", tile);
+                    if (colored) printf("\033[m");
+                }
             }
         }
     }
@@ -1693,8 +1697,8 @@ void redraw() {
     if (debugany()) bottom ++;
     if (state->debug.data) {
         GOTO(0, bottom); bottom ++;
-        printf("back: ");PRINTF_DATA(room.background);
-        printf(", tileset: ");PRINTF_DATA(room.tile_offset);
+        printf("bkgrnd: ");PRINTF_DATA(room.background);
+        printf(", tiles: ");PRINTF_DATA(room.tile_offset);
         printf(", dmg: ");PRINTF_DATA(room.room_damage);
         printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
         printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
@@ -1806,6 +1810,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             printf("No object here, TODO create new?");
         }
     }
+
     if (state->debug.switches) {
         GOTO(0, bottom); bottom ++;
     (void)chunk_switch_underneath;
