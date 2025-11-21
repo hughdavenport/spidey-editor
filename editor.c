@@ -1434,6 +1434,11 @@ void process_input() {
                                 assert(writeRooms(&state->rooms));
                             }; break;
 
+                            case 'c':
+                            {
+                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }; break;
+
                             case 'q':
                             case ESCAPE:
                                 if (state->help) {
@@ -1474,6 +1479,146 @@ void process_input() {
                 case EDIT_SWITCHDETAILS_SELECT_CHUNK:
                 {
                     UNREACHABLE();
+                    if (buf[i] == ESCAPE && i + 1 < n && buf[i + 1] == '[') {
+                        // CSI sequence
+                        i += 2;
+                        uint8_t arg = 0;
+                        while (i < n) {
+                            if (isdigit(buf[i])) {
+                                arg = 10 * arg + buf[i] - '0';
+                            } else if (buf[i] == ';') {
+                                arg = 0;
+                            } else {
+                                switch (buf[i]) {
+                                    case 'A':
+                                    {
+                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        room->switches[state->current_switch].chunks.data[0].side = TOP;
+                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                        assert(writeRooms(&state->rooms));
+                                    }; break;
+
+                                    case 'B':
+                                    {
+                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        room->switches[state->current_switch].chunks.data[0].side = BOTTOM;
+                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                        assert(writeRooms(&state->rooms));
+                                    }; break;
+
+                                    case 'C':
+                                    {
+                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        room->switches[state->current_switch].chunks.data[0].side = RIGHT;
+                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                        assert(writeRooms(&state->rooms));
+                                    }; break;
+
+                                    case 'D':
+                                    {
+                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        room->switches[state->current_switch].chunks.data[0].side = LEFT;
+                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                        assert(writeRooms(&state->rooms));
+                                    }; break;
+                                }
+                                break;
+                            }
+                            i ++;
+                        }
+                    } else {
+                        switch (buf[i]) {
+                            case 'h':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                room->switches[state->current_switch].chunks.data[0].side = LEFT;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }; break;
+
+                            case 'j':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                room->switches[state->current_switch].chunks.data[0].side = BOTTOM;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }; break;
+
+                            case 'k':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                room->switches[state->current_switch].chunks.data[0].side = TOP;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }; break;
+
+                            case 'l':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                room->switches[state->current_switch].chunks.data[0].side = RIGHT;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }; break;
+
+                            case 'o':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                room->switches[state->current_switch].chunks.data[0].one_time_use = !room->switches[state->current_switch].chunks.data[0].one_time_use;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }; break;
+
+                            case 'e':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                room->switches[state->current_switch].chunks.data[0].room_entry = !room->switches[state->current_switch].chunks.data[0].room_entry;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }; break;
+
+                            case 's':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                room->switches[state->current_switch].chunks.data[0].side = (room->switches[state->current_switch].chunks.data[0].side + 1) % NUM_SIDES;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }; break;
+
+                            case 'c':
+                            {
+                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }; break;
+
+                            case 'q':
+                            case ESCAPE:
+                                if (state->help) {
+                                    state->help = false;
+                                } else {
+                                    state->current_state = state->previous_state;
+                                    state->previous_state = TILE_EDIT;
+                                }
+                                break;
+
+                            default:
+                                if (buf[i] == '?') {
+                                    state->help = !state->help;
+                                } else if (iscntrl(buf[i])) {
+                                    switch (buf[i] + 'A' - 1) {
+                                        case '_': state->help = !state->help; break;
+                                        case 'H':
+                                            state->debug.hex = !state->debug.hex;
+                                            if (state->partial_byte) {
+                                                if (state->debug.hex) {
+                                                    state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
+                                                } else {
+                                                    state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
+                                                }
+                                            }
+                                    }
+                                }
+                        }
+                    }
+                    i++;
                 }; break;
 
                 case TILE_EDIT:
@@ -1568,17 +1713,26 @@ void process_input() {
                                     i ++;
                                     continue;
                                 }
-                                for (size_t i = 0; i < num_switches; i ++) {
+                                size_t x = state->cursors[state->current_level].x;
+                                size_t y = state->cursors[state->current_level].y;
+                                size_t i = 0;
+                                while (i < num_switches) {
                                     struct SwitchObject *sw = room->switches + i;
-                                    if (sw->chunks.length && sw->chunks.data[0].x == state->cursors[state->current_level].x && sw->chunks.data[0].y == state->cursors[state->current_level].y) {
-                                        state->current_switch = i;
-                                        state->current_state = EDIT_SWITCHDETAILS;
+                                    if (sw->chunks.length && sw->chunks.data[0].x == x && sw->chunks.data[0].y == y) {
                                         break;
                                     }
+                                    i ++;
                                 }
-                                if (state->current_state != EDIT_SWITCHDETAILS) {
-                                    state->current_state = EDIT_SWITCHDETAILS_NEW;
+                                if (i == room->num_switches) {
+                                    room->switches = realloc(room->switches, (i + 1) * sizeof(struct SwitchObject));
+                                    assert(room->switches != NULL);
+                                    memset(room->switches + i, 0, sizeof(struct SwitchObject));
+                                    room->num_switches ++;
+                                    struct SwitchObject *sw = room->switches + i;
+                                    ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y }));
                                 }
+                                state->current_switch = i;
+                                state->current_state = EDIT_SWITCHDETAILS;
                                 i ++;
                                 continue;
                             }
@@ -1814,7 +1968,7 @@ help_keys help[][100] = {
         {"R", "edit room name"},
         {"r[nn]", "goto room"},
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
-        {"Ctrl-s[eorcs]", "edit switch detail"},
+        {"Ctrl-s[eorcs]", "create/edit switch"},
         {"s[n]", "goto switch"},
         {"p", "play (runs play.sh)"},
         {"q", "quit"},
@@ -1921,13 +2075,12 @@ help_keys help[][100] = {
     [EDIT_SWITCHDETAILS]={
         {"e", "flip the switch on entry bit"},
         {"o", "flip the switch one time only bit"},
-        {"r", "rotate which side is the switch"},
+        {"s", "rotate which side is the switch"},
         {"Left/h", "set switch side to left"},
         {"Down/j", "set switch side to bottom"},
         {"Up/k", "set switch side to top"},
         {"Right/l", "set switch side to right"},
         {"c[n]", "select chunk"},
-        {"s[n]", "select switch (can be out of bounds)"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
