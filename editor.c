@@ -173,6 +173,8 @@ typedef enum {
     EDIT_SWITCHDETAILS,
     EDIT_SWITCHDETAILS_NEW,
 
+    EDIT_SWITCHDETAILS_SELECT_CHUNK,
+
     TOGGLE_DISPLAY,
     NUM_STATES
 } game_state_state;
@@ -633,9 +635,11 @@ void process_input() {
                             if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE && sw->chunks.data[0].x < WIDTH_TILES && sw->chunks.data[0].y < HEIGHT_TILES) {
                                 cursor->x = sw->chunks.data[0].x;
                                 cursor->y = sw->chunks.data[0].y;
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
+                            } else {
+                                state->current_state = EDIT_SWITCHDETAILS;
                             }
-                            state->current_state = state->previous_state;
-                            state->previous_state = NORMAL;
                         }
                     } else if (buf[i] == ESCAPE) {
                         if (state->help) {
@@ -1462,6 +1466,16 @@ void process_input() {
                     i++;
                 }; break;
 
+                case EDIT_SWITCHDETAILS_NEW:
+                {
+                    UNREACHABLE();
+                }; break;
+
+                case EDIT_SWITCHDETAILS_SELECT_CHUNK:
+                {
+                    UNREACHABLE();
+                }; break;
+
                 case TILE_EDIT:
                 {
                     if (isxdigit(buf[i])) {
@@ -1931,6 +1945,16 @@ help_keys help[][100] = {
         {0},
     },
 
+    [EDIT_SWITCHDETAILS_SELECT_CHUNK]={
+        {"TODO", "TODO"},
+        {"s[n]", "select switch (can be out of bounds)"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
+        {0},
+    },
+
 };
 _Static_assert(C_ARRAY_LEN(help) == NUM_STATES, "Unhandled for all states");
 
@@ -2014,10 +2038,10 @@ void redraw() {
     int y = state->cursors[state->current_level].y;
     assert(x >= 0);
     assert(y >= 0);
-    assert(x < WIDTH_TILES);
-    assert(y < HEIGHT_TILES);
-    GOTO(2 * x, y + 1);
-    uint8_t tile = room.tiles[TILE_IDX(x, y)];
+    if (x < WIDTH_TILES && y < HEIGHT_TILES) {
+        GOTO(2 * x, y + 1);
+    }
+    uint8_t tile = x < WIDTH_TILES && y < HEIGHT_TILES ? room.tiles[TILE_IDX(x, y)] : 0;
     bool obj = false;
     bool sw = false;
     bool ch = false;
@@ -2505,17 +2529,48 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
                 GOTO(0, bottom); bottom ++;
 #define BOOL_S(b) ((b) ? "true" : "false")
-                printf("switch id %lu: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
-                        s,
-                        sw->chunks.data[0].x, sw->chunks.data[0].y,
-                        BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
-                        SWITCH_SIDE(sw->chunks.data[0].side));
-#undef BOOL_S
+                if (state->current_state == EDIT_SWITCHDETAILS && state->current_switch == s) {
+                    printf("\033[1;4mswitch id ");
+                    PRINTF_DATA((uint16_t)s);
+                    printf("\033[m: (x,y)=");
+                    PRINTF_DATA(sw->chunks.data[0].x);
+                    printf(",");
+                    PRINTF_DATA(sw->chunks.data[0].y);
+                    printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
+                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
+                            SWITCH_SIDE(sw->chunks.data[0].side));
+
+                } else {
+                    printf("switch id ");
+                    if (state->current_state == GOTO_SWITCH) {
+                        printf("\033[4%ld;30;1m", (s % 4) + 4);
+                        PRINTF_DATA((uint16_t)s);
+                        printf("\033[m");
+                    } else {
+                        PRINTF_DATA((uint16_t)s);
+                    }
+                    printf(": (x,y)=");
+                    PRINTF_DATA(sw->chunks.data[0].x);
+                    printf(",");
+                    PRINTF_DATA(sw->chunks.data[0].y);
+                    printf(" (entry)=%s (once)=%s (side)=%s\n",
+                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
+                            SWITCH_SIDE(sw->chunks.data[0].side));
+                }
+
                 bottom ++;
                 if (sw->chunks.length > 1) {
                     printf("  chunks:\n");
                     bottom ++;
                     for (size_t i = 1; i < sw->chunks.length; i ++) {
+                        if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK) {
+                            fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
+                            UNREACHABLE();
+                        }
+                        if (state->current_chunk == i) {
+                            fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
+                            UNREACHABLE();
+                        }
                         printf("    ");
                         struct SwitchChunk *chunk = sw->chunks.data + i;
                         switch (chunk->type) {
@@ -2612,6 +2667,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         }
                     }
                 }
+#undef BOOL_S
             }
         }
         if (found) {
