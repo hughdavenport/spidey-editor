@@ -57,6 +57,7 @@ enum SwitchSide {
     RIGHT,
     BOTTOM,
     LEFT,
+    NUM_SIDES
 };
 
 #define SWITCH_SIDE(s) (const char *[]){ \

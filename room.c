@@ -645,8 +645,6 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         read_next(lsb, tmp.decompressed);
         uint8_t y = msb & 0x1f;
         uint8_t x = lsb & 0x1f;
-        // FIXME figure out what rest of bytes do
-        // msb 0x40, 0x60 writes badly...
         _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
         ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, .room_entry = (lsb & 0x80) == 0x00, .one_time_use = (msb & 0x20) != 0x00, .side = (lsb & 0x60) >> 5, .msb = msb, .lsb = lsb }));
 
@@ -934,7 +932,7 @@ bool writeRoom(Room *room, FILE *fp) {
             switch (chunk->type) {
                 case PREAMBLE:
                     assert(c == 0);
-                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->one_time_use ? 0x20 : 0x00) | (chunk->msb & (~0x1f | 0x20));
+                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->one_time_use ? 0x20 : 0x00);
                     decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->room_entry ? 0x00 : 0x80) | (chunk->side << 5);
                     break;
 
