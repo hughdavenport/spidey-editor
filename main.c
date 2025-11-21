@@ -188,7 +188,9 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         *last_dot = '\0';
                         arg ++;
                     }
-                    assert(asprintf(&arg, "%s%s", last, arg) >= 0);
+                    if (asprintf(&arg, "%s%s", last, arg) <= 0) {
+                        assert(false);
+                    }
                 }
                 if ((strncasecmp(arg, "object[", 7) == 0 && (isdigit(arg[7]) || arg[7] == ']')) || (strncasecmp(arg, "objects[", 8) == 0 && (isdigit(arg[8]) || arg[8] == ']'))) {
                     char *str = arg + (arg[6] == '[' ? 7 : 8);
@@ -265,6 +267,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         } else {
                             fprintf(stderr, "Invalid object type: %s\n", (*argv)[1]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            if (last != NULL) free(last);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
@@ -276,6 +279,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             fprintf(stderr, "Invalid tile address: %s\n", (*argv)[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            if (last != NULL) free(last);
                             return false;
                         }
                         if (end[1] == '[') {
@@ -283,6 +287,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             if (errno == EINVAL || strcasecmp(end, "]") != 0) {
                                 fprintf(stderr, "Invalid tile address for y: %s\n", (*argv)[0]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                if (last != NULL) free(last);
                                 if (arg != (*argv)[0]) free(arg);
                                 return false;
                             }
@@ -291,6 +296,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         if (idx >= WIDTH_TILES * HEIGHT_TILES) {
                             fprintf(stderr, "Invalid tile address, too large: %s\n", (*argv)[0]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            if (last != NULL) free(last);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
@@ -298,6 +304,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         if (errno == EINVAL || end == NULL || *end != '\0') {
                             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            if (last != NULL) free(last);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
@@ -305,6 +312,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             fprintf(stderr, "Value must be in the range 0..255\n");
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            if (last != NULL) free(last);
                             return false;
                         }
                         value = idx << 8 | value;
@@ -312,6 +320,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         fprintf(stderr, "Invalid object field: %s\n", arg);
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         if (arg != (*argv)[0]) free(arg);
+                        if (last != NULL) free(last);
                         return false;
                     }
 
@@ -321,20 +330,26 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            if (last != NULL) free(last);
                             return false;
                         }
                         if (value < 0 || value > 0xFF) {
                             fprintf(stderr, "Value must be in the range 0..255\n");
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            if (last != NULL) free(last);
                             return false;
                         }
                     }
                     if (last != NULL) free(last);
                     if (idx < 0) {
-                        assert(asprintf(&last, "object[]") > 0);
+                        if (asprintf(&last, "object[]") <= 0) {
+                            assert(false);
+                        }
                     } else {
-                        assert(asprintf(&last, "object[%ld]", idx) > 0);
+                        if (asprintf(&last, "object[%ld]", idx) <= 0) {
+                            assert(false);
+                        }
                     }
                     if (arg != (*argv)[0]) free(arg);
 
@@ -400,6 +415,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             fprintf(stderr, "Invalid side: %s\n", (*argv)[1]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            if (last != NULL) free(last);
                             return false;
                         }
                     } else if ((strncasecmp(end, "].chunk[", 8) == 0 && (isdigit(end[8]) || end[8] == ']')) || (strncasecmp(end, "].chunks[", 9) == 0 && (isdigit(end[9]) || end[9] == ']'))) {
@@ -427,7 +443,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             addr += offsetof(struct SwitchChunk, x);
                         } else if (strcasecmp(end, "].y") == 0) {
                             addr += offsetof(struct SwitchChunk, y);
-                        } else if (strcasecmp(end, "].size") == 0) {
+                        } else if (strcasecmp(end, "].size") == 0 || strcasecmp(end, "].height") == 0 || strcasecmp(end, "].width") == 0) {
                             addr += offsetof(struct SwitchChunk, size);
                         } else if (strcasecmp(end, "].off") == 0) {
                             addr += offsetof(struct SwitchChunk, off);
@@ -446,9 +462,11 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                     fprintf(stderr, "Invalid direction type: %s\n", (*argv)[1]);
                                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                     if (arg != (*argv)[0]) free(arg);
+                                    if (last != NULL) free(last);
                                     return false;
                                 }
                                 if (arg != (*argv)[0]) free(arg);
+                                if (last != NULL) free(last);
                                 return false;
                             }
                         } else if (strcasecmp(end, "].msb") == 0 || strcasecmp(end, "].msb_without_y") == 0 || strcasecmp(end, "].msb_without_y_and_one_time_use") == 0) {
@@ -501,6 +519,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 fprintf(stderr, "Invalid side: %s\n", (*argv)[1]);
                                 fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                 if (arg != (*argv)[0]) free(arg);
+                                if (last != NULL) free(last);
                                 return false;
                             }
                         } else if (strcasecmp(end, "].type") == 0) {
@@ -511,14 +530,15 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                     fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
                                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                     if (arg != (*argv)[0]) free(arg);
+                                    if (last != NULL) free(last);
                                     return false;
                                 }
                                 value = PREAMBLE;
-                            } else if (strcasecmp((*argv)[1], "TOGGLE_BLOCK") == 0) {
+                            } else if (strcasecmp((*argv)[1], "TOGGLE_BLOCK") == 0 || strcasecmp((*argv)[1], "block") == 0) {
                                 value = TOGGLE_BLOCK;
-                            } else if (strcasecmp((*argv)[1], "TOGGLE_BIT") == 0) {
+                            } else if (strcasecmp((*argv)[1], "TOGGLE_BIT") == 0 || strcasecmp((*argv)[1], "bit") == 0) {
                                 value = TOGGLE_BIT;
-                            } else if (strcasecmp((*argv)[1], "TOGGLE_OBJECT") == 0) {
+                            } else if (strcasecmp((*argv)[1], "TOGGLE_OBJECT") == 0 || strcasecmp((*argv)[1], "obj") == 0 || strcasecmp((*argv)[1], "object") == 0) {
                                 value = TOGGLE_OBJECT;
                             } else {
                                 value = strtol((*argv)[1], &end, 0);
@@ -526,21 +546,25 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                     fprintf(stderr, "Invalid chunk type: %s\n", (*argv)[1]);
                                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                     if (arg != (*argv)[0]) free(arg);
+                                    if (last != NULL) free(last);
                                     return false;
                                 }
                                 if (value == PREAMBLE && idx != 0) {
                                     fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
                                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                                     if (arg != (*argv)[0]) free(arg);
+                                    if (last != NULL) free(last);
                                     return false;
                                 }
                                 if (arg != (*argv)[0]) free(arg);
+                                if (last != NULL) free(last);
                                 return false;
                             }
                         } else {
                             fprintf(stderr, "Invalid chunk field: %s\n", arg);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            if (last != NULL) free(last);
                             return false;
                         }
                     } else {
@@ -548,6 +572,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         fprintf(stderr, "Invalid switch field: %s\n", arg);
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         if (arg != (*argv)[0]) free(arg);
+                        if (last != NULL) free(last);
                         return false;
                     }
 
@@ -557,6 +582,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
                             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                             if (arg != (*argv)[0]) free(arg);
+                            if (last != NULL) free(last);
                             return false;
                         }
                     }
@@ -564,13 +590,18 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         fprintf(stderr, "Value must be in the range 0..255\n");
                         fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                         if (arg != (*argv)[0]) free(arg);
+                        if (last != NULL) free(last);
                         return false;
                     }
                     if (last != NULL) free(last);
                     if (chunk_idx != -1) {
-                        assert(asprintf(&last, "switch[%ld].chunk[%ld]", idx, chunk_idx) > 0);
+                        if (asprintf(&last, "switch[%ld].chunk[%ld]", idx, chunk_idx) <= 0) {
+                            assert(false);
+                        }
                     } else {
-                        assert(asprintf(&last, "switch[%ld]", idx) > 0);
+                        if (asprintf(&last, "switch[%ld]", idx) <= 0) {
+                            assert(false);
+                        }
                     }
                     if (arg != (*argv)[0]) free(arg);
 
@@ -583,6 +614,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     fprintf(stderr, "Invalid address: %s\n", arg);
                     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
                     if (arg != (*argv)[0]) free(arg);
+                    if (last != NULL) free(last);
                     return false;
                 }
                 if (arg != (*argv)[0]) free(arg);
@@ -591,6 +623,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
         if (addr < 0) {
             fprintf(stderr, "Address must be positive\n");
             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+            if (last != NULL) free(last);
             return false;
         }
 
@@ -598,11 +631,13 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
         if (errno == EINVAL || end == NULL || *end != '\0') {
             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+            if (last != NULL) free(last);
             return false;
         }
         if (value < 0 || value > 0xFF) {
             fprintf(stderr, "Value must be in the range 0..255\n");
             fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+            if (last != NULL) free(last);
             return false;
         }
 
@@ -918,19 +953,161 @@ int main(int argc, char **argv) {
                 defer_return(1);
             }
         } else if (strcasecmp(argv[0], "find_switch") == 0) {
-            printf("scanning\n");
+
+            printf("out of bounds switches:\n");
             for (size_t room = 0; room < 64; room ++) {
                 if (file.rooms[room].valid) {
+                    uint8_t found = 0;
                     for (size_t i = 0; i < file.rooms[room].data.num_switches; i ++) {
-                        for (size_t chunk = 0; chunk < file.rooms[room].data.switches[i].chunks.length; chunk ++) {
-                            if (file.rooms[room].data.switches[i].chunks.data[chunk].type == TOGGLE_BIT) {
-                                printf("room %02lx %s, switch %lu\n", room, file.rooms[room].data.name, i);
-                                break;
+                        struct SwitchObject *sw = file.rooms[room].data.switches + i;
+                        if (sw->chunks.data[0].x >= WIDTH_TILES || sw->chunks.data[0].y >= HEIGHT_TILES) {
+                            if (!found) {
+                                printf("- %s\n", file.rooms[room].data.name);
+                                found = 1;
+                            }
+                            printf("  - switch id %lu, x,y=%u,%u\n", i,
+                                    sw->chunks.data[0].x,
+                                    sw->chunks.data[0].y);
+                        }
+                    }
+                }
+            }
+
+            printf("out of bounds objects:\n");
+            for (size_t room = 0; room < 64; room ++) {
+                if (file.rooms[room].valid) {
+                    uint8_t found = 0;
+                    for (size_t i = 0; i < file.rooms[room].data.num_objects; i ++) {
+                        struct RoomObject *obj = file.rooms[room].data.objects + i;
+                        if (obj->x >= WIDTH_TILES || obj->y >= HEIGHT_TILES) {
+                            if (!found) {
+                                printf("- %s\n", file.rooms[room].data.name);
+                                found = 1;
+                            }
+                            printf("  - object id %lu: ", i);
+                            switch (obj->type) {
+                                case BLOCK:
+                                    printf("block: (x,y)=(%u,%u)", obj->x, obj->y);
+                                    printf(" (w,h)=(%u,%u)\n", obj->block.width, obj->block.height);
+                                    break;
+
+                                case SPRITE:
+                                    printf("sprite: ");
+                                    switch(obj->sprite.type) {
+                                        case SHARK: 
+                                            switch (obj->sprite.damage) {
+                                                case 1:
+                                                case 2:
+                                                    printf("Shark");
+                                                    break;
+
+                                                case 3: printf("Mysterio"); break;
+                                                case 4: printf("Mary Jane"); break;
+
+                                                default: fprintf(stderr, "%s:%d: UNREACHABLE\n", __FILE__, __LINE__);
+                                            }
+                                            break;
+
+                                        case MUMMY: printf("Mummy"); break;
+                                        case BLUE_MAN: printf("Blue man"); break;
+                                        case WOLF: printf("Wolf"); break;
+                                        case R2D2: printf("R2D2"); break;
+                                        case DINOSAUR: printf("Dinosaur"); break;
+                                        case RAT: printf("Rat"); break;
+                                        case SHOTGUN_LADY: printf("Shotgun_lady"); break;
+
+                                        default: fprintf(stderr, "%s:%d: UNREACHABLE\n", __FILE__, __LINE__);
+                                    }
+                                    printf(" (x,y)=(%u,%u)", obj->x, obj->y);
+                                    printf(" (dmg)=(%u)\n", obj->sprite.damage);
+                                    break;
                             }
                         }
                     }
                 }
             }
+
+            printf("toggle_bit:\n");
+            for (size_t room = 0; room < 64; room ++) {
+                if (file.rooms[room].valid) {
+                    uint8_t found = 0;
+                    for (size_t i = 0; i < file.rooms[room].data.num_switches; i ++) {
+                        uint8_t found_switch = 0;
+                        for (size_t chunk = 0; chunk < file.rooms[room].data.switches[i].chunks.length; chunk ++) {
+                            if (file.rooms[room].data.switches[i].chunks.data[chunk].type == TOGGLE_BIT) {
+                                if (!found) {
+                                    printf("- %s\n", file.rooms[room].data.name);
+                                    found = 1;
+                                }
+                                if (!found_switch) {
+                                    printf(" - %d,%d\n", file.rooms[room].data.switches[i].chunks.data[0].x, file.rooms[room].data.switches[i].chunks.data[0].y);
+                                    found_switch = 1;
+                                }
+                                printf("  - idx=%u on/off=%u/%u mask=0x%02X\n",
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].index,
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].on,
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].off,
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].bitmask);
+                            }
+                        }
+                    }
+                }
+            }
+
+            printf("toggle_object:\n");
+            for (size_t room = 0; room < 64; room ++) {
+                if (file.rooms[room].valid) {
+                    uint8_t found = 0;
+                    for (size_t i = 0; i < file.rooms[room].data.num_switches; i ++) {
+                        uint8_t found_switch = 0;
+                        for (size_t chunk = 0; chunk < file.rooms[room].data.switches[i].chunks.length; chunk ++) {
+                            if (file.rooms[room].data.switches[i].chunks.data[chunk].type == TOGGLE_OBJECT) {
+                                if (!found) {
+                                    printf("- %s\n", file.rooms[room].data.name);
+                                    found = 1;
+                                }
+                                if (!found_switch) {
+                                    printf(" - %d,%d\n", file.rooms[room].data.switches[i].chunks.data[0].x, file.rooms[room].data.switches[i].chunks.data[0].y);
+                                    found_switch = 1;
+                                }
+
+                                printf("  - idx=%u test=0x%02X value=",
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].index,
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].test);
+
+                                switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_LEFT) {
+                                    case MOVE_LEFT:
+                                        switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_UP) {
+                                            case MOVE_UP: printf("up+left"); break;
+                                            case MOVE_DOWN: printf("down+left"); break;
+                                            case '\0': printf("left"); break;
+                                        }
+                                        break;
+
+                                    case MOVE_RIGHT:
+                                        switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_UP) {
+                                            case MOVE_UP: printf("up+right"); break;
+                                            case MOVE_DOWN: printf("down+right"); break;
+                                            case '\0': printf("right"); break;
+                                        }
+                                        break;
+
+                                    case '\0':
+                                        switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_UP) {
+                                            case MOVE_UP: printf("up"); break;
+                                            case MOVE_DOWN: printf("down"); break;
+                                            case '\0': printf("stop"); break;
+                                        }
+                                        break;
+                                }
+                                printf(" value_without_direction=0x%02X\n", 
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                            }
+                        }
+                    }
+                }
+            }
+            return 0;
             argv ++;
             argc = 0;
         } else if (strcasecmp(argv[0], "editor") == 0) {

@@ -620,15 +620,12 @@ void process_input() {
                         }
                         if (id < room->num_switches) {
                             struct SwitchObject *sw = room->switches + id;
-                            if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE) {
+                            if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE && sw->chunks.data[0].x < WIDTH_TILES && sw->chunks.data[0].y < HEIGHT_TILES) {
                                 cursor->x = sw->chunks.data[0].x;
                                 cursor->y = sw->chunks.data[0].y;
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
                             }
-                            if (cursor->y >= HEIGHT_TILES) {
-                                fprintf(stderr, "%s:%d: UNIMPLEMENTED: jump to switch out of bounds (%d,%d)", __FILE__, __LINE__, cursor->x, cursor->y);
-                            }
-                            state->current_state = state->previous_state;
-                            state->previous_state = NORMAL;
                         }
                     } else if (buf[i] == ESCAPE) {
                         if (state->help) {
@@ -695,8 +692,49 @@ void process_input() {
                                 } else if (buf[i] == ';') {
                                     arg = 0;
                                 } else {
-                                    if (buf[i] == '~' && arg == 3) {
-                                        state->partial_byte = 0;
+                                    switch (buf[i]) {
+                                        case '~':
+                                        {
+                                            switch (arg) {
+                                                case 3: state->partial_byte = 0; break;
+                                                default: UNREACHABLE();
+                                            }
+                                        }; break;
+
+                                        case 'A':
+                                        {
+                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
+                                            state->current_state = state->previous_state;
+                                            state->previous_state = NORMAL;
+                                            state->partial_byte = 0;
+                                        }; break;
+
+                                        case 'B':
+                                        {
+                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
+                                            state->current_state = state->previous_state;
+                                            state->previous_state = NORMAL;
+                                            state->partial_byte = 0;
+                                        }; break;
+
+                                        case 'C':
+                                        {
+                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
+                                            state->current_state = state->previous_state;
+                                            state->previous_state = NORMAL;
+                                            state->partial_byte = 0;
+                                        }; break;
+
+                                        case 'D':
+                                        {
+                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
+                                            state->current_state = state->previous_state;
+                                            state->previous_state = NORMAL;
+                                            state->partial_byte = 0;
+                                        }; break;
+
+                                        default:
+                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
                                     }
                                     break;
                                 }
@@ -721,17 +759,52 @@ void process_input() {
                                     }
                                 }
                         }
-                    } else if (buf[i] == 'q') {
-                        if (state->help) {
-                            state->help = !state->help;
-                        } else {
-                            state->current_state = state->previous_state;
-                            state->previous_state = NORMAL;
-                        }
-                    } else if (buf[i] == '?') {
-                        state->help = !state->help;
                     } else {
                         switch (buf[i]) {
+                            case 'h':
+                            {
+                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
+                                state->partial_byte = 0;
+                            }; break;
+
+                            case 'j':
+                            {
+                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
+                                state->partial_byte = 0;
+                            }; break;
+
+                            case 'k':
+                            {
+                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
+                                state->partial_byte = 0;
+                            }; break;
+
+                            case 'l':
+                            {
+                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
+                                state->partial_byte = 0;
+                            }; break;
+
+                            case 'q':
+                            {
+                                if (state->help) {
+                                    state->help = !state->help;
+                                } else {
+                                    state->current_state = state->previous_state;
+                                    state->previous_state = NORMAL;
+                                }
+                            }; break;
+
+                            case '?': state->help = !state->help; break;
+
                             case '[':
                                 if (i + 1 < n) {
                                     // CSI sequence
@@ -780,6 +853,8 @@ void process_input() {
                         strncpy(room->name, state->room_name, C_ARRAY_LEN(room->name));
                         state->current_state = state->previous_state;
                         state->previous_state = NORMAL;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
                     } else if (isprint(buf[i])) {
                         if (state->roomname_cursor < C_ARRAY_LEN(state->room_name) - 1) {
                             state->room_name[state->roomname_cursor++] = buf[i];
@@ -955,7 +1030,16 @@ void process_input() {
                         }
                     } else {
                         switch (buf[i]) {
+                            case 'h':
+                            case 'j':
                             case 'k':
+                            case 'l':
+                                state->room_detail = buf[i];
+                                state->previous_state = state->current_state;
+                                state->current_state = EDIT_ROOMDETAILS_ROOM;
+                                break;
+
+                            case 'g':
                             case 't':
                             case 'd':
                             case '|':
@@ -977,7 +1061,7 @@ void process_input() {
                                     state->help = false;
                                 } else {
                                     state->current_state = state->previous_state;
-                                    state->previous_state = NORMAL;
+                                    state->previous_state = TILE_EDIT;
                                 }
                                 break;
 
@@ -1022,7 +1106,7 @@ void process_input() {
 
                             struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
                             switch (state->room_detail) {
-                                case 'k': room->background = value; break;
+                                case 'g': room->background = value; break;
                                 case 't': room->tile_offset = value; break;
                                 case 'd': room->room_damage = value; break;
                                 case '|': room->gravity_vertical = value; break;
@@ -1041,9 +1125,11 @@ void process_input() {
                                 default: UNREACHABLE();
                             }
                             state->current_state = state->previous_state;
-                            state->previous_state = NORMAL;
+                            state->previous_state = TILE_EDIT;
                             state->partial_byte = 0;
                             state->room_detail = 0;
+                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                            assert(writeRooms(&state->rooms));
                         } else {
                             if (state->room_detail != 'e' || digit == 0) {
                                 state->partial_byte = 0xFF00 | digit;
@@ -1056,7 +1142,9 @@ void process_input() {
                             state->help = false;
                         } else {
                             state->current_state = state->previous_state;
-                            state->previous_state = NORMAL;
+                            state->partial_byte = 0;
+                            state->room_detail = 0;
+                            state->previous_state = TILE_EDIT;
                         }
                     } else if (iscntrl(buf[i])) {
                         switch (buf[i] + 'A' - 1) {
@@ -1076,7 +1164,9 @@ void process_input() {
                             state->help = !state->help;
                         } else {
                             state->current_state = state->previous_state;
-                            state->previous_state = NORMAL;
+                            state->partial_byte = 0;
+                            state->room_detail = 0;
+                            state->previous_state = TILE_EDIT;
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
@@ -1128,16 +1218,34 @@ void process_input() {
                             if (room_id < C_ARRAY_LEN(state->rooms.rooms)) {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
                                 switch (state->room_detail) {
-                                    case 'A': room->room_north = room_id; break;
-                                    case 'B': room->room_south = room_id; break;
-                                    case 'C': room->room_east = room_id; break;
-                                    case 'D': room->room_west = room_id; break;
+                                    case 'A':
+                                    case 'k':
+                                        room->room_north = room_id;
+                                        break;
+
+                                    case 'B':
+                                    case 'j':
+                                        room->room_south = room_id;
+                                        break;
+
+                                    case 'C':
+                                    case 'l':
+                                        room->room_east = room_id;
+                                        break;
+
+                                    case 'D':
+                                    case 'h':
+                                        room->room_west = room_id;
+                                        break;
+
                                     default: UNREACHABLE();
                                 }
                                 state->current_state = state->previous_state;
-                                state->previous_state = NORMAL;
+                                state->previous_state = TILE_EDIT;
                                 state->partial_byte = 0;
                                 state->room_detail = 0;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
                             }
                         } else {
                             if ((unsigned)(digit * (state->debug.hex ? 16 : 10)) < C_ARRAY_LEN(state->rooms.rooms)) {
@@ -1536,6 +1644,10 @@ help_keys help[][100] = {
 
     [GOTO_ROOM]={
         {"0-9a-fA-F", "room number"},
+        {"UP/j", "Goto room above current room"},
+        {"DOWN/k", "Goto room below current room"},
+        {"LEFT/h", "Goto room to the left current room"},
+        {"RIGHT/l", "Goto room to the right current room"},
         {"DEL", "delete character under cursor"},
         {"BACKSPACE", "delete character under cursor"},
         {"ESC", "go back to main view"},
@@ -1573,7 +1685,7 @@ help_keys help[][100] = {
     },
 
     [EDIT_ROOMDETAILS]={
-        {"k", "Edit room background"},
+        {"g", "Edit room background"},
         {"t", "Edit room tileset"},
         {"d", "Edit room damage"},
         {"|", "Edit room vertical gravity"},
@@ -1801,10 +1913,26 @@ void redraw() {
     if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM) {
         if (state->current_state == EDIT_ROOMDETAILS_ROOM) {
             switch (state->room_detail) {
-                case 'A': printf("up: "); break;
-                case 'B': printf("down: "); break;
-                case 'C': printf("right: "); break;
-                case 'D': printf("left: "); break;
+                case 'A':
+                case 'k':
+                    printf("up: ");
+                    break;
+
+                case 'B':
+                case 'j':
+                    printf("down: ");
+                    break;
+
+                case 'C':
+                case 'l':
+                    printf("right: ");
+                    break;
+
+                case 'D':
+                case 'h':
+                    printf("left: ");
+                    break;
+
                 default: UNREACHABLE();
             }
         }
@@ -1837,10 +1965,26 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 struct DecompresssedRoom neighbour_room = {0};
                 char neighbour_name[25] = {0};
                 switch (state->room_detail) {
-                    case 'A': READ_NEIGHBOUR(room->room_north); break;
-                    case 'B': READ_NEIGHBOUR(room->room_south); break;
-                    case 'C': READ_NEIGHBOUR(room->room_east); break;
-                    case 'D': READ_NEIGHBOUR(room->room_west); break;
+                    case 'A':
+                    case 'k':
+                        READ_NEIGHBOUR(room->room_north);
+                        break;
+
+                    case 'B':
+                    case 'j':
+                        READ_NEIGHBOUR(room->room_south);
+                        break;
+
+                    case 'C':
+                    case 'l':
+                        READ_NEIGHBOUR(room->room_east);
+                        break;
+
+                    case 'D':
+                    case 'h':
+                        READ_NEIGHBOUR(room->room_west);
+                        break;
+
                     default: UNREACHABLE();
                 }
                 printf("\033[4;5m_\033[m - \"%s\"", neighbour_name);
@@ -2063,7 +2207,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         printf("\033[m");
     }
 
-    if (state->current_state == TILE_EDIT || (state->current_state != NORMAL && state->previous_state == TILE_EDIT)) {
+    if (state->current_state == TILE_EDIT || (state->current_state != NORMAL)) {
         GOTO(2 * x, y + 1);
         size_t ch_i = i;
         if (obj) {
@@ -2133,12 +2277,149 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     int bottom = HEIGHT_TILES + 1;
+    if (state->debug.switches) {
+        uint8_t found = 0;
+        for (size_t s = 0; s < room.num_switches; s ++) {
+            struct SwitchObject *sw = room.switches + s;
+            int x = sw->chunks.data[0].x;
+            int y = sw->chunks.data[0].y;
+            if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
+                found = 1;
+                break;
+            }
+        }
+        if (found) {
+            GOTO(0, bottom); bottom +=3;
+            printf("\n=====\nOut of bounds switches:");
+        }
+        for (size_t s = 0; s < room.num_switches; s ++) {
+            struct SwitchObject *sw = room.switches + s;
+            int x = sw->chunks.data[0].x;
+            int y = sw->chunks.data[0].y;
+            if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
+                GOTO(0, bottom); bottom ++;
+#define BOOL_S(b) ((b) ? "true" : "false")
+                printf("switch id %lu: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                        s,
+                        sw->chunks.data[0].x, sw->chunks.data[0].y,
+                        BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
+                        SWITCH_SIDE(sw->chunks.data[0].side));
+#undef BOOL_S
+                bottom ++;
+                if (sw->chunks.length > 1) {
+                    printf("  chunks:\n");
+                    bottom ++;
+                    for (size_t i = 1; i < sw->chunks.length; i ++) {
+                        printf("    ");
+                        struct SwitchChunk *chunk = sw->chunks.data + i;
+                        switch (chunk->type) {
+                            case PREAMBLE: UNREACHABLE();
+                            case TOGGLE_BLOCK: {
+                                size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                                if (point >= overflow) {
+                                    printf("memory:");
+                                    size_t offset = point - overflow;
+                                    size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+                                    if (offset >= end) {
+                                        printf("way out of bounds");
+                                        assert(false);
+                                    }
+                                    switch (offset) {
+                                        case 0: printf(" tile_offset"); break;
+                                        case 1: printf(" background"); break;
+                                        case 2: printf(" room_north"); break;
+                                        case 3: printf(" room_east"); break;
+                                        case 4: printf(" room_south"); break;
+                                        case 5: printf(" room_west"); break;
+                                        case 6: printf(" room_damage"); break;
+                                        case 7: printf(" gravity_vertical"); break;
+                                        case 8: printf(" gravity_horizontal"); break;
+                                        case 9: printf(" UNKNOWN_b"); break;
+                                        case 10: printf(" UNKNOWN_c"); break;
+                                        case 11: printf(" num_objects"); break;
+                                        case 12: printf(" _num_switches"); break;
+                                        case 13: printf(" UNKNOWN_f"); break;
+                                        default: printf(" somewhere inside name"); break;
+                                    }
+                                    printf(" (on/off)=%02x/%02x", chunk->on, chunk->off);
+                                } else {
+                                    printf("block - (x,y)=");
+                                    PRINTF_DATA(chunk->x);
+                                    printf(",");
+                                    PRINTF_DATA(chunk->y);
+                                    printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
+                                    PRINTF_DATA(chunk->on);
+                                    printf("/");
+                                    PRINTF_DATA(chunk->off);
+                                }
+                            }; break;
+
+                            case TOGGLE_BIT:
+                            {
+                                printf("bit - (idx)=%d (on/off)=%d/%d (mask)=", chunk->index, chunk->on, chunk->off);
+                                PRINTF_DATA(chunk->bitmask);
+                            }; break;
+
+                            case TOGGLE_OBJECT:
+                            {
+                                printf("object - (idx)=%d (test)=", chunk->index);
+                                PRINTF_DATA(chunk->test);
+                                printf(" (value)=");
+                                switch (chunk->value & MOVE_LEFT) {
+                                    case MOVE_LEFT:
+                                        switch (chunk->value & MOVE_UP) {
+                                            case MOVE_UP: printf("up+left"); break;
+                                            case MOVE_DOWN: printf("down+left"); break;
+                                            case '\0': printf("left"); break;
+                                        }
+                                        break;
+
+                                    case MOVE_RIGHT:
+                                        switch (chunk->value & MOVE_UP) {
+                                            case MOVE_UP: printf("up+right"); break;
+                                            case MOVE_DOWN: printf("down+right"); break;
+                                            case '\0': printf("right"); break;
+                                        }
+                                        break;
+
+                                    case '\0':
+                                        switch (chunk->value & MOVE_UP) {
+                                            case MOVE_UP: printf("up"); break;
+                                            case MOVE_DOWN: printf("down"); break;
+                                            case '\0': printf("stop"); break;
+                                        }
+                                        break;
+                                }
+
+                                printf(" (value_without_direction)=");
+                                PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                                printf(" (value_raw)=");
+                                PRINTF_DATA(chunk->value);
+                            }; break;
+
+                            default: UNREACHABLE();
+                        }
+                        if (i < sw->chunks.length - 1) {
+                            printf("\n");
+                            bottom ++;
+                        }
+                    }
+                }
+            }
+        }
+        if (found) {
+            GOTO(0, bottom); bottom ++;
+            printf("======\n");
+        }
+    }
+
     if (debugany()) bottom ++;
     if (state->debug.data) {
         GOTO(0, bottom); bottom ++;
         switch (state->current_state) {
             case EDIT_ROOMDETAILS:
-                printf("b\033[1;4mk\033[mgrnd: ");PRINTF_DATA(room.background);
+                printf("bk\033[1;4mg\033[mrnd: ");PRINTF_DATA(room.background);
                 printf(", \033[1;4mt\033[miles: ");PRINTF_DATA(room.tile_offset);
                 printf(", \033[1;4md\033[mmg: ");PRINTF_DATA(room.room_damage);
                 printf(", gravity (\033[1;4m|\033[m): ");PRINTF_DATA(room.gravity_vertical);
@@ -2146,7 +2427,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 break;
 
             case EDIT_ROOMDETAILS_NUM:
-                if (state->room_detail == 'k') {
+                if (state->room_detail == 'g') {
                     printf("\033[1;4mbkgrnd\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
@@ -2365,7 +2646,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             printf("right: ");PRINTF_DATA(room.room_east);
             READ_NEIGHBOUR(room.room_east);
             printf(" - \"%s\"", neighbour_name);
-            }
+        }
     }
 
     if (state->current_state == EDIT_ROOMNAME) {
@@ -2546,6 +2827,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                             printf(" (value_without_direction)=");
                             PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                            printf(" (value_raw)=");
+                            PRINTF_DATA(chunk->value);
                         }; break;
 
                         default: UNREACHABLE();
@@ -2556,6 +2839,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         } else if (state->current_state == TILE_EDIT) {
             printf("No switch here, TODO create new?");
         }
+
     }
 
     /* GOTO(0, bottom); bottom ++; */
