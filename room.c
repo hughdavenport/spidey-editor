@@ -843,6 +843,7 @@ bool writeRoom(Room *room, FILE *fp) {
     if (fp == NULL || room == NULL || !room->valid) return false;
 
     if (room->compressed.length > 0) {
+#if 0
         /* printf("Writing already compressed room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp)); */
         size_t written = 0;
         do {
@@ -851,6 +852,9 @@ bool writeRoom(Room *room, FILE *fp) {
             written += write_ret;
         } while (written < room->compressed.length);
         return true;
+#else
+        room->compressed.length = 0; // reset it
+#endif
     }
 
     printf("Compressing and writing Room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp));
@@ -930,7 +934,7 @@ bool writeRoom(Room *room, FILE *fp) {
             switch (chunk->type) {
                 case PREAMBLE:
                     assert(c == 0);
-                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->one_time_use ? 0x20 : 0x00) | (chunk->msb & ~0x1f);
+                    decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->one_time_use ? 0x20 : 0x00) | (chunk->msb & (~0x1f | 0x20));
                     decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->room_entry ? 0x00 : 0x80) | (chunk->side << 5);
                     break;
 
