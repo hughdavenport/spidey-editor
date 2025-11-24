@@ -313,8 +313,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                 case TOGGLE_OBJECT:
                     printf("\033[m\033[4%d;30;1m", (chunk->index % 3) + 1);
-                    printf("{.type = TOGGLE_OBJECT, .index = %d, .test = %02x, .value = ",
-                            chunk->index, chunk->test);
+                    printf("{.type = TOGGLE_OBJECT, .index = %d, .test = %x, .value = ",
+                            chunk->index, chunk->test >> 4);
                     switch (chunk->value & MOVE_LEFT) {
                         case MOVE_LEFT:
                             switch (chunk->value & MOVE_UP) {

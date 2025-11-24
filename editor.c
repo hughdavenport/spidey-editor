@@ -2422,9 +2422,7 @@ void process_input() {
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                             assert(chunk->type == TOGGLE_OBJECT);
-
-                            UNREACHABLE();
-
+                            chunk->value = b;
                             state->partial_byte = 0;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
@@ -2512,6 +2510,18 @@ void process_input() {
                                 }
 
                         }
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == 'i') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        chunk->index = (chunk->index + 1) % 0x10;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == 's') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        chunk->test = (((chunk->test >> 4) + 1) % 4) << 4;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
                     } else if (iscntrl(buf[i])) {
@@ -3114,11 +3124,10 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS]={
         {"t", "change chunk type"},
-        {"i", "change idx value"},
-        {"e", "change test value"},
+        {"i", "cycle through possible index values"},
+        {"s", "cycle through possible test values"},
         {" TODO dir keys ?", "change value"},
-        {"v", "change raw value"},
-        {"m", "change mask value"},
+        {"0-9a-fA-F", "change raw value (advanced)"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
@@ -4223,12 +4232,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                         case TOGGLE_OBJECT:
                         {
-                    if (state->current_chunk == i) {
-                        fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
-                        /* UNREACHABLE(); */
-                    }
-                            printf("object: (idx)=%d (test)=", chunk->index);
-                            PRINTF_DATA(chunk->test);
+                            if (state->current_chunk == i) {
+                                printf("object: (\033[4;1mi\033[mdx)=%d (te\033[4;1ms\033[mt)=%d", chunk->index, chunk->test >> 4);
+                            } else {
+                                printf("object: (idx)=%d (test)=%d", chunk->index, chunk->test >> 4);
+                            }
                             printf(" (value)=");
                             switch (chunk->value & MOVE_LEFT) {
                                 case MOVE_LEFT:
@@ -4259,7 +4267,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             printf(" (value_without_direction)=");
                             PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
                             printf(" (value_raw)=");
-                            PRINTF_DATA(chunk->value);
+                            if (state->current_chunk == i) {
+                                if (state->partial_byte) {
+                                    if (state->debug.hex) {
+                                        printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                    } else {
+                                        printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                    }
+                                } else {
+                                    printf("\033[4;5m%x\033[m", chunk->value / (state->debug.hex ? 16 : 10));
+                                }
+                                printf("\033[4;5m%x\033[m", chunk->value % (state->debug.hex ? 16 : 10));
+                            } else {
+                                PRINTF_DATA(chunk->value);
+                            }
                         }; break;
 
                         default: UNREACHABLE();
