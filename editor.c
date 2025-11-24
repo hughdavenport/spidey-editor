@@ -171,9 +171,12 @@ typedef enum {
     EDIT_ROOMDETAILS_ROOM,
 
     EDIT_SWITCHDETAILS,
-    EDIT_SWITCHDETAILS_NEW,
 
     EDIT_SWITCHDETAILS_SELECT_CHUNK,
+    EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS,
+    EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS,
+    EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS,
+    EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS,
 
     TOGGLE_DISPLAY,
     NUM_STATES
@@ -202,6 +205,7 @@ typedef struct {
 
     size_t current_switch;
     size_t current_chunk;
+    bool switch_on;
 } game_state;
 game_state *state = NULL;
 
@@ -630,7 +634,7 @@ void process_input() {
                             id = buf[i] - '0';
                         }
                         if (id < room->num_switches) {
-                            state->current_switch = id;
+                            state->current_switch = id + 1;
                             struct SwitchObject *sw = room->switches + id;
                             if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE && sw->chunks.data[0].x < WIDTH_TILES && sw->chunks.data[0].y < HEIGHT_TILES) {
                                 cursor->x = sw->chunks.data[0].x;
@@ -646,6 +650,9 @@ void process_input() {
                             state->help = false;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->previous_state = NORMAL;
                         }
                     } else if (iscntrl(buf[i])) {
@@ -658,6 +665,9 @@ void process_input() {
                             state->help = !state->help;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->previous_state = NORMAL;
                         }
                     } else if (buf[i] == '?') {
@@ -685,6 +695,9 @@ void process_input() {
                             if (room < C_ARRAY_LEN(state->rooms.rooms)) {
                                 *cursorlevel = room;
                                 state->current_state = state->previous_state;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 state->previous_state = NORMAL;
                                 state->partial_byte = 0;
                             }
@@ -719,6 +732,9 @@ void process_input() {
                                         {
                                             *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
                                             state->current_state = state->previous_state;
+                                            state->current_switch = 0;
+                                            state->switch_on = false;
+                                            state->current_chunk = 0;
                                             state->previous_state = NORMAL;
                                             state->partial_byte = 0;
                                         }; break;
@@ -727,6 +743,9 @@ void process_input() {
                                         {
                                             *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
                                             state->current_state = state->previous_state;
+                                            state->current_switch = 0;
+                                            state->switch_on = false;
+                                            state->current_chunk = 0;
                                             state->previous_state = NORMAL;
                                             state->partial_byte = 0;
                                         }; break;
@@ -735,6 +754,9 @@ void process_input() {
                                         {
                                             *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
                                             state->current_state = state->previous_state;
+                                            state->current_switch = 0;
+                                            state->switch_on = false;
+                                            state->current_chunk = 0;
                                             state->previous_state = NORMAL;
                                             state->partial_byte = 0;
                                         }; break;
@@ -743,6 +765,9 @@ void process_input() {
                                         {
                                             *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
                                             state->current_state = state->previous_state;
+                                            state->current_switch = 0;
+                                            state->switch_on = false;
+                                            state->current_chunk = 0;
                                             state->previous_state = NORMAL;
                                             state->partial_byte = 0;
                                         }; break;
@@ -758,6 +783,9 @@ void process_input() {
                             state->help = false;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->previous_state = NORMAL;
                         }
                     } else if (iscntrl(buf[i])) {
@@ -779,6 +807,9 @@ void process_input() {
                             {
                                 *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
                                 state->current_state = state->previous_state;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 state->previous_state = NORMAL;
                                 state->partial_byte = 0;
                             }; break;
@@ -787,6 +818,9 @@ void process_input() {
                             {
                                 *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
                                 state->current_state = state->previous_state;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 state->previous_state = NORMAL;
                                 state->partial_byte = 0;
                             }; break;
@@ -795,6 +829,9 @@ void process_input() {
                             {
                                 *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
                                 state->current_state = state->previous_state;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 state->previous_state = NORMAL;
                                 state->partial_byte = 0;
                             }; break;
@@ -803,6 +840,9 @@ void process_input() {
                             {
                                 *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
                                 state->current_state = state->previous_state;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 state->previous_state = NORMAL;
                                 state->partial_byte = 0;
                             }; break;
@@ -813,6 +853,9 @@ void process_input() {
                                     state->help = !state->help;
                                 } else {
                                     state->current_state = state->previous_state;
+                                    state->current_switch = 0;
+                                    state->switch_on = false;
+                                    state->current_chunk = 0;
                                     state->previous_state = NORMAL;
                                 }
                             }; break;
@@ -866,6 +909,9 @@ void process_input() {
                         assert(C_ARRAY_LEN(state->room_name) <= C_ARRAY_LEN(room->name));
                         strncpy(room->name, state->room_name, C_ARRAY_LEN(room->name));
                         state->current_state = state->previous_state;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         state->previous_state = NORMAL;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
@@ -953,6 +999,9 @@ void process_input() {
                             break;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->previous_state = NORMAL;
                         }
                     } else if (buf[i] == 0x7f) {
@@ -978,6 +1027,9 @@ void process_input() {
                 {
                     if (state->help) {
                         switch (buf[i]) {
+                            case 0x08:
+                                state->debug.hex = !state->debug.hex;
+                                break;
                             case ESCAPE:
                             case 'q':
                             case 0x1f:
@@ -1001,17 +1053,24 @@ void process_input() {
 
                         case 'q':
                         case ESCAPE:
-                              break;
+                            break;
+
+                        case 0x08:
+                            state->debug.hex = !state->debug.hex;
+                            break;
 
                         case '?':
                         case 0x1F:
-                              state->help = !state->help;
-                              fallthrough;
-                        default: changed = 0;
+                            state->help = !state->help;
+                            fallthrough;
+                        default: fprintf(stderr, "buf[i] = %02x\n", buf[i]); UNREACHABLE();changed = 0;
                     }
                     i++;
                     if (changed) {
                         state->current_state = state->previous_state;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         state->previous_state = NORMAL;
                     }
                 }; break;
@@ -1035,6 +1094,9 @@ void process_input() {
                                     case 'D':
                                         state->previous_state = state->current_state;
                                         state->current_state = EDIT_ROOMDETAILS_ROOM;
+                                        state->current_switch = 0;
+                                        state->switch_on = false;
+                                        state->current_chunk = 0;
                                         state->room_detail = buf[i];
                                         break;
                                 }
@@ -1051,6 +1113,9 @@ void process_input() {
                                 state->room_detail = buf[i];
                                 state->previous_state = state->current_state;
                                 state->current_state = EDIT_ROOMDETAILS_ROOM;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 break;
 
                             case 'g':
@@ -1067,6 +1132,9 @@ void process_input() {
                                 state->room_detail = buf[i];
                                 state->previous_state = state->current_state;
                                 state->current_state = EDIT_ROOMDETAILS_NUM;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                             }; break;
 
                             case 'q':
@@ -1075,6 +1143,9 @@ void process_input() {
                                     state->help = false;
                                 } else {
                                     state->current_state = state->previous_state;
+                                    state->current_switch = 0;
+                                    state->switch_on = false;
+                                    state->current_chunk = 0;
                                     state->previous_state = TILE_EDIT;
                                 }
                                 break;
@@ -1139,6 +1210,9 @@ void process_input() {
                                 default: UNREACHABLE();
                             }
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->previous_state = TILE_EDIT;
                             state->partial_byte = 0;
                             state->room_detail = 0;
@@ -1156,6 +1230,9 @@ void process_input() {
                             state->help = false;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->partial_byte = 0;
                             state->room_detail = 0;
                             state->previous_state = TILE_EDIT;
@@ -1178,6 +1255,9 @@ void process_input() {
                             state->help = !state->help;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->partial_byte = 0;
                             state->room_detail = 0;
                             state->previous_state = TILE_EDIT;
@@ -1255,6 +1335,9 @@ void process_input() {
                                     default: UNREACHABLE();
                                 }
                                 state->current_state = state->previous_state;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 state->previous_state = TILE_EDIT;
                                 state->partial_byte = 0;
                                 state->room_detail = 0;
@@ -1274,26 +1357,32 @@ void process_input() {
                             state->help = false;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->previous_state = NORMAL;
                         }
                     } else if (iscntrl(buf[i])) {
                         switch (buf[i] + 'A' - 1) {
                             case '_': state->help = !state->help; break;
                             case 'H':
-                                state->debug.hex = !state->debug.hex;
-                                if (state->partial_byte) {
-                                    if (state->debug.hex) {
-                                        state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
-                                    } else {
-                                        state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
-                                    }
-                                }
+                                      state->debug.hex = !state->debug.hex;
+                                      if (state->partial_byte) {
+                                          if (state->debug.hex) {
+                                              state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
+                                          } else {
+                                              state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
+                                          }
+                                      }
                         }
                     } else if (buf[i] == 'q') {
                         if (state->help) {
                             state->help = !state->help;
                         } else {
                             state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
                             state->previous_state = NORMAL;
                         }
                     } else if (buf[i] == '?') {
@@ -1343,7 +1432,7 @@ void process_input() {
                                     case 'A':
                                     {
                                         struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = TOP;
+                                        room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                         assert(writeRooms(&state->rooms));
                                     }; break;
@@ -1351,7 +1440,7 @@ void process_input() {
                                     case 'B':
                                     {
                                         struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = BOTTOM;
+                                        room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                         assert(writeRooms(&state->rooms));
                                     }; break;
@@ -1359,7 +1448,7 @@ void process_input() {
                                     case 'C':
                                     {
                                         struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = RIGHT;
+                                        room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                         assert(writeRooms(&state->rooms));
                                     }; break;
@@ -1367,7 +1456,7 @@ void process_input() {
                                     case 'D':
                                     {
                                         struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = LEFT;
+                                        room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                         assert(writeRooms(&state->rooms));
                                     }; break;
@@ -1381,7 +1470,7 @@ void process_input() {
                             case 'h':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = LEFT;
+                                room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }; break;
@@ -1389,7 +1478,7 @@ void process_input() {
                             case 'j':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = BOTTOM;
+                                room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }; break;
@@ -1397,7 +1486,7 @@ void process_input() {
                             case 'k':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = TOP;
+                                room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }; break;
@@ -1405,7 +1494,7 @@ void process_input() {
                             case 'l':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = RIGHT;
+                                room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }; break;
@@ -1413,7 +1502,7 @@ void process_input() {
                             case 'o':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].one_time_use = !room->switches[state->current_switch].chunks.data[0].one_time_use;
+                                room->switches[state->current_switch - 1].chunks.data[0].one_time_use = !room->switches[state->current_switch - 1].chunks.data[0].one_time_use;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }; break;
@@ -1421,7 +1510,7 @@ void process_input() {
                             case 'e':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].room_entry = !room->switches[state->current_switch].chunks.data[0].room_entry;
+                                room->switches[state->current_switch - 1].chunks.data[0].room_entry = !room->switches[state->current_switch - 1].chunks.data[0].room_entry;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }; break;
@@ -1429,14 +1518,60 @@ void process_input() {
                             case 's':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = (room->switches[state->current_switch].chunks.data[0].side + 1) % NUM_SIDES;
+                                room->switches[state->current_switch - 1].chunks.data[0].side = (room->switches[state->current_switch - 1].chunks.data[0].side + 1) % NUM_SIDES;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }; break;
 
                             case 'c':
                             {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                if (sw->chunks.length == 1) {
+                                    // nop
+                                } else if (sw->chunks.length == 2) {
+                                    // The first chunk is the preamble, uneditable as a chunk, only as a switch
+                                    state->current_chunk = 1;
+                                    struct SwitchChunk *chunk = sw->chunks.data + 1;
+                                    switch (chunk->type) {
+                                        case PREAMBLE: UNREACHABLE();
+                                        case TOGGLE_BLOCK:
+                                        {
+                                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                                            if (point >= overflow) {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                            } else {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                            }
+                                        }; break;
+
+                                        case TOGGLE_BIT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_OBJECT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                            break;
+
+                                        default: UNREACHABLE();
+                                    }
+                                } else {
+                                    state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                }
+                            }; break;
+
+                            case 'C':
+                            {
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                state->current_chunk = sw->chunks.length;
+                                ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
+                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                state->switch_on = false;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
                             }; break;
 
                             case 'q':
@@ -1445,6 +1580,8 @@ void process_input() {
                                     state->help = false;
                                 } else {
                                     state->current_state = state->previous_state;
+                                    state->current_switch = 0;
+                                    state->switch_on = false;
                                     state->previous_state = TILE_EDIT;
                                 }
                                 break;
@@ -1469,156 +1606,303 @@ void process_input() {
                         }
                     }
                     i++;
-                }; break;
-
-                case EDIT_SWITCHDETAILS_NEW:
-                {
-                    UNREACHABLE();
                 }; break;
 
                 case EDIT_SWITCHDETAILS_SELECT_CHUNK:
                 {
-                    UNREACHABLE();
-                    if (buf[i] == ESCAPE && i + 1 < n && buf[i + 1] == '[') {
-                        // CSI sequence
-                        i += 2;
-                        uint8_t arg = 0;
-                        while (i < n) {
-                            if (isdigit(buf[i])) {
-                                arg = 10 * arg + buf[i] - '0';
-                            } else if (buf[i] == ';') {
-                                arg = 0;
-                            } else {
-                                switch (buf[i]) {
-                                    case 'A':
-                                    {
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = TOP;
-                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                        assert(writeRooms(&state->rooms));
-                                    }; break;
-
-                                    case 'B':
-                                    {
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = BOTTOM;
-                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                        assert(writeRooms(&state->rooms));
-                                    }; break;
-
-                                    case 'C':
-                                    {
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = RIGHT;
-                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                        assert(writeRooms(&state->rooms));
-                                    }; break;
-
-                                    case 'D':
-                                    {
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                        room->switches[state->current_switch].chunks.data[0].side = LEFT;
-                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                        assert(writeRooms(&state->rooms));
-                                    }; break;
-                                }
-                                break;
-                            }
-                            i ++;
+                    if (isxdigit(buf[i])) {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        if (sw->chunks.length > 15) {
+                            // FIXME support 2 digit nums
+                            UNREACHABLE();
                         }
-                    } else {
-                        switch (buf[i]) {
-                            case 'h':
-                            {
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = LEFT;
-                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                assert(writeRooms(&state->rooms));
-                            }; break;
-
-                            case 'j':
-                            {
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = BOTTOM;
-                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                assert(writeRooms(&state->rooms));
-                            }; break;
-
-                            case 'k':
-                            {
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = TOP;
-                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                assert(writeRooms(&state->rooms));
-                            }; break;
-
-                            case 'l':
-                            {
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = RIGHT;
-                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                assert(writeRooms(&state->rooms));
-                            }; break;
-
-                            case 'o':
-                            {
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].one_time_use = !room->switches[state->current_switch].chunks.data[0].one_time_use;
-                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                assert(writeRooms(&state->rooms));
-                            }; break;
-
-                            case 'e':
-                            {
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].room_entry = !room->switches[state->current_switch].chunks.data[0].room_entry;
-                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                assert(writeRooms(&state->rooms));
-                            }; break;
-
-                            case 's':
-                            {
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                room->switches[state->current_switch].chunks.data[0].side = (room->switches[state->current_switch].chunks.data[0].side + 1) % NUM_SIDES;
-                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                assert(writeRooms(&state->rooms));
-                            }; break;
-
-                            case 'c':
-                            {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
-                            }; break;
-
-                            case 'q':
-                            case ESCAPE:
-                                if (state->help) {
-                                    state->help = false;
-                                } else {
-                                    state->current_state = state->previous_state;
-                                    state->previous_state = TILE_EDIT;
-                                }
-                                break;
-
-                            default:
-                                if (buf[i] == '?') {
-                                    state->help = !state->help;
-                                } else if (iscntrl(buf[i])) {
-                                    switch (buf[i] + 'A' - 1) {
-                                        case '_': state->help = !state->help; break;
-                                        case 'H':
-                                            state->debug.hex = !state->debug.hex;
-                                            if (state->partial_byte) {
-                                                if (state->debug.hex) {
-                                                    state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
-                                                } else {
-                                                    state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
-                                                }
-                                            }
+                        size_t id;
+                        if (buf[i] > '9') {
+                            id = tolower(buf[i]) - 'a' + 10;
+                        } else {
+                            id = buf[i] - '0';
+                        }
+                        if (id < sw->chunks.length) {
+                            state->current_chunk = id;
+                            struct SwitchChunk *chunk = sw->chunks.data + id;
+                            switch (chunk->type) {
+                                case PREAMBLE: UNREACHABLE();
+                                case TOGGLE_BLOCK:
+                                {
+                                    size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                    size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                                    if (point >= overflow) {
+                                        state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                    } else {
+                                        state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
                                     }
-                                }
+                                }; break;
+
+                                case TOGGLE_BIT:
+                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                    break;
+
+                                case TOGGLE_OBJECT:
+                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                    break;
+
+                                default: UNREACHABLE();
+                            }
                         }
+                    } else if (buf[i] == ESCAPE) {
+                        if (state->help) {
+                            state->help = false;
+                        } else {
+                            state->current_state = EDIT_SWITCHDETAILS;
+                        }
+                    } else if (iscntrl(buf[i])) {
+                        switch (buf[i] + 'A' - 1) {
+                            case '_': state->help = !state->help; break;
+                            case 'H': state->debug.hex = !state->debug.hex; break;
+                        }
+                    } else if (buf[i] == 'q') {
+                        if (state->help) {
+                            state->help = !state->help;
+                        } else {
+                            state->current_state = EDIT_SWITCHDETAILS;
+                        }
+                    } else if (buf[i] == '?') {
+                        state->help = !state->help;
                     }
-                    i++;
+                    i ++;
+                }; break;
+
+                case EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS:
+                {
+                    UNREACHABLE();
+                }; break;
+
+                case EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS:
+                {
+                    /* } else if (buf[i] == ESCAPE) { */
+                    /*     if (state->help) { */
+                    /*         state->help = false; */
+                    /*     } else { */
+                    /*         state->current_state = EDIT_SWITCHDETAILS; */
+                    /*     } */
+                    /* } else if (iscntrl(buf[i])) { */
+                    /*     switch (buf[i] + 'A' - 1) { */
+                    /*         case '_': state->help = !state->help; break; */
+                    /*         case 'H': state->debug.hex = !state->debug.hex; break; */
+                    /*     } */
+                    /* } else if (buf[i] == 'q') { */
+                    /*     if (state->help) { */
+                    /*         state->help = !state->help; */
+                    /*     } else { */
+                    /*         state->current_state = EDIT_SWITCHDETAILS; */
+                    /*     } */
+                    /* } else if (buf[i] == '?') { */
+                    /*     state->help = !state->help; */
+                    /* } */
+                    /* i ++; */
+                    UNREACHABLE();
+                }; break;
+
+                case EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS:
+                {
+                    if (isxdigit(buf[i])) {
+                        uint8_t b = 0;
+                        if (isdigit(buf[i])) {
+                            b = *buf - '0';
+                        } else {
+                            b = 10 + tolower(buf[i]) - 'a';
+                        }
+                        if ((state->partial_byte & 0xFF00) != 0) {
+                            b = (state->partial_byte & 0xFF) | b;
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                            assert(chunk->type == TOGGLE_BLOCK);
+                            if (state->switch_on) {
+                                chunk->on = b;
+                            } else {
+                                chunk->off = b;
+                            }
+                            state->partial_byte = 0;
+                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                            assert(writeRooms(&state->rooms));
+                        } else {
+                            state->partial_byte = 0xFF00 | (b << 4);
+                        }
+                    } else if (buf[i] == 'o') {
+                        state->switch_on = !state->switch_on;
+                    } else if (buf[i] == ' ') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        assert(chunk->type == TOGGLE_BLOCK);
+                        chunk->dir = (chunk->dir + 1) % NUM_DIRECTIONS;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == '+') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        assert(chunk->type == TOGGLE_BLOCK);
+                        chunk->size ++;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == '-') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        assert(chunk->type == TOGGLE_BLOCK);
+                        chunk->size --;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == 'h') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        assert(chunk->type == TOGGLE_BLOCK);
+                        if (chunk->x) chunk->x --;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == 'j') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        assert(chunk->type == TOGGLE_BLOCK);
+                        chunk->y ++;
+                        size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                        size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                        if (point >= overflow) {
+                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                        }
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == 'k') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        assert(chunk->type == TOGGLE_BLOCK);
+                        if (chunk->y) chunk->y --;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == 'l') {
+                        struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                        struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                        assert(chunk->type == TOGGLE_BLOCK);
+                        chunk->x ++;
+                        size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                        size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                        if (point >= overflow) {
+                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                        }
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == ESCAPE) {
+                        if (i + 1 < n && buf[i+1] == '[' && i + 2 < n) {
+                            // CSI sequence
+                            i += 2;
+                            uint8_t arg = 0;
+                            while (i < n) {
+                                if (isdigit(buf[i])) {
+                                    arg = 10 * arg + buf[i] - '0';
+                                } else if (buf[i] == ';') {
+                                    arg = 0;
+                                } else {
+                                    switch (buf[i]) {
+                                        case '~':
+                                        {
+                                            switch (arg) {
+                                                case 3: state->partial_byte = 0; break;
+                                                default: UNREACHABLE();
+                                            }
+                                        }; break;
+
+                                        case 'A':
+                                        {
+                                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                            struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                                            assert(chunk->type == TOGGLE_BLOCK);
+                                            if (chunk->y) chunk->y --;
+                                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                            assert(writeRooms(&state->rooms));
+                                        }; break;
+
+                                        case 'B':
+                                        {
+                                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                            struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                                            assert(chunk->type == TOGGLE_BLOCK);
+                                            chunk->y ++;
+                                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                                            if (point >= overflow) {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                            }
+                                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                            assert(writeRooms(&state->rooms));
+                                        }; break;
+
+                                        case 'C':
+                                        {
+                                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                            struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                                            assert(chunk->type == TOGGLE_BLOCK);
+                                            chunk->x ++;
+                                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                                            if (point >= overflow) {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                            }
+                                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                            assert(writeRooms(&state->rooms));
+                                        }; break;
+
+                                        case 'D':
+                                        {
+                                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                            struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                                            assert(chunk->type == TOGGLE_BLOCK);
+                                            if (chunk->x) chunk->x --;
+                                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                            assert(writeRooms(&state->rooms));
+                                        }; break;
+
+                                        default:
+                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                    }
+                                    break;
+                                }
+                                i ++;
+                            }
+                        } else if (state->help) {
+                            state->help = false;
+                        } else {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            if (sw->chunks.length <= 2) {
+                                state->current_state = EDIT_SWITCHDETAILS;
+                            } else {
+                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }
+                            state->current_chunk = 0;
+                        }
+                    } else if (iscntrl(buf[i])) {
+                        switch (buf[i] + 'A' - 1) {
+                            case '_': state->help = !state->help; break;
+                            case 'H': state->debug.hex = !state->debug.hex; break;
+                        }
+                    } else if (buf[i] == 'q') {
+                        if (state->help) {
+                            state->help = !state->help;
+                        } else {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            if (sw->chunks.length <= 2) {
+                                state->current_state = EDIT_SWITCHDETAILS;
+                            } else {
+                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }
+                            state->current_chunk = 0;
+                        }
+                    } else if (buf[i] == '?') {
+                        state->help = !state->help;
+                    }
+                    i ++;
+                }; break;
+
+                case EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS:
+                {
+                    UNREACHABLE();
                 }; break;
 
                 case TILE_EDIT:
@@ -1685,6 +1969,9 @@ void process_input() {
                     } else if (KEY_MATCHES("R")) {
                         state->previous_state = state->current_state;
                         state->current_state = EDIT_ROOMNAME;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         state->roomname_cursor = 0;
                         strncpy(state->room_name, state->rooms.rooms[*cursorlevel].data.name, C_ARRAY_LEN(state->room_name));
                         for (size_t i = 0; i < C_ARRAY_LEN(state->room_name); i ++) {
@@ -1700,6 +1987,9 @@ void process_input() {
                             case 'R':
                                 state->previous_state = state->current_state;
                                 state->current_state = EDIT_ROOMDETAILS;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
                                 i ++;
                                 continue;
 
@@ -1770,6 +2060,9 @@ void process_input() {
                     } else if (KEY_MATCHES(KEY_LEFT) || KEY_MATCHES("h")) {
                         cursor->x --;
                         state->partial_byte = 0;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         if (cursor->x < 0) {
                             cursor->x ++;
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_west;
@@ -1780,6 +2073,9 @@ void process_input() {
                     } else if (KEY_MATCHES(KEY_DOWN) || KEY_MATCHES("j")) {
                         cursor->y ++;
                         state->partial_byte = 0;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         if (cursor->y >= HEIGHT_TILES) {
                             cursor->y --;
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_south;
@@ -1790,6 +2086,9 @@ void process_input() {
                     } else if (KEY_MATCHES(KEY_UP) || KEY_MATCHES("k")) {
                         cursor->y --;
                         state->partial_byte = 0;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         if (cursor->y < 0) {
                             cursor->y ++;
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_north;
@@ -1800,6 +2099,9 @@ void process_input() {
                     } else if (KEY_MATCHES(KEY_RIGHT) || KEY_MATCHES("l")) {
                         cursor->x ++;
                         state->partial_byte = 0;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         if (cursor->x >= WIDTH_TILES) {
                             cursor->x --;
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_east;
@@ -1810,10 +2112,23 @@ void process_input() {
                     } else if (KEY_MATCHES("r")) {
                         state->previous_state = state->current_state;
                         state->current_state = GOTO_ROOM;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         state->partial_byte = 0;
                     } else if (KEY_MATCHES("s")) {
                         state->previous_state = state->current_state;
                         state->current_state = GOTO_SWITCH;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
+                        state->partial_byte = 0;
+                    } else if (state->current_switch && KEY_MATCHES("c")) {
+                        state->previous_state = state->current_state;
+                        state->current_state = GOTO_SWITCH;
+                        state->current_switch = 0;
+                        state->switch_on = false;
+                        state->current_chunk = 0;
                         state->partial_byte = 0;
                     }
                     if (state->current_state == TILE_EDIT) {
@@ -1856,6 +2171,9 @@ void process_input() {
                             case 'D':
                                   state->previous_state = state->current_state;
                                   state->current_state = TOGGLE_DISPLAY;
+                                  state->current_switch = 0;
+                                  state->switch_on = false;
+                                  state->current_chunk = 0;
                                   break;
 
                             case 'H': state->debug.hex = !state->debug.hex; break;
@@ -1865,11 +2183,17 @@ void process_input() {
                                     {
                                         state->previous_state = state->current_state;
                                         state->current_state = TILE_EDIT;
+                                        state->current_switch = 0;
+                                        state->switch_on = false;
+                                        state->current_chunk = 0;
                                     }; break;
                                     case TILE_EDIT:
                                     {
                                         state->previous_state = state->current_state;
                                         state->current_state = NORMAL;
+                                        state->current_switch = 0;
+                                        state->switch_on = false;
+                                        state->current_chunk = 0;
                                     }; break;
 
                                     default: UNREACHABLE();
@@ -1970,6 +2294,9 @@ help_keys help[][100] = {
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"Ctrl-s[eorcs]", "create/edit switch"},
         {"s[n]", "goto switch"},
+        {"x", "TODO delete object"},
+        {"-", "TODO delete object"},
+        {"Delete", "TODO delete object"},
         {"p", "play (runs play.sh)"},
         {"q", "quit"},
         {"Ctrl-?", "toggle help"},
@@ -1982,6 +2309,7 @@ help_keys help[][100] = {
 
     [GOTO_SWITCH]={
         {"0-9a-fA-F", "switch id (highlighted on map)"},
+        {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -2024,9 +2352,10 @@ help_keys help[][100] = {
         {"p", "toggle position display"},
         {"s", "toggle room switch display"},
         {"u", "toggle unknown display"},
-        {"Ctrl-?", "toggle help"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
         {0},
     },
 
@@ -2047,17 +2376,19 @@ help_keys help[][100] = {
         {"UP", "Edit room above"},
         {"DOWN", "Edit room below"},
 
-        {"Ctrl-?", "toggle help"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
         {0},
     },
 
     [EDIT_ROOMDETAILS_NUM]={
         {"0-9a-fA-F", "value"},
-        {"Ctrl-?", "toggle help"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
         {0},
     },
 
@@ -2081,16 +2412,7 @@ help_keys help[][100] = {
         {"Up/k", "set switch side to top"},
         {"Right/l", "set switch side to right"},
         {"c[n]", "select chunk"},
-        {"ESC", "go back to main view"},
-        {"q", "go back to main view"},
-        {"Ctrl-?", "toggle help"},
-        {"Ctrl-h", "toggle hex in debug info"},
-        {0},
-    },
-
-    [EDIT_SWITCHDETAILS_NEW]={
-        {"TODO", "TODO"},
-        {"s[n]", "select switch (can be out of bounds)"},
+        {"C", "create new chunk"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
@@ -2099,8 +2421,62 @@ help_keys help[][100] = {
     },
 
     [EDIT_SWITCHDETAILS_SELECT_CHUNK]={
+        {"0-9a-fA-F", "chunk number"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
+        {0},
+    },
+
+    [EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS]={
+        {"t", "change chunk type"},
+        {"i", "change idx value"},
+        {"n", "change on value"},
+        {"f", "change off value"},
+        {"m", "change mask value"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
+        {0},
+    },
+
+    [EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS]={
+        {"t", "change chunk type"},
+        {"0-9a-fA-F", "change selected block tile"},
+        {"Left/h", "Move block left"},
+        {"Down/j", "Move block down"},
+        {"Up/k", "Move block up"},
+        {"Right/l", "Move block right"},
+        {"+", "increase block size (width/height)"},
+        {"-", "decrease block size (width/height)"},
+        {"Space", "toggle vertical/horizontal"},
+        {"o", "toggle between editing on and off value"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
+        {0},
+    },
+
+    [EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS]={
+        {"t", "change chunk type"},
         {"TODO", "TODO"},
-        {"s[n]", "select switch (can be out of bounds)"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
+        {0},
+    },
+
+    [EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS]={
+        {"t", "change chunk type"},
+        {"i", "change idx value"},
+        {"e", "change test value"},
+        {" TODO dir keys ?", "change value"},
+        {"v", "change raw value"},
+        {"m", "change mask value"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
@@ -2236,14 +2612,22 @@ void redraw() {
             if (chunk->type == TOGGLE_BLOCK) {
                 if (chunk->dir == HORIZONTAL) {
                     if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                        tile = chunk->on;
+                        if (i + 1 == state->current_switch && c == state->current_chunk) {
+                            tile = state->switch_on ? chunk->on : chunk->off;
+                        } else {
+                            tile = chunk->on;
+                        }
                         ch = true;
                         chunk_switch_underneath = switcch;
                         chunk_underneath = chunk;
                         break;
                     }
                 } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                    tile = chunk->on;
+                    if (i + 1 == state->current_switch && c == state->current_chunk) {
+                        tile = state->switch_on ? chunk->on : chunk->off;
+                    } else {
+                        tile = chunk->on;
+                    }
                     ch = true;
                     chunk_switch_underneath = switcch;
                     chunk_underneath = chunk;
@@ -2531,12 +2915,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                 if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
                                     printf("\033[3%d;40m", (s % 3) + 4);
                                     colored = true;
-                                    tile = chunk->on;
+                                    if (s + 1 == state->current_switch && c == state->current_chunk) {
+                                        tile = state->switch_on ? chunk->on : chunk->off;
+                                    } else {
+                                        tile = chunk->on;
+                                    }
                                 }
                             } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
                                 printf("\033[3%d;40m", (s % 3) + 4);
                                 colored = true;
-                                tile = chunk->on;
+                                if (s + 1 == state->current_switch && c == state->current_chunk) {
+                                    tile = state->switch_on ? chunk->on : chunk->off;
+                                } else {
+                                    tile = chunk->on;
+                                }
                             }
                         }
                     }
@@ -2660,174 +3052,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     int bottom = HEIGHT_TILES + 1;
-    if (state->debug.switches) {
-        uint8_t found = 0;
-        for (size_t s = 0; s < room.num_switches; s ++) {
-            struct SwitchObject *sw = room.switches + s;
-            int x = sw->chunks.data[0].x;
-            int y = sw->chunks.data[0].y;
-            if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
-                found = 1;
-                break;
-            }
-        }
-        if (found) {
-            GOTO(0, bottom); bottom +=3;
-            printf("\n=====\nOut of bounds switches:");
-        }
-        for (size_t s = 0; s < room.num_switches; s ++) {
-            struct SwitchObject *sw = room.switches + s;
-            int x = sw->chunks.data[0].x;
-            int y = sw->chunks.data[0].y;
-            if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
-                GOTO(0, bottom); bottom ++;
-#define BOOL_S(b) ((b) ? "true" : "false")
-                if (state->current_state == EDIT_SWITCHDETAILS && state->current_switch == s) {
-                    printf("\033[1;4mswitch id ");
-                    PRINTF_DATA((uint16_t)s);
-                    printf("\033[m: (x,y)=");
-                    PRINTF_DATA(sw->chunks.data[0].x);
-                    printf(",");
-                    PRINTF_DATA(sw->chunks.data[0].y);
-                    printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
-                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
-                            SWITCH_SIDE(sw->chunks.data[0].side));
-
-                } else {
-                    printf("switch id ");
-                    if (state->current_state == GOTO_SWITCH) {
-                        printf("\033[4%ld;30;1m", (s % 4) + 4);
-                        PRINTF_DATA((uint16_t)s);
-                        printf("\033[m");
-                    } else {
-                        PRINTF_DATA((uint16_t)s);
-                    }
-                    printf(": (x,y)=");
-                    PRINTF_DATA(sw->chunks.data[0].x);
-                    printf(",");
-                    PRINTF_DATA(sw->chunks.data[0].y);
-                    printf(" (entry)=%s (once)=%s (side)=%s\n",
-                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
-                            SWITCH_SIDE(sw->chunks.data[0].side));
-                }
-
-                bottom ++;
-                if (sw->chunks.length > 1) {
-                    printf("  chunks:\n");
-                    bottom ++;
-                    for (size_t i = 1; i < sw->chunks.length; i ++) {
-                        if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK) {
-                            fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
-                            UNREACHABLE();
-                        }
-                        if (state->current_chunk == i) {
-                            fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
-                            UNREACHABLE();
-                        }
-                        printf("    ");
-                        struct SwitchChunk *chunk = sw->chunks.data + i;
-                        switch (chunk->type) {
-                            case PREAMBLE: UNREACHABLE();
-                            case TOGGLE_BLOCK: {
-                                size_t overflow = WIDTH_TILES * HEIGHT_TILES;
-                                size_t point = chunk->y * WIDTH_TILES + chunk->x;
-                                if (point >= overflow) {
-                                    printf("memory:");
-                                    size_t offset = point - overflow;
-                                    size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
-                                    if (offset >= end) {
-                                        printf("way out of bounds");
-                                        assert(false);
-                                    }
-                                    switch (offset) {
-                                        case 0: printf(" tile_offset"); break;
-                                        case 1: printf(" background"); break;
-                                        case 2: printf(" room_north"); break;
-                                        case 3: printf(" room_east"); break;
-                                        case 4: printf(" room_south"); break;
-                                        case 5: printf(" room_west"); break;
-                                        case 6: printf(" room_damage"); break;
-                                        case 7: printf(" gravity_vertical"); break;
-                                        case 8: printf(" gravity_horizontal"); break;
-                                        case 9: printf(" UNKNOWN_b"); break;
-                                        case 10: printf(" UNKNOWN_c"); break;
-                                        case 11: printf(" num_objects"); break;
-                                        case 12: printf(" _num_switches"); break;
-                                        case 13: printf(" UNKNOWN_f"); break;
-                                        default: printf(" somewhere inside name"); break;
-                                    }
-                                    printf(" (on/off)=%02x/%02x", chunk->on, chunk->off);
-                                } else {
-                                    printf("block - (x,y)=");
-                                    PRINTF_DATA(chunk->x);
-                                    printf(",");
-                                    PRINTF_DATA(chunk->y);
-                                    printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
-                                    PRINTF_DATA(chunk->on);
-                                    printf("/");
-                                    PRINTF_DATA(chunk->off);
-                                }
-                            }; break;
-
-                            case TOGGLE_BIT:
-                            {
-                                printf("bit - (idx)=%d (on/off)=%d/%d (mask)=", chunk->index, chunk->on, chunk->off);
-                                PRINTF_DATA(chunk->bitmask);
-                            }; break;
-
-                            case TOGGLE_OBJECT:
-                            {
-                                printf("object - (idx)=%d (test)=", chunk->index);
-                                PRINTF_DATA(chunk->test);
-                                printf(" (value)=");
-                                switch (chunk->value & MOVE_LEFT) {
-                                    case MOVE_LEFT:
-                                        switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: printf("up+left"); break;
-                                            case MOVE_DOWN: printf("down+left"); break;
-                                            case '\0': printf("left"); break;
-                                        }
-                                        break;
-
-                                    case MOVE_RIGHT:
-                                        switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: printf("up+right"); break;
-                                            case MOVE_DOWN: printf("down+right"); break;
-                                            case '\0': printf("right"); break;
-                                        }
-                                        break;
-
-                                    case '\0':
-                                        switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: printf("up"); break;
-                                            case MOVE_DOWN: printf("down"); break;
-                                            case '\0': printf("stop"); break;
-                                        }
-                                        break;
-                                }
-
-                                printf(" (value_without_direction)=");
-                                PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
-                                printf(" (value_raw)=");
-                                PRINTF_DATA(chunk->value);
-                            }; break;
-
-                            default: UNREACHABLE();
-                        }
-                        if (i < sw->chunks.length - 1) {
-                            printf("\n");
-                            bottom ++;
-                        }
-                    }
-                }
-#undef BOOL_S
-            }
-        }
-        if (found) {
-            GOTO(0, bottom); bottom ++;
-            printf("======\n");
-        }
-    }
 
     if (debugany()) bottom ++;
     if (state->debug.data) {
@@ -3072,7 +3296,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
     if (state->current_state == GOTO_SWITCH) {
         GOTO(0, bottom); bottom +=2;
-        printf("\nEnter switch id or q to go to main view");
+        printf("\nEnter switch id (in hex) or q to go to main view");
         goto show_help_if_needed;
     }
 
@@ -3144,6 +3368,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     if (state->debug.switches) {
+
         GOTO(0, bottom); bottom ++;
     (void)chunk_switch_underneath;
     (void)chunk_underneath;
@@ -3157,15 +3382,35 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
             } else {
-                printf("switch: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                printf("switch ");PRINTF_DATA((uint16_t)(switch_underneath - room.switches));printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
                         preamble->x, preamble->y,
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
             }
+            bottom ++;
             if (switch_underneath->chunks.length > 1) {
-                printf("  chunks:\n");
+                if (state->current_state == EDIT_SWITCHDETAILS) {
+                    printf("  \033[1;4mc\033[mhunks:\n");
+                } else {
+                    printf("  chunks:\n");
+                }
+                bottom ++;
                 for (size_t i = 1; i < switch_underneath->chunks.length; i ++) {
                     printf("    ");
+                    if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK || state->current_chunk == i) {
+                        printf("\033[1;4m(");
+                        PRINTF_DATA((uint16_t)i);
+                        printf(")\033[m ");
+                    } else {
+                        printf("(");
+                        PRINTF_DATA((uint16_t)i);
+                        printf(") ");
+                    }
+                    if (state->current_chunk == i) {
+                        printf("\033[1;4mt\033[mype ");
+                    } else {
+                        printf("type ");
+                    }
                     struct SwitchChunk *chunk = switch_underneath->chunks.data + i;
                     switch (chunk->type) {
                         case PREAMBLE: UNREACHABLE();
@@ -3173,6 +3418,10 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             size_t overflow = WIDTH_TILES * HEIGHT_TILES;
                             size_t point = chunk->y * WIDTH_TILES + chunk->x;
                             if (point >= overflow) {
+                    if (state->current_chunk == i) {
+                        fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
+                        UNREACHABLE();
+                    }
                                 printf("memory:");
                                 size_t offset = point - overflow;
                                 size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
@@ -3197,28 +3446,90 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     case 13: printf(" UNKNOWN_f"); break;
                                     default: printf(" somewhere inside name"); break;
                                 }
-                                printf(" (on/off)=%02x/%02x", chunk->on, chunk->off);
+                                printf(" (on/off)=%02x/%02x (size)=%d", chunk->on, chunk->off, chunk->size);
                             } else {
-                                printf("block - (x,y)=");
+                                printf("block: ");
+                                printf("(x,y)=");
                                 PRINTF_DATA(chunk->x);
                                 printf(",");
                                 PRINTF_DATA(chunk->y);
-                                printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
-                                PRINTF_DATA(chunk->on);
-                                printf("/");
-                                PRINTF_DATA(chunk->off);
+                                if (state->current_chunk == i) {
+                                    printf(" (%s)=%d (\033[4;1mo\033[mn/\033[4;1mo\033[mff)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
+                                    if (state->switch_on) {
+                                        if (state->partial_byte) {
+                                            if (state->debug.hex) {
+                                                printf("%x", state->partial_byte & 0xFF);
+                                            } else {
+                                                printf("%u", state->partial_byte & 0xFF);
+                                            }
+                                        } else {
+                                            printf("\033[4;5m%x\033[m", chunk->on / (state->debug.hex ? 16 : 10));
+                                        }
+                                        printf("\033[4;5m%x\033[m", chunk->on / (state->debug.hex ? 16 : 10));
+                                    } else {
+                                        PRINTF_DATA(chunk->on);
+                                    }
+                                    printf("/");
+                                    if (state->switch_on) {
+                                        PRINTF_DATA(chunk->off);
+                                    } else {
+                                        if (state->partial_byte) {
+                                            if (state->debug.hex) {
+                                                printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                            } else {
+                                                printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                            }
+                                        } else {
+                                            printf("\033[4;5m%x\033[m", chunk->off / (state->debug.hex ? 16 : 10));
+                                        }
+                                        printf("\033[4;5m%x\033[m", chunk->off % (state->debug.hex ? 16 : 10));
+                                    }
+                                } else {
+                                    printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
+                                    PRINTF_DATA(chunk->on);
+                                    printf("/");
+                                    PRINTF_DATA(chunk->off);
+                                }
+                                if (state->current_chunk == i) {
+                                    for (int offset = 0; offset < chunk->size; offset ++) {
+                                        if (chunk->dir == HORIZONTAL) {
+                                            GOTO(2 * (chunk->x + offset), chunk->y + 1);
+                                        } else {
+                                            GOTO(2 * chunk->x, chunk->y + offset + 1);
+                                        }
+                                        if (state->partial_byte) {
+                                            if (state->debug.hex) {
+                                                printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                            } else {
+                                                printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                            }
+                                        } else {
+                                            printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) / (state->debug.hex ? 16 : 10));
+                                        }
+                                        printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) % (state->debug.hex ? 16 : 10));
+                                    }
+                                    GOTO(0, bottom - 1);
+                                }
                             }
                         }; break;
 
                         case TOGGLE_BIT:
                         {
-                            printf("bit - (idx)=%d (on/off)=%d/%d (mask)=", chunk->index, chunk->on, chunk->off);
+                    if (state->current_chunk == i) {
+                        fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
+                        UNREACHABLE();
+                    }
+                            printf("bit: (idx)=%d (on/off)=%d/%d (mask)=", chunk->index, chunk->on, chunk->off);
                             PRINTF_DATA(chunk->bitmask);
                         }; break;
 
                         case TOGGLE_OBJECT:
                         {
-                            printf("object - (idx)=%d (test)=", chunk->index);
+                    if (state->current_chunk == i) {
+                        fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
+                        UNREACHABLE();
+                    }
+                            printf("object: (idx)=%d (test)=", chunk->index);
                             PRINTF_DATA(chunk->test);
                             printf(" (value)=");
                             switch (chunk->value & MOVE_LEFT) {
@@ -3255,13 +3566,187 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                         default: UNREACHABLE();
                     }
-                    if (i < switch_underneath->chunks.length - 1) printf("\n");
+                    if (i < switch_underneath->chunks.length - 1) {
+                        printf("\n");
+                        bottom ++;
+                    }
                 }
             }
         } else if (state->current_state == TILE_EDIT) {
-            printf("No switch here, TODO create new?");
+            /* printf("No switch here, Ctrl-s to a create new one"); */
         }
 
+        uint8_t found = 0;
+        for (size_t s = 0; s < room.num_switches; s ++) {
+            struct SwitchObject *sw = room.switches + s;
+            int x = sw->chunks.data[0].x;
+            int y = sw->chunks.data[0].y;
+            if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
+                found = 1;
+                break;
+            }
+        }
+        if (found) {
+            printf("\nOut of bounds switches:");
+            bottom ++;
+        }
+        for (size_t s = 0; s < room.num_switches; s ++) {
+            struct SwitchObject *sw = room.switches + s;
+            int x = sw->chunks.data[0].x;
+            int y = sw->chunks.data[0].y;
+            if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
+                GOTO(0, bottom); bottom ++;
+#define BOOL_S(b) ((b) ? "true" : "false")
+                if (state->current_state == EDIT_SWITCHDETAILS && state->current_switch == s) {
+                    printf("\033[1;4mswitch id ");
+                    PRINTF_DATA((uint16_t)s);
+                    printf("\033[m: (x,y)=");
+                    PRINTF_DATA(sw->chunks.data[0].x);
+                    printf(",");
+                    PRINTF_DATA(sw->chunks.data[0].y);
+                    printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
+                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
+                            SWITCH_SIDE(sw->chunks.data[0].side));
+
+                } else {
+                    printf("switch id ");
+                    if (state->current_state == GOTO_SWITCH) {
+                        printf("\033[4%ld;30;1m", (s % 4) + 4);
+                        PRINTF_DATA((uint16_t)s);
+                        printf("\033[m");
+                    } else {
+                        PRINTF_DATA((uint16_t)s);
+                    }
+                    printf(": (x,y)=");
+                    PRINTF_DATA(sw->chunks.data[0].x);
+                    printf(",");
+                    PRINTF_DATA(sw->chunks.data[0].y);
+                    printf(" (entry)=%s (once)=%s (side)=%s\n",
+                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
+                            SWITCH_SIDE(sw->chunks.data[0].side));
+                }
+
+                bottom ++;
+                if (sw->chunks.length > 1) {
+                    if (state->current_state == EDIT_SWITCHDETAILS) {
+                        printf("  \033[1;4mc\033[mhunks:\n");
+                    } else {
+                        printf("  chunks:\n");
+                    }
+                    bottom ++;
+                    for (size_t i = 1; i < sw->chunks.length; i ++) {
+                        if (state->current_chunk == i) {
+                            fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
+                            UNREACHABLE();
+                        }
+                        printf("    ");
+                        if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK) {
+                            printf("\033[1;4m(");
+                            PRINTF_DATA((uint16_t)i);
+                            printf(")\033[m ");
+                        } else {
+                            printf("(");
+                            PRINTF_DATA((uint16_t)i);
+                            printf(") ");
+                        }
+                        struct SwitchChunk *chunk = sw->chunks.data + i;
+                        switch (chunk->type) {
+                            case PREAMBLE: UNREACHABLE();
+                            case TOGGLE_BLOCK: {
+                                size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                size_t point = chunk->y * WIDTH_TILES + chunk->x;
+                                if (point >= overflow) {
+                                    printf("memory:");
+                                    size_t offset = point - overflow;
+                                    size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+                                    if (offset >= end) {
+                                        printf("way out of bounds");
+                                        assert(false);
+                                    }
+                                    switch (offset) {
+                                        case 0: printf(" tile_offset"); break;
+                                        case 1: printf(" background"); break;
+                                        case 2: printf(" room_north"); break;
+                                        case 3: printf(" room_east"); break;
+                                        case 4: printf(" room_south"); break;
+                                        case 5: printf(" room_west"); break;
+                                        case 6: printf(" room_damage"); break;
+                                        case 7: printf(" gravity_vertical"); break;
+                                        case 8: printf(" gravity_horizontal"); break;
+                                        case 9: printf(" UNKNOWN_b"); break;
+                                        case 10: printf(" UNKNOWN_c"); break;
+                                        case 11: printf(" num_objects"); break;
+                                        case 12: printf(" _num_switches"); break;
+                                        case 13: printf(" UNKNOWN_f"); break;
+                                        default: printf(" somewhere inside name"); break;
+                                    }
+                                    printf(" (on/off)=%02x/%02x (size)=%d", chunk->on, chunk->off, chunk->size);
+                                } else {
+                                    printf("block - (x,y)=");
+                                    PRINTF_DATA(chunk->x);
+                                    printf(",");
+                                    PRINTF_DATA(chunk->y);
+                                    printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
+                                    PRINTF_DATA(chunk->on);
+                                    printf("/");
+                                    PRINTF_DATA(chunk->off);
+                                }
+                            }; break;
+
+                            case TOGGLE_BIT:
+                            {
+                                printf("bit - (idx)=%d (on/off)=%d/%d (mask)=", chunk->index, chunk->on, chunk->off);
+                                PRINTF_DATA(chunk->bitmask);
+                            }; break;
+
+                            case TOGGLE_OBJECT:
+                            {
+                                printf("object - (idx)=%d (test)=", chunk->index);
+                                PRINTF_DATA(chunk->test);
+                                printf(" (value)=");
+                                switch (chunk->value & MOVE_LEFT) {
+                                    case MOVE_LEFT:
+                                        switch (chunk->value & MOVE_UP) {
+                                            case MOVE_UP: printf("up+left"); break;
+                                            case MOVE_DOWN: printf("down+left"); break;
+                                            case '\0': printf("left"); break;
+                                        }
+                                        break;
+
+                                    case MOVE_RIGHT:
+                                        switch (chunk->value & MOVE_UP) {
+                                            case MOVE_UP: printf("up+right"); break;
+                                            case MOVE_DOWN: printf("down+right"); break;
+                                            case '\0': printf("right"); break;
+                                        }
+                                        break;
+
+                                    case '\0':
+                                        switch (chunk->value & MOVE_UP) {
+                                            case MOVE_UP: printf("up"); break;
+                                            case MOVE_DOWN: printf("down"); break;
+                                            case '\0': printf("stop"); break;
+                                        }
+                                        break;
+                                }
+
+                                printf(" (value_without_direction)=");
+                                PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                                printf(" (value_raw)=");
+                                PRINTF_DATA(chunk->value);
+                            }; break;
+
+                            default: UNREACHABLE();
+                        }
+                        if (i < sw->chunks.length - 1) {
+                            printf("\n");
+                            bottom ++;
+                        }
+                    }
+                }
+#undef BOOL_S
+            }
+        }
     }
 
     /* GOTO(0, bottom); bottom ++; */

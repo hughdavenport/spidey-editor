@@ -49,7 +49,8 @@ enum SwitchChunkType {
 
 enum SwitchChunkDirection {
     HORIZONTAL,
-    VERTICAL
+    VERTICAL,
+    NUM_DIRECTIONS,
 };
 
 enum SwitchSide {
