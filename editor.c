@@ -688,9 +688,9 @@ void process_input() {
                         if (state->partial_byte) {
                             size_t room = digit;
                             if (state->debug.hex) {
-                                room += 16 * ((state->partial_byte & 0xFF) >> 4);
+                                room += 16 * (state->partial_byte & 0xFF);
                             } else {
-                                room += 10 * ((state->partial_byte & 0xFF) >> 4);
+                                room += 10 * (state->partial_byte & 0xFF);
                             }
                             if (room < C_ARRAY_LEN(state->rooms.rooms)) {
                                 *cursorlevel = room;
@@ -1684,16 +1684,21 @@ void process_input() {
                             b = 10 + tolower(buf[i]) - 'a';
                         }
                         if ((state->partial_byte & 0xFF00) != 0) {
-                            b = (state->partial_byte & 0xFF) | b;
+                            size_t index = b;
+                            if (state->debug.hex) {
+                                index += 16 * (state->partial_byte & 0xFF);
+                            } else {
+                                index += 10 * (state->partial_byte & 0xFF);
+                            }
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                             assert(chunk->type == TOGGLE_BIT);
-                            chunk->index = b;
+                            chunk->index = index;
                             state->partial_byte = 0;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
                         } else {
-                            state->partial_byte = 0xFF00 | (b << 4);
+                            state->partial_byte = 0xFF00 | b;
                         }
                     } else if (buf[i] == 'm') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -1846,20 +1851,25 @@ void process_input() {
                             b = 10 + tolower(buf[i]) - 'a';
                         }
                         if ((state->partial_byte & 0xFF00) != 0) {
-                            b = (state->partial_byte & 0xFF) | b;
+                            size_t value = b;
+                            if (state->debug.hex) {
+                                value += 16 * (state->partial_byte & 0xFF);
+                            } else {
+                                value += 10 * (state->partial_byte & 0xFF);
+                            }
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                             assert(chunk->type == TOGGLE_BLOCK);
                             if (state->switch_on) {
-                                chunk->on = b;
+                                chunk->on = value;
                             } else {
-                                chunk->off = b;
+                                chunk->off = value;
                             }
                             state->partial_byte = 0;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
                         } else {
-                            state->partial_byte = 0xFF00 | (b << 4);
+                            state->partial_byte = 0xFF00 | b;
                         }
                     } else if (buf[i] == 'h') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2175,20 +2185,25 @@ void process_input() {
                             b = 10 + tolower(buf[i]) - 'a';
                         }
                         if ((state->partial_byte & 0xFF00) != 0) {
-                            b = (state->partial_byte & 0xFF) | b;
+                            size_t value = b;
+                            if (state->debug.hex) {
+                                value += 16 * (state->partial_byte & 0xFF);
+                            } else {
+                                value += 10 * (state->partial_byte & 0xFF);
+                            }
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                             assert(chunk->type == TOGGLE_BLOCK);
                             if (state->switch_on) {
-                                chunk->on = b;
+                                chunk->on = value;
                             } else {
-                                chunk->off = b;
+                                chunk->off = value;
                             }
                             state->partial_byte = 0;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
                         } else {
-                            state->partial_byte = 0xFF00 | (b << 4);
+                            state->partial_byte = 0xFF00 | b;
                         }
                     } else if (buf[i] == 'o') {
                         state->switch_on = !state->switch_on;
@@ -2418,16 +2433,21 @@ void process_input() {
                             b = 10 + tolower(buf[i]) - 'a';
                         }
                         if ((state->partial_byte & 0xFF00) != 0) {
-                            b = (state->partial_byte & 0xFF) | b;
+                            size_t value = b;
+                            if (state->debug.hex) {
+                                value += 16 * (state->partial_byte & 0xFF);
+                            } else {
+                                value += 10 * (state->partial_byte & 0xFF);
+                            }
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                             assert(chunk->type == TOGGLE_OBJECT);
-                            chunk->value = b;
+                            chunk->value = value;
                             state->partial_byte = 0;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
                         } else {
-                            state->partial_byte = 0xFF00 | (b << 4);
+                            state->partial_byte = 0xFF00 | b;
                         }
                     } else if (buf[i] == 0x7f) {
                         state->partial_byte = 0;
@@ -2557,7 +2577,12 @@ void process_input() {
                             b = 10 + tolower(buf[i]) - 'a';
                         }
                         if ((state->partial_byte & 0xFF00) != 0) {
-                            b = (state->partial_byte & 0xFF) | b;
+                            size_t value = b;
+                            if (state->debug.hex) {
+                                value += 16 * (state->partial_byte & 0xFF);
+                            } else {
+                                value += 10 * (state->partial_byte & 0xFF);
+                            }
                             bool obj = false;
                             bool ch = false;
                             int x = state->cursors[state->current_level].x;
@@ -2569,12 +2594,12 @@ void process_input() {
                                         x >= object->x && x < object->x + object->block.width &&
                                         y >= object->y && y < object->y + object->block.height) {
                                     obj = true;
-                                    object->tiles[(y - object->y) * object->block.width + (x - object->x)] = b;
+                                    object->tiles[(y - object->y) * object->block.width + (x - object->x)] = value;
                                     break;
                                 } else if (object->type == SPRITE && x == object->x && y == object->y) {
                                     obj = true;
-                                    object->sprite.type = b >> 4;
-                                    object->sprite.damage = b & 0xF;
+                                    object->sprite.type = value >> 4;
+                                    object->sprite.damage = value & 0xF;
                                     break;
                                 }
                             }
@@ -2594,17 +2619,17 @@ void process_input() {
                                     }
                                     if (ch) {
                                         // FIXME split up chunks, need one for this byte, and potentially 2 more for either end
-                                        chunk->on = b;
+                                        chunk->on = value;
                                         break;
                                     }
                                 }
                             }
-                            if (!obj && !ch) room->tiles[TILE_IDX(x, y)] = b;
+                            if (!obj && !ch) room->tiles[TILE_IDX(x, y)] = value;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
                             state->partial_byte = 0;
                         } else {
-                            state->partial_byte = 0xFF00 | (b << 4);
+                            state->partial_byte = 0xFF00 | b;
                         }
                         i += 1;
                         continue;
@@ -3356,9 +3381,9 @@ void redraw() {
         }
         if (state->partial_byte) {
             if (state->debug.hex) {
-                printf("%x", (state->partial_byte & 0xFF) >> 4);
+                printf("%x", state->partial_byte & 0xFF);
             } else {
-                printf("%u", (state->partial_byte & 0xFF) >> 4);
+                printf("%u", state->partial_byte & 0xFF);
             }
         } else {
             printf("\033[4;5m_\033[m");
@@ -3674,7 +3699,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             } else {
                 printf("\033[1m");
             }
-            printf("%X\033[m", (state->partial_byte & 0xFF) >> 4);
+            printf("%X\033[m", state->partial_byte & 0xFF);
         }
     } else {
         assert(state->cursors[state->current_level].x >= 0);
@@ -3721,9 +3746,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf("\033[1;4mbkgrnd\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3736,9 +3761,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf(", \033[1;4mt\033[miles: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3751,9 +3776,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf(", \033[1;4md\033[mmg: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3766,9 +3791,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf(", gravity (\033[1;4m|\033[m): ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3781,9 +3806,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf(", gravity (\033[1;4m-\033[m): ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3817,9 +3842,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf("UNKNOWN_\033[1;4mb\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3833,9 +3858,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf(", UNKNOWN_\033[1;4mc\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3849,9 +3874,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf(", UNKNOWN_\033[1;4me\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -3865,9 +3890,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     printf(", UNKNOWN_\033[1;4mf\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", (state->partial_byte & 0xFF) >> 4);
+                            printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", (state->partial_byte & 0xFF) >> 4);
+                            printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
                         printf("\033[4;5m_\033[m");
@@ -4098,9 +4123,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     if (state->switch_on) {
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
                                             printf("\033[4;5m%x\033[m", chunk->on / (state->debug.hex ? 16 : 10));
@@ -4115,9 +4140,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     } else {
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
                                             printf("\033[4;5m%x\033[m", chunk->off / (state->debug.hex ? 16 : 10));
@@ -4164,9 +4189,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     } else {
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
                                             printf("\033[4;5m%x\033[m", chunk->off / (state->debug.hex ? 16 : 10));
@@ -4190,9 +4215,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                         printf("\033[3%ld;40m", (i % 7));
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                                printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
                                             printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) / (state->debug.hex ? 16 : 10));
@@ -4211,11 +4236,12 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                 printf("bit: (idx)=");
                                 if (state->partial_byte) {
                                     if (state->debug.hex) {
-                                        printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                        printf("%x", state->partial_byte & 0xFF);
                                     } else {
-                                        printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                        printf("%u", state->partial_byte & 0xFF);
                                     }
                                 } else {
+
                                     printf("\033[4;5m%x\033[m", chunk->index / (state->debug.hex ? 16 : 10));
                                 }
                                 printf("\033[4;5m%x\033[m", chunk->index % (state->debug.hex ? 16 : 10));
@@ -4270,9 +4296,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             if (state->current_chunk == i) {
                                 if (state->partial_byte) {
                                     if (state->debug.hex) {
-                                        printf("%x", (state->partial_byte & 0xFF) >> 4);
+                                        printf("%x", state->partial_byte & 0xFF);
                                     } else {
-                                        printf("%u", (state->partial_byte & 0xFF) >> 4);
+                                        printf("%u", state->partial_byte & 0xFF);
                                     }
                                 } else {
                                     printf("\033[4;5m%x\033[m", chunk->value / (state->debug.hex ? 16 : 10));
