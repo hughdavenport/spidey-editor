@@ -48,7 +48,7 @@
 
 #include "room.h"
 
-bool any_source_newer(struct stat *library_stat) {
+bool any_source_newer(struct timespec test_time) {
     struct stat file_stat;
     char *files[] = {
         __FILE__,
@@ -58,7 +58,7 @@ bool any_source_newer(struct stat *library_stat) {
     };
     for (size_t i = 0; i < C_ARRAY_LEN(files); i ++) {
         if (stat(files[i], &file_stat) == 0) {
-            if (TIME_NEWER(file_stat.st_mtim, library_stat->st_mtim)) {
+            if (TIME_NEWER(file_stat.st_mtim, test_time)) {
                 return true;
             }
         }
@@ -678,106 +678,201 @@ void process_input() {
 
                 case GOTO_ROOM:
                 {
-                    if ((state->debug.hex && isxdigit(buf[i])) || (!state->debug.hex && isdigit(buf[i]))) {
+                    if (state->partial_byte && ((state->debug.hex && isxdigit(buf[i])) || (!state->debug.hex && isdigit(buf[i])))) {
                         int digit;
                         if (buf[i] > '9') {
                             digit = tolower(buf[i]) - 'a' + 10;
                         } else {
                             digit = buf[i] - '0';
                         }
-                        if (state->partial_byte) {
-                            size_t room = digit;
-                            if (state->debug.hex) {
-                                room += 16 * (state->partial_byte & 0xFF);
-                            } else {
-                                room += 10 * (state->partial_byte & 0xFF);
-                            }
-                            if (room < C_ARRAY_LEN(state->rooms.rooms)) {
-                                *cursorlevel = room;
-                                state->current_state = state->previous_state;
-                                state->current_switch = 0;
-                                state->switch_on = false;
-                                state->current_chunk = 0;
-                                state->previous_state = NORMAL;
-                                state->partial_byte = 0;
-                            }
+                        size_t room = digit;
+                        if (state->debug.hex) {
+                            room += 16 * (state->partial_byte & 0xFF);
                         } else {
-                            if ((unsigned)(digit * (state->debug.hex ? 16 : 10)) < C_ARRAY_LEN(state->rooms.rooms)) {
-                                state->partial_byte = 0xFF00 | digit;
+                            room += 10 * (state->partial_byte & 0xFF);
+                        }
+                        if (room < C_ARRAY_LEN(state->rooms.rooms)) {
+                            *cursorlevel = room;
+                            state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
+                            state->previous_state = NORMAL;
+                            state->partial_byte = 0;
+                            if (state->roomname_cursor) {
+                                memset(state->room_name, 0, state->roomname_cursor);
+                                state->roomname_cursor = 0;
                             }
                         }
+                    } else if (state->roomname_cursor == 0 && state->partial_byte == 0 && buf[i] >= '0' &&
+                                buf[i] <= (state->debug.hex ? '3' : '6')) {
+                        state->partial_byte = 0xFF00 | (buf[i] - '0');
                     } else if (buf[i] == 0x7f) {
-                        state->partial_byte = 0;
+                        if (state->roomname_cursor) {
+                            state->room_name[--state->roomname_cursor] = 0;
+                        } else {
+                            state->partial_byte = 0;
+                        }
                     } else if (buf[i] == ESCAPE) {
-                        if (i + 1 < n && buf[i+1] == '[' && i + 2 < n) {
-                            // CSI sequence
-                            i += 2;
-                            uint8_t arg = 0;
-                            while (i < n) {
-                                if (isdigit(buf[i])) {
-                                    arg = 10 * arg + buf[i] - '0';
-                                } else if (buf[i] == ';') {
-                                    arg = 0;
-                                } else {
-                                    switch (buf[i]) {
-                                        case '~':
-                                        {
-                                            switch (arg) {
-                                                case 3: state->partial_byte = 0; break;
-                                                default: UNREACHABLE();
+                        if (i + 1 < n) {
+                            switch (buf[i + 1]) {
+                                case '[':
+                                    if (i + 2 < n) {
+                                        // CSI sequence
+                                        i += 2;
+                                        uint8_t arg = 0;
+                                        while (i < n) {
+                                            if (isdigit(buf[i])) {
+                                                arg = 10 * arg + buf[i] - '0';
+                                            } else if (buf[i] == ';') {
+                                                arg = 0;
+                                            } else {
+                                                switch (buf[i]) {
+                                                    case '~':
+                                                    {
+                                                        switch (arg) {
+                                                            case 3:
+                                                                if (state->roomname_cursor) {
+                                                                    state->room_name[--state->roomname_cursor] = 0;
+                                                                } else {
+                                                                    state->partial_byte = 0;
+                                                                }
+                                                                break;
+
+                                                            default: UNREACHABLE();
+                                                        }
+                                                    }; break;
+
+                                                    case 'A':
+                                                    {
+                                                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
+                                                        state->current_state = state->previous_state;
+                                                        state->current_switch = 0;
+                                                        state->switch_on = false;
+                                                        state->current_chunk = 0;
+                                                        state->previous_state = NORMAL;
+                                                        state->partial_byte = 0;
+                                                        if (state->roomname_cursor) {
+                                                            memset(state->room_name, 0, state->roomname_cursor);
+                                                            state->roomname_cursor = 0;
+                                                        }
+                                                    }; break;
+
+                                                    case 'B':
+                                                    {
+                                                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
+                                                        state->current_state = state->previous_state;
+                                                        state->current_switch = 0;
+                                                        state->switch_on = false;
+                                                        state->current_chunk = 0;
+                                                        state->previous_state = NORMAL;
+                                                        state->partial_byte = 0;
+                                                        if (state->roomname_cursor) {
+                                                            memset(state->room_name, 0, state->roomname_cursor);
+                                                            state->roomname_cursor = 0;
+                                                        }
+                                                    }; break;
+
+                                                    case 'C':
+                                                    {
+                                                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
+                                                        state->current_state = state->previous_state;
+                                                        state->current_switch = 0;
+                                                        state->switch_on = false;
+                                                        state->current_chunk = 0;
+                                                        state->previous_state = NORMAL;
+                                                        state->partial_byte = 0;
+                                                        if (state->roomname_cursor) {
+                                                            memset(state->room_name, 0, state->roomname_cursor);
+                                                            state->roomname_cursor = 0;
+                                                        }
+                                                    }; break;
+
+                                                    case 'D':
+                                                    {
+                                                        *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
+                                                        state->current_state = state->previous_state;
+                                                        state->current_switch = 0;
+                                                        state->switch_on = false;
+                                                        state->current_chunk = 0;
+                                                        state->previous_state = NORMAL;
+                                                        state->partial_byte = 0;
+                                                        if (state->roomname_cursor) {
+                                                            memset(state->room_name, 0, state->roomname_cursor);
+                                                            state->roomname_cursor = 0;
+                                                        }
+                                                    }; break;
+
+                                                    default:
+                                                        fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                                }
+                                                break;
                                             }
-                                        }; break;
-
-                                        case 'A':
-                                        {
-                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
-                                            state->current_state = state->previous_state;
-                                            state->current_switch = 0;
-                                            state->switch_on = false;
-                                            state->current_chunk = 0;
-                                            state->previous_state = NORMAL;
-                                            state->partial_byte = 0;
-                                        }; break;
-
-                                        case 'B':
-                                        {
-                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
-                                            state->current_state = state->previous_state;
-                                            state->current_switch = 0;
-                                            state->switch_on = false;
-                                            state->current_chunk = 0;
-                                            state->previous_state = NORMAL;
-                                            state->partial_byte = 0;
-                                        }; break;
-
-                                        case 'C':
-                                        {
-                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
-                                            state->current_state = state->previous_state;
-                                            state->current_switch = 0;
-                                            state->switch_on = false;
-                                            state->current_chunk = 0;
-                                            state->previous_state = NORMAL;
-                                            state->partial_byte = 0;
-                                        }; break;
-
-                                        case 'D':
-                                        {
-                                            *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
-                                            state->current_state = state->previous_state;
-                                            state->current_switch = 0;
-                                            state->switch_on = false;
-                                            state->current_chunk = 0;
-                                            state->previous_state = NORMAL;
-                                            state->partial_byte = 0;
-                                        }; break;
-
-                                        default:
-                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                            i ++;
+                                        }
                                     }
                                     break;
-                                }
-                                i ++;
+
+                                case 'h':
+                                {
+                                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
+                                    state->current_state = state->previous_state;
+                                    state->current_switch = 0;
+                                    state->switch_on = false;
+                                    state->current_chunk = 0;
+                                    state->previous_state = NORMAL;
+                                    state->partial_byte = 0;
+                                    if (state->roomname_cursor) {
+                                        memset(state->room_name, 0, state->roomname_cursor);
+                                        state->roomname_cursor = 0;
+                                    }
+                                }; break;
+
+                                case 'j':
+                                {
+                                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
+                                    state->current_state = state->previous_state;
+                                    state->current_switch = 0;
+                                    state->switch_on = false;
+                                    state->current_chunk = 0;
+                                    state->previous_state = NORMAL;
+                                    state->partial_byte = 0;
+                                    if (state->roomname_cursor) {
+                                        memset(state->room_name, 0, state->roomname_cursor);
+                                        state->roomname_cursor = 0;
+                                    }
+                                }; break;
+
+                                case 'k':
+                                {
+                                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
+                                    state->current_state = state->previous_state;
+                                    state->current_switch = 0;
+                                    state->switch_on = false;
+                                    state->current_chunk = 0;
+                                    state->previous_state = NORMAL;
+                                    state->partial_byte = 0;
+                                    if (state->roomname_cursor) {
+                                        memset(state->room_name, 0, state->roomname_cursor);
+                                        state->roomname_cursor = 0;
+                                    }
+                                }; break;
+
+                                case 'l':
+                                {
+                                    *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
+                                    state->current_state = state->previous_state;
+                                    state->current_switch = 0;
+                                    state->switch_on = false;
+                                    state->current_chunk = 0;
+                                    state->previous_state = NORMAL;
+                                    state->partial_byte = 0;
+                                    if (state->roomname_cursor) {
+                                        memset(state->room_name, 0, state->roomname_cursor);
+                                        state->roomname_cursor = 0;
+                                    }
+                                }; break;
+
                             }
                         } else if (state->help) {
                             state->help = false;
@@ -787,6 +882,11 @@ void process_input() {
                             state->switch_on = false;
                             state->current_chunk = 0;
                             state->previous_state = NORMAL;
+                            state->partial_byte = 0;
+                            if (state->roomname_cursor) {
+                                memset(state->room_name, 0, state->roomname_cursor);
+                                state->roomname_cursor = 0;
+                            }
                         }
                     } else if (iscntrl(buf[i])) {
                         switch (buf[i] + 'A' - 1) {
@@ -800,54 +900,9 @@ void process_input() {
                                         state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
                                     }
                                 }
-                        }
-                    } else {
-                        switch (buf[i]) {
-                            case 'h':
-                            {
-                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_west;
-                                state->current_state = state->previous_state;
-                                state->current_switch = 0;
-                                state->switch_on = false;
-                                state->current_chunk = 0;
-                                state->previous_state = NORMAL;
-                                state->partial_byte = 0;
-                            }; break;
+                                break;
 
-                            case 'j':
-                            {
-                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_south;
-                                state->current_state = state->previous_state;
-                                state->current_switch = 0;
-                                state->switch_on = false;
-                                state->current_chunk = 0;
-                                state->previous_state = NORMAL;
-                                state->partial_byte = 0;
-                            }; break;
-
-                            case 'k':
-                            {
-                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_north;
-                                state->current_state = state->previous_state;
-                                state->current_switch = 0;
-                                state->switch_on = false;
-                                state->current_chunk = 0;
-                                state->previous_state = NORMAL;
-                                state->partial_byte = 0;
-                            }; break;
-
-                            case 'l':
-                            {
-                                *cursorlevel = state->rooms.rooms[*cursorlevel].data.room_east;
-                                state->current_state = state->previous_state;
-                                state->current_switch = 0;
-                                state->switch_on = false;
-                                state->current_chunk = 0;
-                                state->previous_state = NORMAL;
-                                state->partial_byte = 0;
-                            }; break;
-
-                            case 'q':
+                            case 'Q':
                             {
                                 if (state->help) {
                                     state->help = !state->help;
@@ -857,33 +912,79 @@ void process_input() {
                                     state->switch_on = false;
                                     state->current_chunk = 0;
                                     state->previous_state = NORMAL;
+                                    state->partial_byte = 0;
+                                    if (state->roomname_cursor) {
+                                        memset(state->room_name, 0, state->roomname_cursor);
+                                        state->roomname_cursor = 0;
+                                    }
                                 }
                             }; break;
 
-                            case '?': state->help = !state->help; break;
-
-                            case '[':
-                                if (i + 1 < n) {
-                                    // CSI sequence
-                                    i += 1;
-                                    uint8_t arg = 0;
-                                    while (i < n) {
-                                        if (isdigit(buf[i])) {
-                                            arg = 10 * arg + buf[i] - '0';
-                                        } else if (buf[i] == ';') {
-                                            arg = 0;
-                                        } else {
-                                            if (arg == 3 && buf[i] == '~') {
-                                                state->partial_byte = 0;
-                                            }
-                                            break;
+                        }
+                    } else {
+                        if (buf[i] == '[') {
+                            if (i + 1 < n) {
+                                // CSI sequence
+                                i += 1;
+                                uint8_t arg = 0;
+                                while (i < n) {
+                                    if (isdigit(buf[i])) {
+                                        arg = 10 * arg + buf[i] - '0';
+                                    } else if (buf[i] == ';') {
+                                        arg = 0;
+                                    } else {
+                                        if (arg == 3 && buf[i] == '~') {
+                                            state->partial_byte = 0;
                                         }
-                                        i ++;
+                                        break;
                                     }
-                                } else {
-                                    UNREACHABLE();
+                                    i ++;
                                 }
-                                break;
+                            } else {
+                                UNREACHABLE();
+                            }
+                        } else {
+                            if (state->partial_byte == 0 && isprint(buf[i])) {
+                                if (state->roomname_cursor < C_ARRAY_LEN(state->room_name) - 1) {
+                                    state->room_name[state->roomname_cursor++] = buf[i];
+
+                                    bool possible = false;
+                                    bool duplicate = false;
+                                    size_t matching_room = 0;
+                                    if (state->roomname_cursor) {
+                                        for (size_t _room = 0; _room < C_ARRAY_LEN(state->rooms.rooms); _room ++) {
+                                            struct DecompresssedRoom *room = &state->rooms.rooms[_room].data;
+                                            if (strncasecmp(room->name, state->room_name, state->roomname_cursor) == 0) {
+                                                if (possible) {
+                                                    duplicate = true;
+                                                    break;
+                                                } else {
+                                                    duplicate = false;
+                                                }
+                                                possible = true;
+                                                matching_room = _room;
+                                            }
+                                        }
+                                    } else {
+                                        possible = true;
+                                    }
+                                    if (!possible) {
+                                        state->room_name[--state->roomname_cursor] = 0;
+                                    } else if (!duplicate) {
+                                        *cursorlevel = matching_room;
+                                        state->current_state = state->previous_state;
+                                        state->current_switch = 0;
+                                        state->switch_on = false;
+                                        state->current_chunk = 0;
+                                        state->previous_state = NORMAL;
+                                        state->partial_byte = 0;
+                                        if (state->roomname_cursor) {
+                                            memset(state->room_name, 0, state->roomname_cursor);
+                                            state->roomname_cursor = 0;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     i ++;
@@ -1092,7 +1193,6 @@ void process_input() {
                                     case 'B':
                                     case 'C':
                                     case 'D':
-                                        state->previous_state = state->current_state;
                                         state->current_state = EDIT_ROOMDETAILS_ROOM;
                                         state->current_switch = 0;
                                         state->switch_on = false;
@@ -1111,7 +1211,6 @@ void process_input() {
                             case 'k':
                             case 'l':
                                 state->room_detail = buf[i];
-                                state->previous_state = state->current_state;
                                 state->current_state = EDIT_ROOMDETAILS_ROOM;
                                 state->current_switch = 0;
                                 state->switch_on = false;
@@ -1130,7 +1229,6 @@ void process_input() {
                             case 'f':
                             {
                                 state->room_detail = buf[i];
-                                state->previous_state = state->current_state;
                                 state->current_state = EDIT_ROOMDETAILS_NUM;
                                 state->current_switch = 0;
                                 state->switch_on = false;
@@ -1209,11 +1307,10 @@ void process_input() {
 
                                 default: UNREACHABLE();
                             }
-                            state->current_state = state->previous_state;
+                            state->current_state = EDIT_ROOMDETAILS;
                             state->current_switch = 0;
                             state->switch_on = false;
                             state->current_chunk = 0;
-                            state->previous_state = TILE_EDIT;
                             state->partial_byte = 0;
                             state->room_detail = 0;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
@@ -1229,13 +1326,12 @@ void process_input() {
                         if (state->help) {
                             state->help = false;
                         } else {
-                            state->current_state = state->previous_state;
+                            state->current_state = EDIT_ROOMDETAILS;
                             state->current_switch = 0;
                             state->switch_on = false;
                             state->current_chunk = 0;
                             state->partial_byte = 0;
                             state->room_detail = 0;
-                            state->previous_state = TILE_EDIT;
                         }
                     } else if (iscntrl(buf[i])) {
                         switch (buf[i] + 'A' - 1) {
@@ -1254,13 +1350,12 @@ void process_input() {
                         if (state->help) {
                             state->help = !state->help;
                         } else {
-                            state->current_state = state->previous_state;
+                            state->current_state = EDIT_ROOMDETAILS;
                             state->current_switch = 0;
                             state->switch_on = false;
                             state->current_chunk = 0;
                             state->partial_byte = 0;
                             state->room_detail = 0;
-                            state->previous_state = TILE_EDIT;
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
@@ -1334,11 +1429,10 @@ void process_input() {
 
                                     default: UNREACHABLE();
                                 }
-                                state->current_state = state->previous_state;
+                                state->current_state = EDIT_ROOMDETAILS;
                                 state->current_switch = 0;
                                 state->switch_on = false;
                                 state->current_chunk = 0;
-                                state->previous_state = TILE_EDIT;
                                 state->partial_byte = 0;
                                 state->room_detail = 0;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
@@ -1356,11 +1450,10 @@ void process_input() {
                         if (state->help) {
                             state->help = false;
                         } else {
-                            state->current_state = state->previous_state;
+                            state->current_state = EDIT_ROOMDETAILS;
                             state->current_switch = 0;
                             state->switch_on = false;
                             state->current_chunk = 0;
-                            state->previous_state = NORMAL;
                         }
                     } else if (iscntrl(buf[i])) {
                         switch (buf[i] + 'A' - 1) {
@@ -1379,11 +1472,10 @@ void process_input() {
                         if (state->help) {
                             state->help = !state->help;
                         } else {
-                            state->current_state = state->previous_state;
+                            state->current_state = EDIT_ROOMDETAILS;
                             state->current_switch = 0;
                             state->switch_on = false;
                             state->current_chunk = 0;
-                            state->previous_state = NORMAL;
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
@@ -2990,14 +3082,15 @@ help_keys help[][100] = {
 
     [GOTO_ROOM]={
         {"0-9a-fA-F", "room number"},
-        {"UP/j", "Goto room above current room"},
-        {"DOWN/k", "Goto room below current room"},
-        {"LEFT/h", "Goto room to the left current room"},
-        {"RIGHT/l", "Goto room to the right current room"},
+        {"any printable char", "change character under cursor"},
+        {"UP/Alt+j", "Goto room above current room"},
+        {"DOWN/Alt+k", "Goto room below current room"},
+        {"LEFT/Alt+h", "Goto room to the left current room"},
+        {"RIGHT/Alt+l", "Goto room to the right current room"},
         {"DEL", "delete character under cursor"},
         {"BACKSPACE", "delete character under cursor"},
         {"ESC", "go back to main view"},
-        {"q", "go back to main view"},
+        {"Ctrl+q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
         {0},
@@ -3389,7 +3482,10 @@ void redraw() {
             printf("\033[4;5m_\033[m");
         }
         switch (state->current_state) {
-            case GOTO_ROOM: printf("\033[4;5m_\033[m - \"???\""); break;
+            case GOTO_ROOM:
+                printf("\033[4;5m_\033[m - \"%s???\"", state->room_name);
+                break;
+
             case EDIT_ROOMDETAILS_ROOM:
             {
 #define READ_NEIGHBOUR(id) do { \
@@ -3450,6 +3546,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             struct DecompresssedRoom *room = &state->rooms.rooms[room_id].data;
             assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room->name));
             strncpy(room_name, room->name, C_ARRAY_LEN(room->name));
+            bool highlight = state->roomname_cursor && strncasecmp(room_name, state->room_name, state->roomname_cursor) == 0;
             int room_name_len;
             for (room_name_len = (int)C_ARRAY_LEN(room_name) - 1; room_name_len >= 0; room_name_len --) {
                 if (room_name[room_name_len] == '\0' || isspace(room_name[room_name_len])) {
@@ -3468,13 +3565,23 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 printf("\033[m");
                 printed += printf(state->debug.hex ? "%01lx" : "%01ld", room_id % (state->debug.hex ? 16 : 10));
             } else {
+                if (highlight) printf("\033[4;1m");
                 printed += printf(state->debug.hex ? "%02lx" : "%02ld", room_id);
             }
             printed += printf(" - \"");
             if (underline) {
                 printf("\033[4;1m");
             }
-            printed += printf("%s", room_name);
+            if (highlight) {
+                char tmp = room_name[state->roomname_cursor];
+                room_name[state->roomname_cursor] = 0;
+                printed += printf("%s", room_name);
+                room_name[state->roomname_cursor] = tmp;
+                printf("\033[m");
+                printed += printf("%s", room_name + state->roomname_cursor);
+            } else {
+                printed += printf("%s", room_name);
+            }
             if (underline) {
                 printf("\033[m");
                 underline = 0;
@@ -3488,6 +3595,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             room = &state->rooms.rooms[room_id].data;
             assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room->name));
             strncpy(room_name, room->name, C_ARRAY_LEN(room->name));
+            highlight = state->roomname_cursor && strncasecmp(room_name, state->room_name, state->roomname_cursor) == 0;
             for (room_name_len = (int)C_ARRAY_LEN(room_name) - 1; room_name_len >= 0; room_name_len --) {
                 if (room_name[room_name_len] == '\0' || isspace(room_name[room_name_len])) {
                     room_name[room_name_len] = '\0';
@@ -3503,13 +3611,23 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 printf("\033[m");
                 printf(state->debug.hex ? "%01lx" : "%01ld", room_id % (state->debug.hex ? 16 : 10));
             } else {
+                if (highlight) printf("\033[4;1m");
                 printf(state->debug.hex ? "%02lx" : "%02ld", room_id);
             }
             printf(" - \"");
             if (underline) {
                 printf("\033[4;1m");
             }
-            printf("%s", room_name);
+            if (highlight) {
+                char tmp = room_name[state->roomname_cursor];
+                room_name[state->roomname_cursor] = 0;
+                printed += printf("%s", room_name);
+                room_name[state->roomname_cursor] = tmp;
+                printf("\033[m");
+                printed += printf("%s", room_name + state->roomname_cursor);
+            } else {
+                printed += printf("%s", room_name);
+            }
             if (underline) {
                 printf("\033[m");
                 underline = 0;
@@ -3971,9 +4089,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     if (state->current_state == GOTO_SWITCH) {
-        GOTO(0, bottom); bottom +=2;
+        GOTO(0, bottom);
         printf("\nEnter switch id (in hex) or q to go to main view");
-        goto show_help_if_needed;
     }
 
     if (state->current_state == TOGGLE_DISPLAY) {
@@ -4048,7 +4165,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         GOTO(0, bottom); bottom ++;
     (void)chunk_switch_underneath;
     (void)chunk_underneath;
-        if (switch_underneath != NULL) {
+        if (state->current_state != GOTO_SWITCH && switch_underneath != NULL) {
 #define BOOL_S(b) ((b) ? "true" : "false")
             assert(switch_underneath->chunks.length >= 1);
             struct SwitchChunk *preamble = switch_underneath->chunks.data;
@@ -4332,8 +4449,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             }
         }
         if (found) {
-            printf("\nOut of bounds switches:");
-            bottom ++;
+            printf("\n\nOut of bounds switches:");
+            bottom +=2;
         }
         for (size_t s = 0; s < room.num_switches; s ++) {
             struct SwitchObject *sw = room.switches + s;
@@ -4581,9 +4698,10 @@ void *loop_main(char *library, void *call_state) {
     signal(SIGWINCH, sigwinch_handler);
     signal(SIGINT, end);
 
+    struct timespec test_time = library_stat.st_mtim;
     while (true) {
         struct stat rooms_stat;
-        if (any_source_newer(&library_stat)) {
+        if (any_source_newer(test_time)) {
             // rebuild
             char *build_cmd = NULL;
             assert(asprintf(&build_cmd, "%s %s %s", LIBRARY_BUILD_CMD, library, __FILE__) > 0);
@@ -4595,8 +4713,11 @@ void *loop_main(char *library, void *call_state) {
                 return state;
             }
             if (ret == -1) perror("system");
-            fprintf(stderr, "Recompile failed\n");
+            fprintf(stderr, "--- Recompile failed not reloading ---\n");
             free(build_cmd);
+            if (clock_gettime(CLOCK_REALTIME, &test_time) == -1) {
+                perror("clock_gettime");
+            }
         }
         if (stat("ROOMS.SPL", &rooms_stat) == 0) {
             if (TIME_NEWER(rooms_stat.st_mtim, start_rooms_stat.st_mtim)) {
