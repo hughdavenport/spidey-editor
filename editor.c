@@ -162,6 +162,7 @@ typedef enum {
     NORMAL,
     TILE_EDIT,
 
+    GOTO_OBJECT,
     GOTO_SWITCH,
     GOTO_ROOM,
 
@@ -619,6 +620,60 @@ void process_input() {
             char *match = NULL;
 #define KEY_MATCHES(key) ((strncmp(buf + i, (key), strlen((key))) == 0) && (match = key))
             switch (state->current_state) {
+                case GOTO_OBJECT:
+                {
+                    if (isxdigit(buf[i])) {
+                        struct DecompresssedRoom *room = &state->rooms.rooms[*cursorlevel].data;
+                        if (room->num_objects > 15) {
+                            // FIXME support 2 digit nums
+                            UNREACHABLE();
+                        }
+                        size_t id;
+                        if (buf[i] > '9') {
+                            id = tolower(buf[i]) - 'a' + 10;
+                        } else {
+                            id = buf[i] - '0';
+                        }
+                        if (id < room->num_objects) {
+                            struct RoomObject *obj = room->objects + id;
+                            if (obj->x < WIDTH_TILES && obj->y < HEIGHT_TILES) {
+                                cursor->x = obj->x;
+                                cursor->y = obj->y;
+                                state->current_state = state->previous_state;
+                                state->previous_state = NORMAL;
+                            }
+                        }
+                    } else if (buf[i] == ESCAPE) {
+                        if (state->help) {
+                            state->help = false;
+                        } else {
+                            state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
+                            state->previous_state = NORMAL;
+                        }
+                    } else if (iscntrl(buf[i])) {
+                        switch (buf[i] + 'A' - 1) {
+                            case '_': state->help = !state->help; break;
+                            case 'H': state->debug.hex = !state->debug.hex; break;
+                        }
+                    } else if (buf[i] == 'q') {
+                        if (state->help) {
+                            state->help = !state->help;
+                        } else {
+                            state->current_state = state->previous_state;
+                            state->current_switch = 0;
+                            state->switch_on = false;
+                            state->current_chunk = 0;
+                            state->previous_state = NORMAL;
+                        }
+                    } else if (buf[i] == '?') {
+                        state->help = !state->help;
+                    }
+                    i ++;
+                }; break;
+
                 case GOTO_SWITCH:
                 {
                     if (isxdigit(buf[i])) {
@@ -3094,9 +3149,9 @@ void process_input() {
                         state->switch_on = false;
                         state->current_chunk = 0;
                         state->partial_byte = 0;
-                    } else if (state->current_switch && KEY_MATCHES("c")) {
+                    } else if (KEY_MATCHES("o")) {
                         state->previous_state = state->current_state;
-                        state->current_state = GOTO_SWITCH;
+                        state->current_state = GOTO_OBJECT;
                         state->current_switch = 0;
                         state->switch_on = false;
                         state->current_chunk = 0;
@@ -3357,6 +3412,7 @@ help_keys help[][100] = {
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"Ctrl-s[eorcs]", "create/edit switch"},
         {"s[n]", "goto switch"},
+        {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
         {"y", "TODO copy thing"},
         {"+", "TODO increase thing id (shuffles up)"},
@@ -3368,6 +3424,15 @@ help_keys help[][100] = {
         {"Ctrl-h", "toggle hex in debug info"},
         {"Ctrl-t", "toggle tile edit mode"},
         {"Ctrl-d[adnopsu]", "toggle display element"},
+        {0},
+    },
+
+    [GOTO_OBJECT]={
+        {"0-9a-fA-F", "object id (highlighted on map)"},
+        {"ESC", "go back to main view"},
+        {"q", "go back to main view"},
+        {"Ctrl-?", "toggle help"},
+        {"Ctrl-h", "toggle hex in debug info"},
         {0},
     },
 
@@ -4018,7 +4083,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             for (int x = 0; x < WIDTH_TILES; x ++) {
                 uint8_t tile = room.tiles[TILE_IDX(x, y)];
                 bool colored = false;
-                if (state->debug.switches)
+                if (state->debug.switches && state->current_state != GOTO_OBJECT)
                 for (int s = 0; s < room.num_switches; s ++) {
                     struct SwitchObject *sw = room.switches + s;
                     assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
@@ -4062,43 +4127,70 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     uint8_t dirty[MIN_HEIGHT * MIN_WIDTH] = {0};
-    if (state->debug.objects)
-    for (size_t i = 0; i < room.num_objects; i ++) {
-        struct RoomObject *object = room.objects + i;
-        assert(object->x >= 0);
-        assert(object->y >= 0);
-        assert(object->x < WIDTH_TILES);
-        assert(object->y < HEIGHT_TILES);
-        switch (object->type) {
-            case BLOCK:
-                assert(object->x + object->block.width <= WIDTH_TILES);
-                assert(object->y + object->block.height <= HEIGHT_TILES);
-                printf("\033[3%ldm", (i % 3) + 1);
-                for (int y = object->y; y < object->y + object->block.height; y ++) {
-                    GOTO(2 * object->x, y + 1);
-                    for (int x = object->x; x < object->x + object->block.width; x ++) {
-                        if (dirty[y * MIN_WIDTH + x] == 1) continue;
-                        dirty[y * MIN_WIDTH + x] = 1;
-                        uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-                        if (tile == BLANK_TILE) {
-                            printf("  ");
-                        } else {
-                            printf("%02X", tile);
+    if (state->debug.objects) {
+        for (size_t i = 0; i < room.num_objects; i ++) {
+            struct RoomObject *object = room.objects + i;
+            assert(object->x >= 0);
+            assert(object->y >= 0);
+            assert(object->x < WIDTH_TILES);
+            assert(object->y < HEIGHT_TILES);
+            switch (object->type) {
+                case BLOCK:
+                    assert(object->x + object->block.width <= WIDTH_TILES);
+                    assert(object->y + object->block.height <= HEIGHT_TILES);
+                    printf("\033[3%ldm", (i % 3) + 1);
+                    for (int y = object->y; y < object->y + object->block.height; y ++) {
+                        GOTO(2 * object->x, y + 1);
+                        for (int x = object->x; x < object->x + object->block.width; x ++) {
+                            if (dirty[y * MIN_WIDTH + x] == 1) continue;
+                            dirty[y * MIN_WIDTH + x] = 1;
+                            uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
+                            if (tile == BLANK_TILE) {
+                                printf("  ");
+                            } else {
+                                printf("%02X", tile);
+                            }
                         }
                     }
-                }
-                break;
+                    break;
 
-            case SPRITE:
-                if (state->current_state == GOTO_SWITCH) break;
-                GOTO(2 * object->x, object->y + 1);
-                assert((unsigned)(object->y * MIN_WIDTH + object->x) < sizeof(dirty));
-                if (dirty[object->y * MIN_WIDTH + object->x] == 1) continue;
-                dirty[object->y * MIN_WIDTH + object->x] = 1;
-                printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
-                break;
+                case SPRITE:
+                    if (state->current_state == GOTO_SWITCH) break;
+                    GOTO(2 * object->x, object->y + 1);
+                    assert((unsigned)(object->y * MIN_WIDTH + object->x) < sizeof(dirty));
+                    if (dirty[object->y * MIN_WIDTH + object->x] == 1) continue;
+                    dirty[object->y * MIN_WIDTH + object->x] = 1;
+                    printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
+                    break;
+            }
+            printf("\033[m");
         }
-        printf("\033[m");
+        if (state->current_state == GOTO_OBJECT) {
+            for (int y = 0; y < HEIGHT_TILES; y ++) {
+                for (int x = 0; x < WIDTH_TILES; x ++) {
+                    struct RoomObject *found_object = NULL;
+                    int o;
+                    for (o = 0; o < room.num_objects; o ++) {
+                        struct RoomObject *obj = room.objects + o;
+                        if (x == obj->x && y == obj->y) {
+                            found_object = obj;
+                            break;
+                        }
+                    }
+                    GOTO(2 * x, y + 1);
+                    if (found_object) {
+                        printf("\033[4%d;30;1m", (o % 3) + 1);
+
+                        if (o > 15) {
+                            // FIXME support 2 digit nums
+                            UNREACHABLE();
+                        }
+                        printf(" %x", o);
+                        printf("\033[m");
+                    }
+                }
+            }
+        }
     }
 
     if (state->current_state == TILE_EDIT || (state->current_state != NORMAL)) {
@@ -4416,6 +4508,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     if (state->current_state == GOTO_SWITCH) {
         GOTO(0, bottom);
         printf("\nEnter switch id (in hex) or q to go to main view");
+    }
+
+    if (state->current_state == GOTO_OBJECT) {
+        GOTO(0, bottom);
+        printf("\nEnter object id (in hex) or q to go to main view");
     }
 
     if (state->current_state == TOGGLE_DISPLAY) {
