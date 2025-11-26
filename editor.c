@@ -3564,8 +3564,8 @@ help_keys help[][100] = {
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
         {"y", "TODO copy thing"},
-        {"+", "TODO increase thing id (shuffles up)"},
-        {"-", "TODO decrease thing id (shuffles down)"},
+        {"+", "increase id of thing under cursor"},
+        {"-", "decrease id of thing under cursor"},
         {"p", "play (runs play.sh)"},
         {"q", "quit"},
         {"Ctrl-?", "toggle help"},
@@ -4736,32 +4736,43 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         GOTO(0, bottom); bottom ++;
     (void)chunk_switch_underneath;
     (void)chunk_underneath;
-        if (state->current_state != GOTO_SWITCH && switch_underneath != NULL) {
+        struct SwitchObject *switcz = switch_underneath;
+        if (!switcz && chunk_underneath) switcz = chunk_switch_underneath;
+        if (state->current_state != GOTO_SWITCH && switcz != NULL) {
 #define BOOL_S(b) ((b) ? "true" : "false")
-            assert(switch_underneath->chunks.length >= 1);
-            struct SwitchChunk *preamble = switch_underneath->chunks.data;
+            assert(switcz->chunks.length >= 1);
+            struct SwitchChunk *preamble = switcz->chunks.data;
             if (state->current_state == EDIT_SWITCHDETAILS) {
-                printf("switch ");PRINTF_DATA((uint16_t)(switch_underneath - room.switches));printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
+                printf("switch ");
+                if (switcz == switch_underneath) printf("\033[4;1m");
+                PRINTF_DATA((uint16_t)(switcz - room.switches));
+                if (switcz == switch_underneath) printf("\033[m");
+                printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
                         preamble->x, preamble->y,
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
             } else {
-                printf("switch ");PRINTF_DATA((uint16_t)(switch_underneath - room.switches));printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                printf("switch ");
+                if (state->current_state == TILE_EDIT && switcz == switch_underneath) printf("\033[4;1m");
+                PRINTF_DATA((uint16_t)(switcz - room.switches));
+                if (state->current_state == TILE_EDIT && switcz == switch_underneath) printf("\033[m");
+                printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
                         preamble->x, preamble->y,
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
             }
             bottom ++;
-            if (switch_underneath->chunks.length > 1) {
+            if (switcz->chunks.length > 1) {
                 if (state->current_state == EDIT_SWITCHDETAILS) {
                     printf("  \033[1;4mc\033[mhunks:\n");
                 } else {
                     printf("  chunks:\n");
                 }
                 bottom ++;
-                for (size_t i = 1; i < switch_underneath->chunks.length; i ++) {
+                for (size_t i = 1; i < switcz->chunks.length; i ++) {
                     printf("    ");
-                    if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK || state->current_chunk == i) {
+                    if ((state->current_state != EDIT_SWITCHDETAILS_SELECT_CHUNK && switcz == chunk_switch_underneath && (chunk_underneath - switcz->chunks.data) == i) ||
+                            (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK || state->current_chunk == i)) {
                         printf("\033[1;4m(");
                         PRINTF_DATA((uint16_t)i);
                         printf(")\033[m ");
@@ -4775,7 +4786,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     } else {
                         printf("type ");
                     }
-                    struct SwitchChunk *chunk = switch_underneath->chunks.data + i;
+                    struct SwitchChunk *chunk = switcz->chunks.data + i;
                     switch (chunk->type) {
                         case PREAMBLE: UNREACHABLE();
                         case TOGGLE_BLOCK: {
@@ -4999,7 +5010,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                         default: UNREACHABLE();
                     }
-                    if (i < switch_underneath->chunks.length - 1) {
+                    if (i < switcz->chunks.length - 1) {
                         printf("\n");
                         bottom ++;
                     }
