@@ -1735,6 +1735,38 @@ void process_input() {
                         }
                     } else {
                         switch (buf[i]) {
+                            case '+':
+                            {
+                                if (state->current_switch) {
+                                    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                    size_t sw_i = state->current_switch - 1;
+                                    struct SwitchObject sw = room->switches[sw_i];
+                                    if (sw_i < (unsigned)room->num_switches - 1) {
+                                        room->switches[sw_i] = room->switches[sw_i+1];
+                                        room->switches[sw_i+1] = sw;
+                                        state->current_switch ++;
+                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                        assert(writeRooms(&state->rooms));
+                                    }
+                                }
+                            }; break;
+
+                            case '-':
+                            {
+                                if (state->current_switch) {
+                                    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                    size_t sw_i = state->current_switch - 1;
+                                    struct SwitchObject sw = room->switches[sw_i];
+                                    if (sw_i) {
+                                        room->switches[sw_i] = room->switches[sw_i-1];
+                                        room->switches[sw_i-1] = sw;
+                                        state->current_switch --;
+                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                        assert(writeRooms(&state->rooms));
+                                    }
+                                }
+                            }; break;
+
                             case 'h':
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
@@ -2105,6 +2137,30 @@ void process_input() {
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
+                    } else if (buf[i] == '+') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            if (state->current_chunk < sw->chunks.length - 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
+                                sw->chunks.data[state->current_chunk+1] = ch;
+                                state->current_chunk ++;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
+                    } else if (buf[i] == '-') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            if (state->current_chunk > 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
+                                sw->chunks.data[state->current_chunk-1] = ch;
+                                state->current_chunk --;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
                     }
                     i ++;
                 }; break;
@@ -2439,6 +2495,30 @@ void process_input() {
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
+                    } else if (buf[i] == '+') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            if (state->current_chunk < sw->chunks.length - 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
+                                sw->chunks.data[state->current_chunk+1] = ch;
+                                state->current_chunk ++;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
+                    } else if (buf[i] == '-') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
+                            if (state->current_chunk > 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
+                                sw->chunks.data[state->current_chunk-1] = ch;
+                                state->current_chunk --;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
                     }
                     i ++;
                 }; break;
@@ -2687,6 +2767,30 @@ void process_input() {
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
+                    } else if (buf[i] == '+') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            if (state->current_chunk < sw->chunks.length - 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
+                                sw->chunks.data[state->current_chunk+1] = ch;
+                                state->current_chunk ++;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
+                    } else if (buf[i] == '-') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
+                            if (state->current_chunk > 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
+                                sw->chunks.data[state->current_chunk-1] = ch;
+                                state->current_chunk --;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
                     }
                     i ++;
                 }; break;
@@ -2831,6 +2935,30 @@ void process_input() {
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
+                    } else if (buf[i] == '+') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            if (state->current_chunk < sw->chunks.length - 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
+                                sw->chunks.data[state->current_chunk+1] = ch;
+                                state->current_chunk ++;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
+                    } else if (buf[i] == '-') {
+                        if (state->current_switch) {
+                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            if (state->current_chunk > 1) {
+                                sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
+                                sw->chunks.data[state->current_chunk-1] = ch;
+                                state->current_chunk --;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                            }
+                        }
                     }
                     i ++;
                 }; break;
@@ -3691,8 +3819,8 @@ help_keys help[][100] = {
         {"Down/j", "set switch side to bottom"},
         {"Up/k", "set switch side to top"},
         {"Right/l", "set switch side to right"},
-        {"+", "TODO increase switch id (shuffles up)"},
-        {"-", "TODO decrease switch id (shuffles down)"},
+        {"+", "increase switch id (shuffles up)"},
+        {"-", "decrease switch id (shuffles down)"},
         {"c[n]", "select chunk"},
         {"C", "create new chunk"},
         {"ESC", "go back to main view"},
@@ -3718,8 +3846,8 @@ help_keys help[][100] = {
         {"DEL", "TODO delete chunk"},
         {"BACKSPACE", "TODO delete chunk"},
         {"y", "TODO copy chunk"},
-        {"+", "TODO increase chunk id (shuffles up)"},
-        {"-", "TODO decrease chunk id (shuffles down)"},
+        {"+", "increase chunk id (shuffles up)"},
+        {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change index value"},
         {"n", "cycle possible on values"},
         {"o", "cycle possible off values"},
@@ -3736,8 +3864,8 @@ help_keys help[][100] = {
         {"DEL", "remove partial entry or TODO delete chunk"},
         {"BACKSPACE", "remove partial entry or TODO delete chunk"},
         {"y", "TODO copy chunk"},
-        {"+", "TODO increase chunk id (shuffles up)"},
-        {"-", "TODO decrease chunk id (shuffles down)"},
+        {"+", "increase chunk id (shuffles up)"},
+        {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
         {"Left/h", "Move block left"},
         {"Down/j", "Move block down"},
@@ -3759,8 +3887,8 @@ help_keys help[][100] = {
         {"DEL", "remove partial entry or TODO delete chunk"},
         {"BACKSPACE", "remove partial entry or TODO delete chunk"},
         {"y", "TODO copy chunk"},
-        {"+", "TODO increase chunk id (shuffles up)"},
-        {"-", "TODO decrease chunk id (shuffles down)"},
+        {"+", "increase chunk id (shuffles up)"},
+        {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
         {"Space", "cycle through memory fields"},
         {"o", "toggle between editing on and off value"},
@@ -3779,8 +3907,8 @@ help_keys help[][100] = {
         {"DEL", "remove partial entry or TODO delete chunk"},
         {"BACKSPACE", "remove partial entry or TODO delete chunk"},
         {"y", "TODO copy chunk"},
-        {"+", "TODO increase chunk id (shuffles up)"},
-        {"-", "TODO decrease chunk id (shuffles down)"},
+        {"+", "increase chunk id (shuffles up)"},
+        {"-", "decrease chunk id (shuffles down)"},
         {"i", "cycle through possible index values"},
         {"s", "cycle through possible test values"},
         {" TODO dir keys ?", "change value"},
@@ -4771,7 +4899,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 bottom ++;
                 for (size_t i = 1; i < switcz->chunks.length; i ++) {
                     printf("    ");
-                    if ((state->current_state != EDIT_SWITCHDETAILS_SELECT_CHUNK && switcz == chunk_switch_underneath && (chunk_underneath - switcz->chunks.data) == i) ||
+                    if ((state->current_state != EDIT_SWITCHDETAILS_SELECT_CHUNK && switcz == chunk_switch_underneath && (size_t)(chunk_underneath - switcz->chunks.data) == i) ||
                             (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK || state->current_chunk == i)) {
                         printf("\033[1;4m(");
                         PRINTF_DATA((uint16_t)i);
