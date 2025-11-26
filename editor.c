@@ -2177,14 +2177,14 @@ void process_input() {
                         }
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
-                    } else if (buf[i] == '+') {
+                    } else if (buf[i] == '^') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                         struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                         assert(chunk->type == TOGGLE_BLOCK);
                         if (chunk->size < 8) chunk->size ++;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
-                    } else if (buf[i] == '-') {
+                    } else if (buf[i] == 'V') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                         struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                         assert(chunk->type == TOGGLE_BLOCK);
@@ -2428,14 +2428,14 @@ void process_input() {
                         chunk->dir = (chunk->dir + 1) % NUM_DIRECTIONS;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
-                    } else if (buf[i] == '+') {
+                    } else if (buf[i] == '^') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                         struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                         assert(chunk->type == TOGGLE_BLOCK);
                         if (chunk->size < 8) chunk->size ++;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
-                    } else if (buf[i] == '-') {
+                    } else if (buf[i] == 'v') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                         struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                         assert(chunk->type == TOGGLE_BLOCK);
@@ -2863,7 +2863,96 @@ void process_input() {
                             }
                         }
                     } else if (buf[i] == 0x7f) {
-                        state->partial_byte = 0;
+                        if (state->partial_byte) {
+                            state->partial_byte = 0;
+                        } else {
+                            // FIXME find object or switch underneath
+                            struct RoomObject *object_underneath = NULL;
+                            struct SwitchObject *switch_underneath = NULL;
+                            struct SwitchChunk *chunk_underneath = NULL;
+                            struct SwitchObject *chunk_switch_underneath = NULL;
+
+                            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                            int x = state->cursors[state->current_level].x;
+                            int y = state->cursors[state->current_level].y;
+                            int i;
+                            for (i = 0; i < room->num_objects; i ++) {
+                                struct RoomObject *object = room->objects + i;
+                                if (object->type == BLOCK &&
+                                        x >= object->x && x < object->x + object->block.width &&
+                                        y >= object->y && y < object->y + object->block.height) {
+                                    object_underneath = object;
+                                    break;
+                                } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                                    object_underneath = object;
+                                    break;
+                                }
+                            }
+                            int obj_i = i;
+                            for (i = 0; i < room->num_switches; i ++) {
+                                struct SwitchObject *switcch = room->switches + i;
+                                if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                                        x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                                    switch_underneath = switcch;
+                                    break;
+                                }
+                            }
+                            int sw_i = i;
+                            int c;
+                            for (i = 0; i < room->num_switches; i ++) {
+                                struct SwitchObject *switcch = room->switches + i;
+                                for (c = 1; c < (signed) switcch->chunks.length; c ++) {
+                                    struct SwitchChunk *chunk = switcch->chunks.data + c;
+                                    if (chunk->type == TOGGLE_BLOCK) {
+                                        if (chunk->dir == HORIZONTAL) {
+                                            if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                                                chunk_switch_underneath = switcch;
+                                                chunk_underneath = chunk;
+                                                break;
+                                            }
+                                        } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                                            chunk_switch_underneath = switcch;
+                                            chunk_underneath = chunk;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (chunk_underneath) break;
+                            }
+
+                            if (object_underneath) {
+                                while (obj_i < room->num_objects - 1) {
+                                    if (room->objects[obj_i].tiles) {
+                                        free(room->objects[obj_i].tiles);
+                                    }
+                                    room->objects[obj_i] = room->objects[obj_i+1];
+                                    obj_i++;
+                                }
+                                if (room->objects[obj_i].tiles) {
+                                    free(room->objects[obj_i].tiles);
+                                }
+                                memset(room->objects + obj_i, 0, sizeof(struct RoomObject));
+                                room->num_objects --;
+                            } else if (switch_underneath) {
+                                while (sw_i < room->num_switches - 1) {
+                                    room->switches[sw_i] = room->switches[sw_i+1];
+                                    sw_i++;
+                                }
+                                memset(room->switches + sw_i, 0, sizeof(struct SwitchObject));
+                                room->num_switches --;
+                            } else if (chunk_underneath) {
+                                while (c < (signed) chunk_switch_underneath->chunks.length - 1) {
+                                    chunk_switch_underneath->chunks.data[c] = chunk_switch_underneath->chunks.data[c+1];
+                                    c++;
+                                }
+                                memset(chunk_switch_underneath->chunks.data + c, 0, sizeof(struct SwitchChunk));
+                                chunk_switch_underneath->chunks.length --;
+                            } else {
+                                room->tiles[TILE_IDX(x, y)] = 0;
+                            }
+                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                            assert(writeRooms(&state->rooms));
+                        }
                     } else if (iscntrl(buf[i])) {
                         switch (buf[i] + 'A' - 1) {
                             case 'R':
@@ -3100,7 +3189,96 @@ void process_input() {
                                                 i += 2;
                                                 while (i < n && (isdigit(buf[i]) || buf[i] == ';')) i ++;
                                                 if (buf[i] == '~') {
-                                                    state->partial_byte = 0;
+                                                    if (state->partial_byte) {
+                                                        state->partial_byte = 0;
+                                                    } else {
+                                                        // FIXME find object or switch underneath
+                                                        struct RoomObject *object_underneath = NULL;
+                                                        struct SwitchObject *switch_underneath = NULL;
+                                                        struct SwitchChunk *chunk_underneath = NULL;
+                                                        struct SwitchObject *chunk_switch_underneath = NULL;
+
+                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                        int x = state->cursors[state->current_level].x;
+                                                        int y = state->cursors[state->current_level].y;
+                                                        int i;
+                                                        for (i = 0; i < room->num_objects; i ++) {
+                                                            struct RoomObject *object = room->objects + i;
+                                                            if (object->type == BLOCK &&
+                                                                    x >= object->x && x < object->x + object->block.width &&
+                                                                    y >= object->y && y < object->y + object->block.height) {
+                                                                object_underneath = object;
+                                                                break;
+                                                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                                                                object_underneath = object;
+                                                                break;
+                                                            }
+                                                        }
+                                                        int obj_i = i;
+                                                        for (i = 0; i < room->num_switches; i ++) {
+                                                            struct SwitchObject *switcch = room->switches + i;
+                                                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                                                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                                                                switch_underneath = switcch;
+                                                                break;
+                                                            }
+                                                        }
+                                                        int sw_i = i;
+                                                        int c;
+                                                        for (i = 0; i < room->num_switches; i ++) {
+                                                            struct SwitchObject *switcch = room->switches + i;
+                                                            for (c = 1; c < (signed) switcch->chunks.length; c ++) {
+                                                                struct SwitchChunk *chunk = switcch->chunks.data + c;
+                                                                if (chunk->type == TOGGLE_BLOCK) {
+                                                                    if (chunk->dir == HORIZONTAL) {
+                                                                        if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                                                                            chunk_switch_underneath = switcch;
+                                                                            chunk_underneath = chunk;
+                                                                            break;
+                                                                        }
+                                                                    } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                                                                        chunk_switch_underneath = switcch;
+                                                                        chunk_underneath = chunk;
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                            if (chunk_underneath) break;
+                                                        }
+
+                                                        if (object_underneath) {
+                                                            while (obj_i < room->num_objects - 1) {
+                                                                if (room->objects[obj_i].tiles) {
+                                                                    free(room->objects[obj_i].tiles);
+                                                                }
+                                                                room->objects[obj_i] = room->objects[obj_i+1];
+                                                                obj_i++;
+                                                            }
+                                                            if (room->objects[obj_i].tiles) {
+                                                                free(room->objects[obj_i].tiles);
+                                                            }
+                                                            memset(room->objects + obj_i, 0, sizeof(struct RoomObject));
+                                                            room->num_objects --;
+                                                        } else if (switch_underneath) {
+                                                            while (sw_i < room->num_switches - 1) {
+                                                                room->switches[sw_i] = room->switches[sw_i+1];
+                                                                sw_i++;
+                                                            }
+                                                            memset(room->switches + sw_i, 0, sizeof(struct SwitchObject));
+                                                            room->num_switches --;
+                                                        } else if (chunk_underneath) {
+                                                            while (c < (signed) chunk_switch_underneath->chunks.length - 1) {
+                                                                chunk_switch_underneath->chunks.data[c] = chunk_switch_underneath->chunks.data[c+1];
+                                                                c++;
+                                                            }
+                                                            memset(chunk_switch_underneath->chunks.data + c, 0, sizeof(struct SwitchChunk));
+                                                            chunk_switch_underneath->chunks.length --;
+                                                        } else {
+                                                            room->tiles[TILE_IDX(x, y)] = 0;
+                                                        }
+                                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                                        assert(writeRooms(&state->rooms));
+                                                    }
                                                 }
                                                 i ++;
                                             } else {
@@ -3179,9 +3357,10 @@ help_keys help[][100] = {
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"Ctrl-s[eorcs]", "create/edit switch"},
         {"s[n]", "goto switch"},
-        {"x", "TODO delete object"},
-        {"-", "TODO delete object"},
-        {"Delete", "TODO delete object"},
+        {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
+        {"y", "TODO copy thing"},
+        {"+", "TODO increase thing id (shuffles up)"},
+        {"-", "TODO decrease thing id (shuffles down)"},
         {"p", "play (runs play.sh)"},
         {"q", "quit"},
         {"Ctrl-?", "toggle help"},
@@ -3298,9 +3477,13 @@ help_keys help[][100] = {
         {"Down/j", "set switch side to bottom"},
         {"Up/k", "set switch side to top"},
         {"Right/l", "set switch side to right"},
+        {"+", "TODO increase switch id (shuffles up)"},
+        {"-", "TODO decrease switch id (shuffles down)"},
         {"c[n]", "select chunk"},
         {"C", "create new chunk"},
         {"ESC", "go back to main view"},
+        {"DEL", "TODO delete switch"},
+        {"BACKSPACE", "TODO delete switch"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -3318,6 +3501,11 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS]={
         {"t", "change chunk type"},
+        {"DEL", "TODO delete chunk"},
+        {"BACKSPACE", "TODO delete chunk"},
+        {"y", "TODO copy chunk"},
+        {"+", "TODO increase chunk id (shuffles up)"},
+        {"-", "TODO decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change index value"},
         {"n", "cycle possible on values"},
         {"o", "cycle possible off values"},
@@ -3331,13 +3519,18 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS]={
         {"t", "change chunk type"},
+        {"DEL", "remove partial entry or TODO delete chunk"},
+        {"BACKSPACE", "remove partial entry or TODO delete chunk"},
+        {"y", "TODO copy chunk"},
+        {"+", "TODO increase chunk id (shuffles up)"},
+        {"-", "TODO decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
         {"Left/h", "Move block left"},
         {"Down/j", "Move block down"},
         {"Up/k", "Move block up"},
         {"Right/l", "Move block right"},
-        {"+", "increase block size (width/height)"},
-        {"-", "decrease block size (width/height)"},
+        {"^", "increase block size (width/height)"},
+        {"v", "decrease block size (width/height)"},
         {"Space", "toggle vertical/horizontal"},
         {"o", "toggle between editing on and off value"},
         {"ESC", "go back to main view"},
@@ -3349,11 +3542,16 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS]={
         {"t", "change chunk type"},
+        {"DEL", "remove partial entry or TODO delete chunk"},
+        {"BACKSPACE", "remove partial entry or TODO delete chunk"},
+        {"y", "TODO copy chunk"},
+        {"+", "TODO increase chunk id (shuffles up)"},
+        {"-", "TODO decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
         {"Space", "cycle through memory fields"},
         {"o", "toggle between editing on and off value"},
-        {"+", "increase block size (advanced)"},
-        {"-", "decrease block size (advanced)"},
+        {"^", "increase block size (advanced)"},
+        {"v", "decrease block size (advanced)"},
         {"r", "toggle direction (advanced)"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
@@ -3364,6 +3562,11 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS]={
         {"t", "change chunk type"},
+        {"DEL", "remove partial entry or TODO delete chunk"},
+        {"BACKSPACE", "remove partial entry or TODO delete chunk"},
+        {"y", "TODO copy chunk"},
+        {"+", "TODO increase chunk id (shuffles up)"},
+        {"-", "TODO decrease chunk id (shuffles down)"},
         {"i", "cycle through possible index values"},
         {"s", "cycle through possible test values"},
         {" TODO dir keys ?", "change value"},
@@ -4292,7 +4495,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             assert(switch_underneath->chunks.length >= 1);
             struct SwitchChunk *preamble = switch_underneath->chunks.data;
             if (state->current_state == EDIT_SWITCHDETAILS) {
-                printf("switch: (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
+                printf("switch ");PRINTF_DATA((uint16_t)(switch_underneath - room.switches));printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
                         preamble->x, preamble->y,
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
