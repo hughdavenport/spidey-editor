@@ -1933,6 +1933,10 @@ void process_input() {
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
                                 struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                if (sw->chunks.length == 14) {
+                                    i++;
+                                    break;
+                                }
                                 state->current_chunk = sw->chunks.length;
                                 ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
                                 state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
@@ -1978,9 +1982,11 @@ void process_input() {
                 case EDIT_SWITCHDETAILS_SELECT_CHUNK:
                 {
                     if (isxdigit(buf[i])) {
+                        fprintf(stderr, "here %c\n", buf[i]);
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                         if (sw->chunks.length > 15) {
-                            // FIXME support 2 digit nums
+                            // FIXME support 2 digit nums, remove define above when done (used in staticdefines)
+                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: support two digit numbers", __FILE__, __LINE__);
                             UNREACHABLE();
                         }
                         size_t id;
@@ -2037,6 +2043,18 @@ void process_input() {
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
+                    } else if (buf[i] == '+') {
+                        // create new one
+                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                        struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                        if (sw->chunks.length == 14) {
+                            i++;
+                            break;
+                        }
+                        ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
+                        state->switch_on = false;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
                     }
                     i ++;
                 }; break;
@@ -2324,7 +2342,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                if (state->current_chunk > 2) state->current_chunk --;
+                                state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -2791,7 +2809,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                if (state->current_chunk > 2) state->current_chunk --;
+                                state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -3172,7 +3190,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                if (state->current_chunk > 2) state->current_chunk --;
+                                state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -3449,7 +3467,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                if (state->current_chunk > 2) state->current_chunk --;
+                                state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -4352,7 +4370,7 @@ help_keys help[][100] = {
         {"0-9a-fA-F", "chunk number"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
-        {"+", "TODO add new chunk"},
+        {"+", "add new chunk"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
         {0},
