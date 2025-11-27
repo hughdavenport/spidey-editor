@@ -1933,7 +1933,7 @@ void process_input() {
                             {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
                                 struct SwitchObject *sw = room->switches + state->current_switch - 1;
-                                if (sw->chunks.length == 14) {
+                                if (sw->chunks.length == 16) {
                                     i++;
                                     break;
                                 }
@@ -1982,9 +1982,8 @@ void process_input() {
                 case EDIT_SWITCHDETAILS_SELECT_CHUNK:
                 {
                     if (isxdigit(buf[i])) {
-                        fprintf(stderr, "here %c\n", buf[i]);
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                        if (sw->chunks.length > 15) {
+                        if (sw->chunks.length > 16) {
                             // FIXME support 2 digit nums, remove define above when done (used in staticdefines)
                             fprintf(stderr, "%s:%d: UNIMPLEMENTED: support two digit numbers", __FILE__, __LINE__);
                             UNREACHABLE();
@@ -2047,7 +2046,7 @@ void process_input() {
                         // create new one
                         struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
                         struct SwitchObject *sw = room->switches + state->current_switch - 1;
-                        if (sw->chunks.length == 14) {
+                        if (sw->chunks.length == 16) {
                             i++;
                             break;
                         }
