@@ -2095,7 +2095,56 @@ void process_input() {
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
                     } else if (buf[i] == 0x7f) {
-                        state->partial_byte = 0;
+                        if (state->partial_byte) {
+                            state->partial_byte = 0;
+                        } else {
+                            if (!state->current_switch) UNREACHABLE();
+                            if (!state->current_chunk) UNREACHABLE();
+                            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                            struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                            size_t ch_i = state->current_chunk;
+                            if (sw->chunks.length <= 1) UNREACHABLE();
+                            while (ch_i < sw->chunks.length - 1) {
+                                sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                ch_i++;
+                            }
+                            memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                            sw->chunks.length --;
+                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                            assert(writeRooms(&state->rooms));
+                            state->current_chunk --;
+                            switch (sw->chunks.length) {
+                                case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                case 2:
+                                {
+                                    switch (sw->chunks.data[1].type) {
+                                        case PREAMBLE: UNREACHABLE();
+                                        case TOGGLE_BIT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_OBJECT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_BLOCK:
+                                        {
+                                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                            size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                            if (point >= overflow) {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                            } else {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                            }
+                                        }; break;
+
+                                        default: UNREACHABLE();
+                                    }
+                                }; break;
+
+                                default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }
+                        }
                     } else if (buf[i] == ESCAPE) {
                         if (i + 1 < n && buf[i+1] == '[' && i + 2 < n) {
                             // CSI sequence
@@ -2111,7 +2160,60 @@ void process_input() {
                                         case '~':
                                         {
                                             switch (arg) {
-                                                case 3: state->partial_byte = 0; break;
+                                                case 3:
+                                                {
+                                                    if (state->partial_byte) {
+                                                        state->partial_byte = 0;
+                                                    } else {
+                                                        if (!state->current_switch) UNREACHABLE();
+                                                        if (!state->current_chunk) UNREACHABLE();
+                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                        struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                                        size_t ch_i = state->current_chunk;
+                                                        if (sw->chunks.length <= 1) UNREACHABLE();
+                                                        while (ch_i < sw->chunks.length - 1) {
+                                                            sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                                            ch_i++;
+                                                        }
+                                                        memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                                                        sw->chunks.length --;
+                                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                                        assert(writeRooms(&state->rooms));
+                                                        state->current_chunk --;
+                                                        switch (sw->chunks.length) {
+                                                            case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                                            case 2:
+                                                                    {
+                                                                        switch (sw->chunks.data[1].type) {
+                                                                            case PREAMBLE: UNREACHABLE();
+                                                                            case TOGGLE_BIT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_OBJECT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_BLOCK:
+                                                                                           {
+                                                                                               size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                                                                               size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                                                                               if (point >= overflow) {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                                                                               } else {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                                                                               }
+                                                                                           }; break;
+
+                                                                            default: UNREACHABLE();
+                                                                        }
+                                                                    }; break;
+
+                                                            default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                                        }
+                                                    }
+                                                }; break;
+
                                                 default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
@@ -2376,7 +2478,56 @@ void process_input() {
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
                     } else if (buf[i] == 0x7f) {
-                        state->partial_byte = 0;
+                        if (state->partial_byte) {
+                            state->partial_byte = 0;
+                        } else {
+                            if (!state->current_switch) UNREACHABLE();
+                            if (!state->current_chunk) UNREACHABLE();
+                            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                            struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                            size_t ch_i = state->current_chunk;
+                            if (sw->chunks.length <= 1) UNREACHABLE();
+                            while (ch_i < sw->chunks.length - 1) {
+                                sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                ch_i++;
+                            }
+                            memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                            sw->chunks.length --;
+                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                            assert(writeRooms(&state->rooms));
+                            state->current_chunk --;
+                            switch (sw->chunks.length) {
+                                case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                case 2:
+                                {
+                                    switch (sw->chunks.data[1].type) {
+                                        case PREAMBLE: UNREACHABLE();
+                                        case TOGGLE_BIT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_OBJECT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_BLOCK:
+                                        {
+                                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                            size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                            if (point >= overflow) {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                            } else {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                            }
+                                        }; break;
+
+                                        default: UNREACHABLE();
+                                    }
+                                }; break;
+
+                                default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }
+                        }
                     } else if (buf[i] == ESCAPE) {
                         if (i + 1 < n && buf[i+1] == '[' && i + 2 < n) {
                             // CSI sequence
@@ -2392,7 +2543,60 @@ void process_input() {
                                         case '~':
                                         {
                                             switch (arg) {
-                                                case 3: state->partial_byte = 0; break;
+                                                case 3:
+                                                {
+                                                    if (state->partial_byte) {
+                                                        state->partial_byte = 0;
+                                                    } else {
+                                                        if (!state->current_switch) UNREACHABLE();
+                                                        if (!state->current_chunk) UNREACHABLE();
+                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                        struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                                        size_t ch_i = state->current_chunk;
+                                                        if (sw->chunks.length <= 1) UNREACHABLE();
+                                                        while (ch_i < sw->chunks.length - 1) {
+                                                            sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                                            ch_i++;
+                                                        }
+                                                        memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                                                        sw->chunks.length --;
+                                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                                        assert(writeRooms(&state->rooms));
+                                                        state->current_chunk --;
+                                                        switch (sw->chunks.length) {
+                                                            case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                                            case 2:
+                                                                    {
+                                                                        switch (sw->chunks.data[1].type) {
+                                                                            case PREAMBLE: UNREACHABLE();
+                                                                            case TOGGLE_BIT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_OBJECT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_BLOCK:
+                                                                                           {
+                                                                                               size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                                                                               size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                                                                               if (point >= overflow) {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                                                                               } else {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                                                                               }
+                                                                                           }; break;
+
+                                                                            default: UNREACHABLE();
+                                                                        }
+                                                                    }; break;
+
+                                                            default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                                        }
+                                                    }
+                                                }; break;
+
                                                 default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
@@ -2689,7 +2893,56 @@ void process_input() {
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
                     } else if (buf[i] == 0x7f) {
-                        state->partial_byte = 0;
+                        if (state->partial_byte) {
+                            state->partial_byte = 0;
+                        } else {
+                            if (!state->current_switch) UNREACHABLE();
+                            if (!state->current_chunk) UNREACHABLE();
+                            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                            struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                            size_t ch_i = state->current_chunk;
+                            if (sw->chunks.length <= 1) UNREACHABLE();
+                            while (ch_i < sw->chunks.length - 1) {
+                                sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                ch_i++;
+                            }
+                            memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                            sw->chunks.length --;
+                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                            assert(writeRooms(&state->rooms));
+                            state->current_chunk --;
+                            switch (sw->chunks.length) {
+                                case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                case 2:
+                                {
+                                    switch (sw->chunks.data[1].type) {
+                                        case PREAMBLE: UNREACHABLE();
+                                        case TOGGLE_BIT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_OBJECT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_BLOCK:
+                                        {
+                                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                            size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                            if (point >= overflow) {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                            } else {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                            }
+                                        }; break;
+
+                                        default: UNREACHABLE();
+                                    }
+                                }; break;
+
+                                default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }
+                        }
                     } else if (buf[i] == ESCAPE) {
                         if (i + 1 < n && buf[i+1] == '[' && i + 2 < n) {
                             // CSI sequence
@@ -2705,7 +2958,60 @@ void process_input() {
                                         case '~':
                                         {
                                             switch (arg) {
-                                                case 3: state->partial_byte = 0; break;
+                                                case 3:
+                                                {
+                                                    if (state->partial_byte) {
+                                                        state->partial_byte = 0;
+                                                    } else {
+                                                        if (!state->current_switch) UNREACHABLE();
+                                                        if (!state->current_chunk) UNREACHABLE();
+                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                        struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                                        size_t ch_i = state->current_chunk;
+                                                        if (sw->chunks.length <= 1) UNREACHABLE();
+                                                        while (ch_i < sw->chunks.length - 1) {
+                                                            sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                                            ch_i++;
+                                                        }
+                                                        memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                                                        sw->chunks.length --;
+                                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                                        assert(writeRooms(&state->rooms));
+                                                        state->current_chunk --;
+                                                        switch (sw->chunks.length) {
+                                                            case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                                            case 2:
+                                                                    {
+                                                                        switch (sw->chunks.data[1].type) {
+                                                                            case PREAMBLE: UNREACHABLE();
+                                                                            case TOGGLE_BIT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_OBJECT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_BLOCK:
+                                                                                           {
+                                                                                               size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                                                                               size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                                                                               if (point >= overflow) {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                                                                               } else {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                                                                               }
+                                                                                           }; break;
+
+                                                                            default: UNREACHABLE();
+                                                                        }
+                                                                    }; break;
+
+                                                            default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                                        }
+                                                    }
+                                                }; break;
+
                                                 default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
@@ -2967,7 +3273,60 @@ void process_input() {
                                         case '~':
                                         {
                                             switch (arg) {
-                                                case 3: state->partial_byte = 0; break;
+                                                case 3:
+                                                {
+                                                    if (state->partial_byte) {
+                                                        state->partial_byte = 0;
+                                                    } else {
+                                                        if (!state->current_switch) UNREACHABLE();
+                                                        if (!state->current_chunk) UNREACHABLE();
+                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                        struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                                        size_t ch_i = state->current_chunk;
+                                                        if (sw->chunks.length <= 1) UNREACHABLE();
+                                                        while (ch_i < sw->chunks.length - 1) {
+                                                            sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                                            ch_i++;
+                                                        }
+                                                        memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                                                        sw->chunks.length --;
+                                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                                        assert(writeRooms(&state->rooms));
+                                                        state->current_chunk --;
+                                                        switch (sw->chunks.length) {
+                                                            case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                                            case 2:
+                                                                    {
+                                                                        switch (sw->chunks.data[1].type) {
+                                                                            case PREAMBLE: UNREACHABLE();
+                                                                            case TOGGLE_BIT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_OBJECT:
+                                                                                           state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                                                                           break;
+
+                                                                            case TOGGLE_BLOCK:
+                                                                                           {
+                                                                                               size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                                                                               size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                                                                               if (point >= overflow) {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                                                                               } else {
+                                                                                                   state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                                                                               }
+                                                                                           }; break;
+
+                                                                            default: UNREACHABLE();
+                                                                        }
+                                                                    }; break;
+
+                                                            default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                                        }
+                                                    }
+                                                }; break;
+
                                                 default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
@@ -3843,7 +4202,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"Ctrl-s[eorcs]", "create/edit switch"},
-        {"Ctrl-o", "create object from tile"},
+        {"Ctrl-o", "TODO create object from tile"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
