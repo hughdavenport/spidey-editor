@@ -794,7 +794,7 @@ void process_input() {
                                                                 }
                                                                 break;
 
-                                                            default: UNREACHABLE();
+                                                            default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                                         }
                                                     }; break;
 
@@ -858,8 +858,7 @@ void process_input() {
                                                         }
                                                     }; break;
 
-                                                    default:
-                                                        fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                                    default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                                 }
                                                 break;
                                             }
@@ -990,6 +989,8 @@ void process_input() {
                                     } else {
                                         if (arg == 3 && buf[i] == '~') {
                                             state->partial_byte = 0;
+                                        } else {
+                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                         }
                                         break;
                                     }
@@ -1137,8 +1138,7 @@ void process_input() {
                                                         }
                                                     }; break;
 
-                                                    default:
-                                                        fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
+                                                    default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                                 }
                                                 i ++;
                                                 break;
@@ -1427,6 +1427,8 @@ void process_input() {
                                         } else {
                                             if (arg == 3 && buf[i] == '~') {
                                                 state->partial_byte = 0;
+                                            } else {
+                                                fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                             break;
                                         }
@@ -1518,22 +1520,21 @@ void process_input() {
                                         } else {
                                             switch (buf[i]) {
                                                 case '~':
-                                                    {
-                                                        switch (arg) {
-                                                            case 3:
-                                                                if (state->roomname_cursor) {
-                                                                    state->room_name[--state->roomname_cursor] = 0;
-                                                                } else {
-                                                                    state->partial_byte = 0;
-                                                                }
-                                                                break;
+                                                {
+                                                    switch (arg) {
+                                                        case 3:
+                                                            if (state->roomname_cursor) {
+                                                                state->room_name[--state->roomname_cursor] = 0;
+                                                            } else {
+                                                                state->partial_byte = 0;
+                                                            }
+                                                            break;
 
-                                                            default: UNREACHABLE();
-                                                        }
-                                                    }; break;
+                                                        default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
+                                                    }
+                                                }; break;
 
-                                                default:
-                                                    fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                                default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                             break;
                                         }
@@ -1605,7 +1606,7 @@ void process_input() {
                                                 state->partial_byte = 0;
                                             }
                                         } else {
-                                            UNREACHABLE();
+                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                         }
                                         break;
                                     }
@@ -1697,6 +1698,37 @@ void process_input() {
                                 arg = 0;
                             } else {
                                 switch (buf[i]) {
+                                    case '~':
+                                    {
+                                        switch (arg) {
+                                            case 3:
+                                            {
+                                                if (!state->current_switch) UNREACHABLE();
+                                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                size_t sw_i = state->current_switch - 1;
+                                                while (sw_i < (size_t)(room->num_switches - 1)) {
+                                                    room->switches[sw_i] = room->switches[sw_i+1];
+                                                    sw_i++;
+                                                }
+                                                memset(room->switches + sw_i, 0, sizeof(struct SwitchObject));
+                                                room->num_switches --;
+
+                                                state->current_state = state->previous_state;
+                                                state->current_switch = 0;
+                                                state->switch_on = false;
+                                                state->current_chunk = 0;
+                                                state->previous_state = NORMAL;
+                                                state->partial_byte = 0;
+                                                if (state->roomname_cursor) {
+                                                    memset(state->room_name, 0, state->roomname_cursor);
+                                                    state->roomname_cursor = 0;
+                                                }
+                                            }; break;
+
+                                            default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
+                                        }
+                                    }; break;
+
                                     case 'A':
                                     {
                                         struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
@@ -1728,6 +1760,8 @@ void process_input() {
                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                         assert(writeRooms(&state->rooms));
                                     }; break;
+
+                                    default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                 }
                                 break;
                             }
@@ -1735,6 +1769,30 @@ void process_input() {
                         }
                     } else {
                         switch (buf[i]) {
+                            case 0x7f:
+                            {
+                                if (!state->current_switch) UNREACHABLE();
+                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                size_t sw_i = state->current_switch - 1;
+                                while (sw_i < (size_t)(room->num_switches - 1)) {
+                                    room->switches[sw_i] = room->switches[sw_i+1];
+                                    sw_i++;
+                                }
+                                memset(room->switches + sw_i, 0, sizeof(struct SwitchObject));
+                                room->num_switches --;
+
+                                state->current_state = state->previous_state;
+                                state->current_switch = 0;
+                                state->switch_on = false;
+                                state->current_chunk = 0;
+                                state->previous_state = NORMAL;
+                                state->partial_byte = 0;
+                                if (state->roomname_cursor) {
+                                    memset(state->room_name, 0, state->roomname_cursor);
+                                    state->roomname_cursor = 0;
+                                }
+                            }; break;
+
                             case '+':
                             {
                                 if (state->current_switch) {
@@ -1829,10 +1887,19 @@ void process_input() {
                                 struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
                                 struct SwitchObject *sw = room->switches + state->current_switch - 1;
                                 if (sw->chunks.length == 1) {
-                                    // nop
+                                    // create new one
+                                    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                    struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                                    state->current_chunk = sw->chunks.length;
+                                    ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
+                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                    state->switch_on = false;
+                                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                    assert(writeRooms(&state->rooms));
                                 } else if (sw->chunks.length == 2) {
                                     // The first chunk is the preamble, uneditable as a chunk, only as a switch
                                     state->current_chunk = 1;
+                                    assert(sw->chunks.data[0].type == PREAMBLE);
                                     struct SwitchChunk *chunk = sw->chunks.data + 1;
                                     switch (chunk->type) {
                                         case PREAMBLE: UNREACHABLE();
@@ -2045,12 +2112,11 @@ void process_input() {
                                         {
                                             switch (arg) {
                                                 case 3: state->partial_byte = 0; break;
-                                                default: UNREACHABLE();
+                                                default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
 
-                                        default:
-                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                        default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                     }
                                     break;
                                 }
@@ -2140,7 +2206,7 @@ void process_input() {
                     } else if (buf[i] == '+') {
                         if (state->current_switch) {
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
                             if (state->current_chunk < sw->chunks.length - 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
                                 sw->chunks.data[state->current_chunk+1] = ch;
@@ -2152,7 +2218,7 @@ void process_input() {
                     } else if (buf[i] == '-') {
                         if (state->current_switch) {
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
@@ -2327,7 +2393,7 @@ void process_input() {
                                         {
                                             switch (arg) {
                                                 case 3: state->partial_byte = 0; break;
-                                                default: UNREACHABLE();
+                                                default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
 
@@ -2415,8 +2481,7 @@ void process_input() {
                                             assert(writeRooms(&state->rooms));
                                         }; break;
 
-                                        default:
-                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                        default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                     }
                                     break;
                                 }
@@ -2425,13 +2490,17 @@ void process_input() {
                         } else if (state->help) {
                             state->help = false;
                         } else {
-                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            if (sw->chunks.length <= 2) {
-                                state->current_state = EDIT_SWITCHDETAILS;
+                            if (state->partial_byte) {
+                                state->partial_byte = 0;
                             } else {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                if (sw->chunks.length <= 2) {
+                                    state->current_state = EDIT_SWITCHDETAILS;
+                                } else {
+                                    state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                }
+                                state->current_chunk = 0;
                             }
-                            state->current_chunk = 0;
                         }
                     } else if (buf[i] == 't') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2485,20 +2554,24 @@ void process_input() {
                         if (state->help) {
                             state->help = !state->help;
                         } else {
-                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            if (sw->chunks.length <= 2) {
-                                state->current_state = EDIT_SWITCHDETAILS;
+                            if (state->partial_byte) {
+                                state->partial_byte = 0;
                             } else {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                if (sw->chunks.length <= 2) {
+                                    state->current_state = EDIT_SWITCHDETAILS;
+                                } else {
+                                    state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                }
+                                state->current_chunk = 0;
                             }
-                            state->current_chunk = 0;
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
                     } else if (buf[i] == '+') {
                         if (state->current_switch) {
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
                             if (state->current_chunk < sw->chunks.length - 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
                                 sw->chunks.data[state->current_chunk+1] = ch;
@@ -2633,7 +2706,7 @@ void process_input() {
                                         {
                                             switch (arg) {
                                                 case 3: state->partial_byte = 0; break;
-                                                default: UNREACHABLE();
+                                                default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
 
@@ -2687,8 +2760,7 @@ void process_input() {
                                             assert(writeRooms(&state->rooms));
                                         }; break;
 
-                                        default:
-                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                        default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                     }
                                     break;
                                 }
@@ -2697,13 +2769,17 @@ void process_input() {
                         } else if (state->help) {
                             state->help = false;
                         } else {
-                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            if (sw->chunks.length <= 2) {
-                                state->current_state = EDIT_SWITCHDETAILS;
+                            if (state->partial_byte) {
+                                state->partial_byte = 0;
                             } else {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                if (sw->chunks.length <= 2) {
+                                    state->current_state = EDIT_SWITCHDETAILS;
+                                } else {
+                                    state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                }
+                                state->current_chunk = 0;
                             }
-                            state->current_chunk = 0;
                         }
                     } else if (buf[i] == 't') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2757,20 +2833,24 @@ void process_input() {
                         if (state->help) {
                             state->help = !state->help;
                         } else {
-                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            if (sw->chunks.length <= 2) {
-                                state->current_state = EDIT_SWITCHDETAILS;
+                            if (state->partial_byte) {
+                                state->partial_byte = 0;
                             } else {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                if (sw->chunks.length <= 2) {
+                                    state->current_state = EDIT_SWITCHDETAILS;
+                                } else {
+                                    state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                }
+                                state->current_chunk = 0;
                             }
-                            state->current_chunk = 0;
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
                     } else if (buf[i] == '+') {
                         if (state->current_switch) {
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
                             if (state->current_chunk < sw->chunks.length - 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
                                 sw->chunks.data[state->current_chunk+1] = ch;
@@ -2822,7 +2902,56 @@ void process_input() {
                             state->partial_byte = 0xFF00 | b;
                         }
                     } else if (buf[i] == 0x7f) {
-                        state->partial_byte = 0;
+                        if (state->partial_byte) {
+                            state->partial_byte = 0;
+                        } else {
+                            if (!state->current_switch) UNREACHABLE();
+                            if (!state->current_chunk) UNREACHABLE();
+                            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                            struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                            size_t ch_i = state->current_chunk;
+                            if (sw->chunks.length <= 1) UNREACHABLE();
+                            while (ch_i < sw->chunks.length - 1) {
+                                sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
+                                ch_i++;
+                            }
+                            memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
+                            sw->chunks.length --;
+                            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                            assert(writeRooms(&state->rooms));
+                            state->current_chunk --;
+                            switch (sw->chunks.length) {
+                                case 1: state->current_state = EDIT_SWITCHDETAILS; break;
+                                case 2:
+                                {
+                                    switch (sw->chunks.data[1].type) {
+                                        case PREAMBLE: UNREACHABLE();
+                                        case TOGGLE_BIT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_OBJECT:
+                                            state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+                                            break;
+
+                                        case TOGGLE_BLOCK:
+                                        {
+                                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
+                                            size_t point = sw->chunks.data[1].y * WIDTH_TILES + sw->chunks.data[1].x;
+                                            if (point >= overflow) {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+                                            } else {
+                                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+                                            }
+                                        }; break;
+
+                                        default: UNREACHABLE();
+                                    }
+                                }; break;
+
+                                default: state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                            }
+                        }
                     } else if (buf[i] == ESCAPE) {
                         if (i + 1 < n && buf[i+1] == '[' && i + 2 < n) {
                             // CSI sequence
@@ -2839,12 +2968,11 @@ void process_input() {
                                         {
                                             switch (arg) {
                                                 case 3: state->partial_byte = 0; break;
-                                                default: UNREACHABLE();
+                                                default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                             }
                                         }; break;
 
-                                        default:
-                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator ~ arg %d", __FILE__, __LINE__, arg);
+                                        default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                     }
                                     break;
                                 }
@@ -2853,13 +2981,17 @@ void process_input() {
                         } else if (state->help) {
                             state->help = false;
                         } else {
-                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            if (sw->chunks.length <= 2) {
-                                state->current_state = EDIT_SWITCHDETAILS;
+                            if (state->partial_byte) {
+                                state->partial_byte = 0;
                             } else {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                if (sw->chunks.length <= 2) {
+                                    state->current_state = EDIT_SWITCHDETAILS;
+                                } else {
+                                    state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                }
+                                state->current_chunk = 0;
                             }
-                            state->current_chunk = 0;
                         }
                     } else if (buf[i] == 't') {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2925,20 +3057,24 @@ void process_input() {
                         if (state->help) {
                             state->help = !state->help;
                         } else {
-                            struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            if (sw->chunks.length <= 2) {
-                                state->current_state = EDIT_SWITCHDETAILS;
+                            if (state->partial_byte) {
+                                state->partial_byte = 0;
                             } else {
-                                state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                                if (sw->chunks.length <= 2) {
+                                    state->current_state = EDIT_SWITCHDETAILS;
+                                } else {
+                                    state->current_state = EDIT_SWITCHDETAILS_SELECT_CHUNK;
+                                }
+                                state->current_chunk = 0;
                             }
-                            state->current_chunk = 0;
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
                     } else if (buf[i] == '+') {
                         if (state->current_switch) {
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
                             if (state->current_chunk < sw->chunks.length - 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
                                 sw->chunks.data[state->current_chunk+1] = ch;
@@ -2950,7 +3086,7 @@ void process_input() {
                     } else if (buf[i] == '-') {
                         if (state->current_switch) {
                             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
-                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];;
+                            struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
@@ -3324,7 +3460,9 @@ void process_input() {
                                     struct SwitchObject *sw = room->switches + i;
                                     ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y }));
                                 }
-                                state->current_switch = i;
+                                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                assert(writeRooms(&state->rooms));
+                                state->current_switch = i + 1;
                                 state->current_state = EDIT_SWITCHDETAILS;
                                 i ++;
                                 continue;
@@ -3519,100 +3657,117 @@ void process_input() {
                                             if (i + 2 < n) {
                                                 // CSI sequence
                                                 i += 2;
-                                                while (i < n && (isdigit(buf[i]) || buf[i] == ';')) i ++;
-                                                if (buf[i] == '~') {
-                                                    if (state->partial_byte) {
-                                                        state->partial_byte = 0;
+                                                uint8_t arg = 0;
+                                                while (i < n) {
+                                                    if (isdigit(buf[i])) {
+                                                        arg = 10 * arg + buf[i] - '0';
+                                                    } else if (buf[i] == ';') {
+                                                        arg = 0;
                                                     } else {
-                                                        // FIXME find object or switch underneath
-                                                        struct RoomObject *object_underneath = NULL;
-                                                        struct SwitchObject *switch_underneath = NULL;
-                                                        struct SwitchChunk *chunk_underneath = NULL;
-                                                        struct SwitchObject *chunk_switch_underneath = NULL;
+                                                        if (buf[i] == '~') {
+                                                            switch (arg) {
+                                                                case 3:
+                                                                {
+                                                                    if (state->partial_byte) {
+                                                                        state->partial_byte = 0;
+                                                                    } else {
+                                                                        // FIXME find object or switch underneath
+                                                                        struct RoomObject *object_underneath = NULL;
+                                                                        struct SwitchObject *switch_underneath = NULL;
+                                                                        struct SwitchChunk *chunk_underneath = NULL;
+                                                                        struct SwitchObject *chunk_switch_underneath = NULL;
 
-                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                                                        int x = state->cursors[state->current_level].x;
-                                                        int y = state->cursors[state->current_level].y;
-                                                        int i;
-                                                        for (i = 0; i < room->num_objects; i ++) {
-                                                            struct RoomObject *object = room->objects + i;
-                                                            if (object->type == BLOCK &&
-                                                                    x >= object->x && x < object->x + object->block.width &&
-                                                                    y >= object->y && y < object->y + object->block.height) {
-                                                                object_underneath = object;
-                                                                break;
-                                                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
-                                                                object_underneath = object;
-                                                                break;
-                                                            }
-                                                        }
-                                                        int obj_i = i;
-                                                        for (i = 0; i < room->num_switches; i ++) {
-                                                            struct SwitchObject *switcch = room->switches + i;
-                                                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
-                                                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
-                                                                switch_underneath = switcch;
-                                                                break;
-                                                            }
-                                                        }
-                                                        int sw_i = i;
-                                                        int c;
-                                                        for (i = 0; i < room->num_switches; i ++) {
-                                                            struct SwitchObject *switcch = room->switches + i;
-                                                            for (c = 1; c < (signed) switcch->chunks.length; c ++) {
-                                                                struct SwitchChunk *chunk = switcch->chunks.data + c;
-                                                                if (chunk->type == TOGGLE_BLOCK) {
-                                                                    if (chunk->dir == HORIZONTAL) {
-                                                                        if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                                                                            chunk_switch_underneath = switcch;
-                                                                            chunk_underneath = chunk;
-                                                                            break;
+                                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                                        int x = state->cursors[state->current_level].x;
+                                                                        int y = state->cursors[state->current_level].y;
+                                                                        int i;
+                                                                        for (i = 0; i < room->num_objects; i ++) {
+                                                                            struct RoomObject *object = room->objects + i;
+                                                                            if (object->type == BLOCK &&
+                                                                                    x >= object->x && x < object->x + object->block.width &&
+                                                                                    y >= object->y && y < object->y + object->block.height) {
+                                                                                object_underneath = object;
+                                                                                break;
+                                                                            } else if (object->type == SPRITE && x == object->x && y == object->y) {
+                                                                                object_underneath = object;
+                                                                                break;
+                                                                            }
                                                                         }
-                                                                    } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                                                                        chunk_switch_underneath = switcch;
-                                                                        chunk_underneath = chunk;
-                                                                        break;
-                                                                    }
-                                                                }
-                                                            }
-                                                            if (chunk_underneath) break;
-                                                        }
+                                                                        int obj_i = i;
+                                                                        for (i = 0; i < room->num_switches; i ++) {
+                                                                            struct SwitchObject *switcch = room->switches + i;
+                                                                            if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
+                                                                                    x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
+                                                                                switch_underneath = switcch;
+                                                                                break;
+                                                                            }
+                                                                        }
+                                                                        int sw_i = i;
+                                                                        int c;
+                                                                        for (i = 0; i < room->num_switches; i ++) {
+                                                                            struct SwitchObject *switcch = room->switches + i;
+                                                                            for (c = 1; c < (signed) switcch->chunks.length; c ++) {
+                                                                                struct SwitchChunk *chunk = switcch->chunks.data + c;
+                                                                                if (chunk->type == TOGGLE_BLOCK) {
+                                                                                    if (chunk->dir == HORIZONTAL) {
+                                                                                        if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
+                                                                                            chunk_switch_underneath = switcch;
+                                                                                            chunk_underneath = chunk;
+                                                                                            break;
+                                                                                        }
+                                                                                    } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
+                                                                                        chunk_switch_underneath = switcch;
+                                                                                        chunk_underneath = chunk;
+                                                                                        break;
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                            if (chunk_underneath) break;
+                                                                        }
 
-                                                        if (object_underneath) {
-                                                            while (obj_i < room->num_objects - 1) {
-                                                                if (room->objects[obj_i].tiles) {
-                                                                    free(room->objects[obj_i].tiles);
-                                                                }
-                                                                room->objects[obj_i] = room->objects[obj_i+1];
-                                                                obj_i++;
+                                                                        if (object_underneath) {
+                                                                            while (obj_i < room->num_objects - 1) {
+                                                                                if (room->objects[obj_i].tiles) {
+                                                                                    free(room->objects[obj_i].tiles);
+                                                                                }
+                                                                                room->objects[obj_i] = room->objects[obj_i+1];
+                                                                                obj_i++;
+                                                                            }
+                                                                            if (room->objects[obj_i].tiles) {
+                                                                                free(room->objects[obj_i].tiles);
+                                                                            }
+                                                                            memset(room->objects + obj_i, 0, sizeof(struct RoomObject));
+                                                                            room->num_objects --;
+                                                                        } else if (switch_underneath) {
+                                                                            while (sw_i < room->num_switches - 1) {
+                                                                                room->switches[sw_i] = room->switches[sw_i+1];
+                                                                                sw_i++;
+                                                                            }
+                                                                            memset(room->switches + sw_i, 0, sizeof(struct SwitchObject));
+                                                                            room->num_switches --;
+                                                                        } else if (chunk_underneath) {
+                                                                            while (c < (signed) chunk_switch_underneath->chunks.length - 1) {
+                                                                                chunk_switch_underneath->chunks.data[c] = chunk_switch_underneath->chunks.data[c+1];
+                                                                                c++;
+                                                                            }
+                                                                            memset(chunk_switch_underneath->chunks.data + c, 0, sizeof(struct SwitchChunk));
+                                                                            chunk_switch_underneath->chunks.length --;
+                                                                        } else {
+                                                                            room->tiles[TILE_IDX(x, y)] = 0;
+                                                                        }
+                                                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                                                                        assert(writeRooms(&state->rooms));
+                                                                    }
+                                                                }; break;
+
+                                                                default: fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                                             }
-                                                            if (room->objects[obj_i].tiles) {
-                                                                free(room->objects[obj_i].tiles);
-                                                            }
-                                                            memset(room->objects + obj_i, 0, sizeof(struct RoomObject));
-                                                            room->num_objects --;
-                                                        } else if (switch_underneath) {
-                                                            while (sw_i < room->num_switches - 1) {
-                                                                room->switches[sw_i] = room->switches[sw_i+1];
-                                                                sw_i++;
-                                                            }
-                                                            memset(room->switches + sw_i, 0, sizeof(struct SwitchObject));
-                                                            room->num_switches --;
-                                                        } else if (chunk_underneath) {
-                                                            while (c < (signed) chunk_switch_underneath->chunks.length - 1) {
-                                                                chunk_switch_underneath->chunks.data[c] = chunk_switch_underneath->chunks.data[c+1];
-                                                                c++;
-                                                            }
-                                                            memset(chunk_switch_underneath->chunks.data + c, 0, sizeof(struct SwitchChunk));
-                                                            chunk_switch_underneath->chunks.length --;
                                                         } else {
-                                                            room->tiles[TILE_IDX(x, y)] = 0;
+                                                            fprintf(stderr, "%s:%d: UNIMPLEMENTED: csi terminator %c arg %d", __FILE__, __LINE__, buf[i], arg);
                                                         }
-                                                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                                                        assert(writeRooms(&state->rooms));
                                                     }
+                                                    i ++;
                                                 }
-                                                i ++;
                                             } else {
                                                 UNREACHABLE();
                                             }
@@ -3679,7 +3834,7 @@ help_keys help[][100] = {
         {"0-9a-fA-F", "Enter hex nibble"},
         {"Shift+dir", "Move thing under cursor"},
         {"Alt+dir", "Stretch thing under cursor"},
-        {"Alt+S+dir", "Shrink thing under cursor"},
+        {"Alt+S+dir", "TODO Shrink thing under cursor"},
         {"Left/h", "Move cursor left"},
         {"Down/j", "Move cursor down"},
         {"Up/k", "Move cursor up"},
@@ -3688,6 +3843,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"Ctrl-s[eorcs]", "create/edit switch"},
+        {"Ctrl-o", "create object from tile"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
@@ -3821,11 +3977,12 @@ help_keys help[][100] = {
         {"Right/l", "set switch side to right"},
         {"+", "increase switch id (shuffles up)"},
         {"-", "decrease switch id (shuffles down)"},
+        {"y", "TODO copy switch"},
         {"c[n]", "select chunk"},
         {"C", "create new chunk"},
         {"ESC", "go back to main view"},
-        {"DEL", "TODO delete switch"},
-        {"BACKSPACE", "TODO delete switch"},
+        {"DEL", "delete switch"},
+        {"BACKSPACE", "delete switch"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -3836,6 +3993,7 @@ help_keys help[][100] = {
         {"0-9a-fA-F", "chunk number"},
         {"ESC", "go back to main view"},
         {"q", "go back to main view"},
+        {"+", "TODO add new chunk"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
         {0},
@@ -4807,6 +4965,12 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     if (state->debug.objects) {
         GOTO(0, bottom); bottom ++;
         if (object_underneath != NULL) {
+            for (size_t i = object_underneath - room.objects + 1; i < room.num_objects; i ++) {
+                if (room.objects[i].x == x && room.objects[i].y == y) {
+                    fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: multiple objects underneath\n", __FILE__, __LINE__, __func__);
+                    break;
+                }
+            }
             switch (object_underneath->type) {
                 case BLOCK:
                     printf("block: (x,y)=");
@@ -4865,6 +5029,14 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     (void)chunk_switch_underneath;
     (void)chunk_underneath;
         struct SwitchObject *switcz = switch_underneath;
+        if (switcz) {
+            for (size_t i = switcz - room.switches + 1; i < room.num_switches; i ++) {
+                if (room.switches[i].chunks.data[0].x == x && room.switches[i].chunks.data[0].y == y) {
+                    fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: multiple switches underneath\n", __FILE__, __LINE__, __func__);
+                    break;
+                }
+            }
+        }
         if (!switcz && chunk_underneath) switcz = chunk_switch_underneath;
         if (state->current_state != GOTO_SWITCH && switcz != NULL) {
 #define BOOL_S(b) ((b) ? "true" : "false")
@@ -5423,7 +5595,7 @@ void *loop_main(char *library, void *call_state) {
                 return state;
             }
             if (ret == -1) perror("system");
-            fprintf(stderr, "--- Recompile failed not reloading ---\n");
+            fprintf(stderr, "--- Recompile failed not reloading (%d)---\n", ret);
             free(build_cmd);
             if (clock_gettime(CLOCK_REALTIME, &test_time) == -1) {
                 perror("clock_gettime");
