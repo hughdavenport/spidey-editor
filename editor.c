@@ -2112,7 +2112,7 @@ void process_input() {
                             sw->chunks.length --;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
-                            state->current_chunk --;
+                            if (state->current_chunk > 2) state->current_chunk --;
                             switch (sw->chunks.length) {
                                 case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                 case 2:
@@ -2179,7 +2179,7 @@ void process_input() {
                                                         sw->chunks.length --;
                                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                                         assert(writeRooms(&state->rooms));
-                                                        state->current_chunk --;
+                                                        if (state->current_chunk > 2) state->current_chunk --;
                                                         switch (sw->chunks.length) {
                                                             case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                                             case 2:
@@ -2324,7 +2324,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                state->current_chunk --;
+                                if (state->current_chunk > 2) state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -2495,7 +2495,7 @@ void process_input() {
                             sw->chunks.length --;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
-                            state->current_chunk --;
+                            if (state->current_chunk > 2) state->current_chunk --;
                             switch (sw->chunks.length) {
                                 case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                 case 2:
@@ -2562,7 +2562,7 @@ void process_input() {
                                                         sw->chunks.length --;
                                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                                         assert(writeRooms(&state->rooms));
-                                                        state->current_chunk --;
+                                                        if (state->current_chunk > 2) state->current_chunk --;
                                                         switch (sw->chunks.length) {
                                                             case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                                             case 2:
@@ -2791,7 +2791,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                state->current_chunk --;
+                                if (state->current_chunk > 2) state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -2910,7 +2910,7 @@ void process_input() {
                             sw->chunks.length --;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
-                            state->current_chunk --;
+                            if (state->current_chunk > 2) state->current_chunk --;
                             switch (sw->chunks.length) {
                                 case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                 case 2:
@@ -2977,7 +2977,7 @@ void process_input() {
                                                         sw->chunks.length --;
                                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                                         assert(writeRooms(&state->rooms));
-                                                        state->current_chunk --;
+                                                        if (state->current_chunk > 2) state->current_chunk --;
                                                         switch (sw->chunks.length) {
                                                             case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                                             case 2:
@@ -3172,7 +3172,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                state->current_chunk --;
+                                if (state->current_chunk > 2) state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -3225,7 +3225,7 @@ void process_input() {
                             sw->chunks.length --;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                             assert(writeRooms(&state->rooms));
-                            state->current_chunk --;
+                            if (state->current_chunk > 2) state->current_chunk --;
                             switch (sw->chunks.length) {
                                 case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                 case 2:
@@ -3292,7 +3292,7 @@ void process_input() {
                                                         sw->chunks.length --;
                                                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                                         assert(writeRooms(&state->rooms));
-                                                        state->current_chunk --;
+                                                        if (state->current_chunk > 2) state->current_chunk --;
                                                         switch (sw->chunks.length) {
                                                             case 1: state->current_state = EDIT_SWITCHDETAILS; break;
                                                             case 2:
@@ -3449,7 +3449,7 @@ void process_input() {
                             if (state->current_chunk > 1) {
                                 sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
                                 sw->chunks.data[state->current_chunk-1] = ch;
-                                state->current_chunk --;
+                                if (state->current_chunk > 2) state->current_chunk --;
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
@@ -4360,8 +4360,8 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_BIT_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "TODO delete chunk"},
-        {"BACKSPACE", "TODO delete chunk"},
+        {"DEL", "delete chunk"},
+        {"BACKSPACE", "delete chunk"},
         {"y", "TODO copy chunk"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
@@ -4378,8 +4378,8 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "remove partial entry or TODO delete chunk"},
-        {"BACKSPACE", "remove partial entry or TODO delete chunk"},
+        {"DEL", "remove partial entry or delete chunk"},
+        {"BACKSPACE", "remove partial entry or delete chunk"},
         {"y", "TODO copy chunk"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
@@ -4401,8 +4401,8 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "remove partial entry or TODO delete chunk"},
-        {"BACKSPACE", "remove partial entry or TODO delete chunk"},
+        {"DEL", "remove partial entry or delete chunk"},
+        {"BACKSPACE", "remove partial entry or delete chunk"},
         {"y", "TODO copy chunk"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
@@ -4421,8 +4421,8 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "remove partial entry or TODO delete chunk"},
-        {"BACKSPACE", "remove partial entry or TODO delete chunk"},
+        {"DEL", "remove partial entry or delete chunk"},
+        {"BACKSPACE", "remove partial entry or delete chunk"},
         {"y", "TODO copy chunk"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
