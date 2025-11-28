@@ -2346,6 +2346,21 @@ void process_input() {
                                 assert(writeRooms(&state->rooms));
                             }
                         }
+                    } else if (buf[i] == 'p') {
+                        signal(SIGCHLD, SIG_IGN);
+                        pid_t child = fork();
+                        if (child == 0) {
+                            if (state != NULL) {
+                                freeRoomFile(&state->rooms);
+                                free(state);
+                            }
+                            pid_t sid = fork();
+                            if (sid == -1) exit(EXIT_FAILURE);
+                            if (sid > 0) exit(EXIT_SUCCESS);
+                            if (setsid() == -1) exit(EXIT_FAILURE);
+                            execv("./play.sh", (char**){0});
+                            exit(EXIT_FAILURE);
+                        }
                     }
                     i ++;
                 }; break;
@@ -3471,6 +3486,21 @@ void process_input() {
                                 assert(writeRooms(&state->rooms));
                             }
                         }
+                    } else if (buf[i] == 'p') {
+                        signal(SIGCHLD, SIG_IGN);
+                        pid_t child = fork();
+                        if (child == 0) {
+                            if (state != NULL) {
+                                freeRoomFile(&state->rooms);
+                                free(state);
+                            }
+                            pid_t sid = fork();
+                            if (sid == -1) exit(EXIT_FAILURE);
+                            if (sid > 0) exit(EXIT_SUCCESS);
+                            if (setsid() == -1) exit(EXIT_FAILURE);
+                            execv("./play.sh", (char**){0});
+                            exit(EXIT_FAILURE);
+                        }
                     }
                     i ++;
                 }; break;
@@ -4219,7 +4249,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"Ctrl-s[eorcs]", "create/edit switch"},
-        {"Ctrl-o", "TODO create object from tile"},
+        {"Ctrl-o", "TODO create/edit object"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
@@ -5821,7 +5851,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                             case TOGGLE_OBJECT:
                             {
-                                printf("object - (idx)=%d (test)=", chunk->index);
+                                printf("object - (idx)=%d (test)=", chunk->index >> 4);
                                 PRINTF_DATA(chunk->test);
                                 printf(" (value)=");
                                 switch (chunk->value & MOVE_LEFT) {

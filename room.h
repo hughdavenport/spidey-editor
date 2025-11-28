@@ -20,6 +20,23 @@
 #define MOVE_DOWN  0x20
 #define MOVE_LEFT  0x06
 #define MOVE_RIGHT 0x02
+/*
+ * 0x00 - stop
+ * 0x01 - right slow
+ * 0x02 - right normal
+ * 0x03 - right quick?
+ * 0x04 - invert bit?
+ * 0x05 - left slow
+ * 0x06 - left med
+ * 0x07 - left high
+ * 0x08 - stop (ignored bit)
+ *
+ * 0x10 - down slow
+ * 0x20 - down med
+ * 0x30 - down quick
+ *
+ *
+ * */
 
 typedef enum {
     SHARK, // for damage 4 this is mary jane, 3 is mysterio, 2 and 1 are sharks

@@ -21,4 +21,9 @@ for i in {1..62}; do
         down=1
     fi
 done
-./a.out patch 63 switches[1].chunks[1].on 0x5e
+
+# make mysterio's platform fire
+# ./a.out patch 63 switches[1].chunks[1].on 0x5e
+
+# make switch that we hit on entry kill mysterio
+./a.out patch 63 switches[3].x 0x3 .y 0x14 .chunks[1].type TOGGLE_OBJECT .test 0x20
