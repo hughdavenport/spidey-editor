@@ -36,6 +36,40 @@
  * 0x30 - down quick
  *
  *
+ *
+ * when sprite (midnight obj 1 test 2)
+ * 00 dead
+ * 77 dead
+ * 80 freeze in place
+ * 08 dead
+ * 87 freeze in place
+ * 88 freeze on next wall
+ * 8f freeze on next wall
+ * 90 freeze in place
+ * 97 freeze in place
+ * 98 no action
+ * 9f no action
+ * a0 freeze in place
+ * a7 freeze in place
+ * a8 freeze on next wall
+ * af freeze on next wall
+ * b0 freeze in place
+ * b7 freeze in place
+ * b8 no action
+ * bf no action
+ * c0 freeze in place
+ * c7 freeze in place
+ * c8 freeze on next wall
+ * cf freeze on next wall
+ * d0 freeze in place
+ * d7 freeze in place
+ * d8 always move towards right, hits wall then turns twice to go back right
+ * df always move towards right, hits wall then turns twice to go back right
+ * e0 freeze in place
+ * e7 freeze in place
+ * e8 moves towards right, never turns back
+ * ef moves towards right, never turns back
+ *
  * */
 
 typedef enum {

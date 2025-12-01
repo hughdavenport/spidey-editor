@@ -1304,6 +1304,11 @@ bool writeRooms(RoomFile *file) {
                         }
                     }
                 }
+                if (chunk->room_idx == 0 && chunk->switch_idx == 0) {
+                    chunk->index = 0;
+                    chunk->bitmask = 0x1;
+                    goto next;
+                }
                 fprintf(stderr, "Could not find switch for room %lu switch %lu chunk %lu pointing to room %u switch %u\n", idx, sw, c, chunk->room_idx, chunk->switch_idx);
                 return false;
 next:

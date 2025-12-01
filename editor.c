@@ -2387,6 +2387,7 @@ void process_input() {
                             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                             assert(chunk->type == TOGGLE_BIT);
                             chunk->room_idx = room_id;
+                            chunk->switch_idx = 0;
                             state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                             state->partial_byte = 0;
                             state->roomname_cursor = 0;
@@ -2559,6 +2560,7 @@ void process_input() {
                                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                                     assert(chunk->type == TOGGLE_BIT);
                                     chunk->room_idx = matching_room;
+                                    chunk->switch_idx = 0;
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     state->partial_byte = 0;
                                     state->roomname_cursor = 0;
@@ -5292,22 +5294,46 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         } else {
             printf("\033[47;30;1m%02X\033[m", tile);
         }
-        if (state->current_state != EDIT_ROOMDETAILS_NUM && state->current_state != EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS && state->partial_byte) {
-            GOTO(2 * x, y + 1);
-            if (obj) {
-                if (sprite) {
-                    printf("\033[30;4%ld;1m", (obj_i % 3) + 1);
-                } else {
-                    printf("\033[3%ld;1m", (obj_i % 8) + 1);
+        switch (state->current_state) {
+            case EDIT_ROOMDETAILS_NUM:
+            case EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS:
+            case EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS:
+            case EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS:
+            case EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS:
+                break;
+
+            case NORMAL:
+            case TILE_EDIT:
+            case GOTO_OBJECT:
+            case GOTO_SWITCH:
+            case EDIT_ROOMNAME:
+            case EDIT_ROOMDETAILS:
+            case EDIT_SWITCHDETAILS:
+            case EDIT_SWITCHDETAILS_SELECT_CHUNK:
+            case TOGGLE_DISPLAY:
+                if (state->partial_byte) {
+                    GOTO(2 * x, y + 1);
+                    if (obj) {
+                        if (sprite) {
+                            printf("\033[30;4%ld;1m", (obj_i % 3) + 1);
+                        } else {
+                            printf("\033[3%ld;1m", (obj_i % 8) + 1);
+                        }
+                    } else if (sw) {
+                        printf("\033[30;4%ld;1m", (sw_i % 3) + 4);
+                    } else if (ch) {
+                        printf("\033[40;3%ld;1m", (ch_i % 3) + 4);
+                    } else {
+                        printf("\033[1m");
+                    }
+                    printf("%X\033[m", state->partial_byte & 0xFF);
                 }
-            } else if (sw) {
-                printf("\033[30;4%ld;1m", (sw_i % 3) + 4);
-            } else if (ch) {
-                printf("\033[40;3%ld;1m", (ch_i % 3) + 4);
-            } else {
-                printf("\033[1m");
-            }
-            printf("%X\033[m", state->partial_byte & 0xFF);
+                break;
+
+            case EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM:
+            case EDIT_ROOMDETAILS_ROOM:
+            case GOTO_ROOM:
+            default: UNREACHABLE();
         }
     } else {
         assert(state->cursors[state->current_level].x >= 0);
