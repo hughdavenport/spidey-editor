@@ -122,6 +122,9 @@ struct SwitchChunk {
     uint8_t value;
     enum SwitchSide side;
     bool one_time_use;
+
+    uint16_t room_idx;
+    uint16_t switch_idx;
 };
 
 struct SwitchObject {

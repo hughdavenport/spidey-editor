@@ -831,6 +831,37 @@ bool readFile(RoomFile *file, FILE *fp) {
         /* dumpRoom(&file->rooms[idx]); */
     }
 
+    uint16_t index = 0;
+    uint8_t mask = 0;
+    uint8_t bitmasks[] = {0x01, 0x04, 0x10, 0x40};
+
+    for (size_t idx = 0; idx < C_ARRAY_LEN(head.definitions); idx ++) {
+        Room *r = file->rooms + idx;
+        if (!r->valid) continue;
+        for (size_t sw = 0; sw < r->data.num_switches; sw ++) {
+            for (size_t _idx = 0; _idx < C_ARRAY_LEN(head.definitions); _idx ++) {
+                Room *_r = file->rooms + _idx;
+                if (!_r->valid) continue;
+                for (size_t _sw = 0; _sw < _r->data.num_switches; _sw ++) {
+                    struct SwitchObject *switcch = _r->data.switches + _sw;
+                    for (size_t c = 1; c < switcch->chunks.length; c ++) {
+                        struct SwitchChunk *chunk = switcch->chunks.data + c;
+                        if (chunk->type != TOGGLE_BIT) continue;
+                        if (chunk->index == index && chunk->bitmask == bitmasks[mask]) {
+                            chunk->room_idx = idx;
+                            chunk->switch_idx = sw;
+                        }
+                    }
+                }
+            }
+            mask ++;
+            if (mask == C_ARRAY_LEN(bitmasks)) {
+                mask = 0;
+                index ++;
+            }
+        }
+    }
+
     return true;
 }
 
@@ -1209,6 +1240,7 @@ bool writeFile(RoomFile *file, FILE *fp) {
     Header head = {0};
     long offset = sizeof(Header);
     if (fseek(fp, offset, SEEK_SET) == -1) return false;
+
     for (size_t i = 0; i < C_ARRAY_LEN(file->rooms); i ++) {
         head.definitions[i] = htons(offset);
         if (!writeRoom(&file->rooms[i], fp)) {
@@ -1244,6 +1276,42 @@ bool readRooms(RoomFile *file) {
 }
 
 bool writeRooms(RoomFile *file) {
+    for (size_t idx = 0; idx < C_ARRAY_LEN(file->rooms); idx ++) {
+        Room *r = file->rooms + idx;
+        if (!r->valid) continue;
+        for (size_t sw = 0; sw < r->data.num_switches; sw ++) {
+            struct SwitchObject *switcch = r->data.switches + sw;
+            for (size_t c = 1; c < switcch->chunks.length; c ++) {
+                struct SwitchChunk *chunk = switcch->chunks.data + c;
+                if (chunk->type != TOGGLE_BIT) continue;
+                uint16_t index = 0;
+                uint8_t mask = 0;
+                uint8_t bitmasks[] = {0x01, 0x04, 0x10, 0x40};
+
+                for (size_t _idx = 0; _idx < C_ARRAY_LEN(file->rooms); _idx ++) {
+                    Room *_r = file->rooms + _idx;
+                    if (!_r->valid) continue;
+                    for (size_t _sw = 0; _sw < _r->data.num_switches; _sw ++) {
+                        if (chunk->room_idx == _idx && chunk->switch_idx == _sw) {
+                            chunk->index = index;
+                            chunk->bitmask = bitmasks[mask];
+                            goto next;
+                        }
+                        mask ++;
+                        if (mask == C_ARRAY_LEN(bitmasks)) {
+                            mask = 0;
+                            index ++;
+                        }
+                    }
+                }
+                fprintf(stderr, "Could not find switch for room %lu switch %lu chunk %lu pointing to room %u switch %u\n", idx, sw, c, chunk->room_idx, chunk->switch_idx);
+                return false;
+next:
+                {}
+            }
+        }
+    }
+
     FILE *fp = fopen(ROOMS_FILE, "wb");
     if (fp == NULL) {
         fprintf(stderr, "Could not open %s for writing.\n", ROOMS_FILE);
