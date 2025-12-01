@@ -69,6 +69,22 @@
  * e7 freeze in place
  * e8 moves towards right, never turns back
  * ef moves towards right, never turns back
+ * f0 freeze in place
+ * f7 freeze in place
+ * f8 moves towards right, never turns back
+ * ff moves towards right, never turns back
+ * 09-0f kills
+ *
+ * test 0 - activates on second press
+ *
+ *
+ *
+ * memory
+ * tile_offset - require room re-enter
+ * background - no effect
+ * room damage - no effect? hard to tell
+ * gravity - immediate effect
+ * name - requires re-enter
  *
  * */
 
