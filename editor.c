@@ -1297,6 +1297,24 @@ void process_input() {
                                 state->current_chunk = 0;
                             }; break;
 
+                            case 'p':
+                            {
+                                signal(SIGCHLD, SIG_IGN);
+                                pid_t child = fork();
+                                if (child == 0) {
+                                    if (state != NULL) {
+                                        freeRoomFile(&state->rooms);
+                                        free(state);
+                                    }
+                                    pid_t sid = fork();
+                                    if (sid == -1) exit(EXIT_FAILURE);
+                                    if (sid > 0) exit(EXIT_SUCCESS);
+                                    if (setsid() == -1) exit(EXIT_FAILURE);
+                                    execv("./play.sh", (char**){0});
+                                    exit(EXIT_FAILURE);
+                                }
+                            }; break;
+
                             case 'q':
                             case ESCAPE:
                                 if (state->help) {
@@ -1421,6 +1439,21 @@ void process_input() {
                         }
                     } else if (buf[i] == '?') {
                         state->help = !state->help;
+                    } else if (buf[i] == 'p') {
+                        signal(SIGCHLD, SIG_IGN);
+                        pid_t child = fork();
+                        if (child == 0) {
+                            if (state != NULL) {
+                                freeRoomFile(&state->rooms);
+                                free(state);
+                            }
+                            pid_t sid = fork();
+                            if (sid == -1) exit(EXIT_FAILURE);
+                            if (sid > 0) exit(EXIT_SUCCESS);
+                            if (setsid() == -1) exit(EXIT_FAILURE);
+                            execv("./play.sh", (char**){0});
+                            exit(EXIT_FAILURE);
+                        }
                     } else {
                         switch (buf[i]) {
                             case '[':
@@ -1778,6 +1811,21 @@ void process_input() {
                             }
                             i ++;
                         }
+                    } else if (buf[i] == 'p') {
+                        signal(SIGCHLD, SIG_IGN);
+                        pid_t child = fork();
+                        if (child == 0) {
+                            if (state != NULL) {
+                                freeRoomFile(&state->rooms);
+                                free(state);
+                            }
+                            pid_t sid = fork();
+                            if (sid == -1) exit(EXIT_FAILURE);
+                            if (sid > 0) exit(EXIT_SUCCESS);
+                            if (setsid() == -1) exit(EXIT_FAILURE);
+                            execv("./play.sh", (char**){0});
+                            exit(EXIT_FAILURE);
+                        }
                     } else {
                         switch (buf[i]) {
                             case 0x7f:
@@ -2067,6 +2115,21 @@ void process_input() {
                         state->switch_on = false;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
+                    } else if (buf[i] == 'p') {
+                        signal(SIGCHLD, SIG_IGN);
+                        pid_t child = fork();
+                        if (child == 0) {
+                            if (state != NULL) {
+                                freeRoomFile(&state->rooms);
+                                free(state);
+                            }
+                            pid_t sid = fork();
+                            if (sid == -1) exit(EXIT_FAILURE);
+                            if (sid > 0) exit(EXIT_SUCCESS);
+                            if (setsid() == -1) exit(EXIT_FAILURE);
+                            execv("./play.sh", (char**){0});
+                            exit(EXIT_FAILURE);
+                        }
                     }
                     i ++;
                 }; break;
@@ -3045,6 +3108,21 @@ void process_input() {
                                 assert(writeRooms(&state->rooms));
                             }
                         }
+                    } else if (buf[i] == 'p') {
+                        signal(SIGCHLD, SIG_IGN);
+                        pid_t child = fork();
+                        if (child == 0) {
+                            if (state != NULL) {
+                                freeRoomFile(&state->rooms);
+                                free(state);
+                            }
+                            pid_t sid = fork();
+                            if (sid == -1) exit(EXIT_FAILURE);
+                            if (sid > 0) exit(EXIT_SUCCESS);
+                            if (setsid() == -1) exit(EXIT_FAILURE);
+                            execv("./play.sh", (char**){0});
+                            exit(EXIT_FAILURE);
+                        }
                     }
                     i ++;
                 }; break;
@@ -3425,6 +3503,21 @@ void process_input() {
                                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                                 assert(writeRooms(&state->rooms));
                             }
+                        }
+                    } else if (buf[i] == 'p') {
+                        signal(SIGCHLD, SIG_IGN);
+                        pid_t child = fork();
+                        if (child == 0) {
+                            if (state != NULL) {
+                                freeRoomFile(&state->rooms);
+                                free(state);
+                            }
+                            pid_t sid = fork();
+                            if (sid == -1) exit(EXIT_FAILURE);
+                            if (sid > 0) exit(EXIT_SUCCESS);
+                            if (setsid() == -1) exit(EXIT_FAILURE);
+                            execv("./play.sh", (char**){0});
+                            exit(EXIT_FAILURE);
                         }
                     }
                     i ++;
@@ -4567,6 +4660,7 @@ help_keys help[][100] = {
         {"DOWN", "Edit room below"},
 
         {"ESC", "go back to main view"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -4576,6 +4670,7 @@ help_keys help[][100] = {
     [EDIT_ROOMDETAILS_NUM]={
         {"0-9a-fA-F", "value"},
         {"ESC", "go back to main view"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -4610,6 +4705,7 @@ help_keys help[][100] = {
         {"ESC", "go back to main view"},
         {"DEL", "delete switch"},
         {"BACKSPACE", "delete switch"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -4619,6 +4715,7 @@ help_keys help[][100] = {
     [EDIT_SWITCHDETAILS_SELECT_CHUNK]={
         {"0-9a-fA-F", "chunk number"},
         {"ESC", "go back to main view"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"+", "add new chunk"},
         {"Ctrl-?", "toggle help"},
@@ -4638,6 +4735,7 @@ help_keys help[][100] = {
         {"n", "cycle possible on values"},
         {"o", "cycle possible off values"},
         {"ESC", "go back to main view"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -4673,6 +4771,7 @@ help_keys help[][100] = {
         {"Space", "toggle vertical/horizontal"},
         {"o", "toggle between editing on and off value"},
         {"ESC", "go back to main view"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -4693,6 +4792,7 @@ help_keys help[][100] = {
         {"v", "decrease block size (advanced)"},
         {"r", "toggle direction (advanced)"},
         {"ESC", "go back to main view"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -4711,6 +4811,7 @@ help_keys help[][100] = {
         {" TODO dir keys ?", "change value"},
         {"0-9a-fA-F", "change raw value (advanced)"},
         {"ESC", "go back to main view"},
+        {"p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -5725,7 +5826,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
             }
-            bottom ++;
+            bottom +=2;
             if (switcz->chunks.length > 1) {
                 if (state->current_state == EDIT_SWITCHDETAILS) {
                     printf("  \033[1;4mc\033[mhunks:\n");
