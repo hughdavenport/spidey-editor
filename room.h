@@ -85,6 +85,7 @@
  * room damage - no effect? hard to tell
  * gravity - immediate effect
  * name - requires re-enter
+ * above name - no effect noticed
  *
  * */
 

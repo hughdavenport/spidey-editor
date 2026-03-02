@@ -5905,7 +5905,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     case 35:
                                     case 36:
                                     case 37:
-                                             printf(" names[%lu]", offset-14);
+                                             printf(" name[%lu]", offset-14);
                                              break;
 
                                     default: printf(" out_of_bounds[%lu]", offset-end);
@@ -6204,8 +6204,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     size_t offset = point - overflow;
                                     size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
                                     if (offset >= end) {
-                                        printf("way out of bounds");
-                                        assert(false);
+                                        fprintf(stderr, "way out of bounds, overflowing name end by %lu bytes\n", offset - end + 1);
+                                        /* assert(false); */
                                     }
                                     switch (offset) {
                                         case 0: printf(" tile_offset"); break;
@@ -6222,7 +6222,35 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                         case 11: printf(" num_objects"); break;
                                         case 12: printf(" _num_switches"); break;
                                         case 13: printf(" UNKNOWN_f"); break;
-                                        default: printf(" name[%lu]", offset-14); break;
+
+                                        case 14:
+                                        case 15:
+                                        case 16:
+                                        case 17:
+                                        case 18:
+                                        case 19:
+                                        case 20:
+                                        case 21:
+                                        case 22:
+                                        case 23:
+                                        case 24:
+                                        case 25:
+                                        case 26:
+                                        case 27:
+                                        case 28:
+                                        case 29:
+                                        case 30:
+                                        case 31:
+                                        case 32:
+                                        case 33:
+                                        case 34:
+                                        case 35:
+                                        case 36:
+                                        case 37:
+                                                 printf(" name[%lu]", offset-14);
+                                                 break;
+
+                                    default: printf(" out_of_bounds[%lu]", offset-end);
                                     }
                                     printf(" (on/off)=%02x/%02x (size)=%d", chunk->on, chunk->off, chunk->size);
                                 } else {
