@@ -153,8 +153,12 @@ void *loop_main(char *library, void *call_state) {
     signal(SIGINT, sigint_handler);
 
     struct timespec test_time = library_stat.st_mtim;
+
+    redraw();
+
     while (true) {
-        struct stat rooms_stat;
+        bool dirty = false;
+
         if (any_source_newer(test_time)) {
             // rebuild
             char *build_cmd = NULL;
@@ -173,23 +177,27 @@ void *loop_main(char *library, void *call_state) {
                 perror("clock_gettime");
             }
         }
-        if (stat("ROOMS.SPL", &rooms_stat) == 0) {
-            if (TIME_NEWER(rooms_stat.st_mtim, start_rooms_stat.st_mtim)) {
-                fprintf(stderr, "Reloading ROOMS.SPL\n");
-                freeRoomFile(&state->rooms);
-                assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
-                start_rooms_stat = rooms_stat;
-            }
+
+        struct stat rooms_stat;
+        if (stat("ROOMS.SPL", &rooms_stat) == 0
+                && TIME_NEWER(rooms_stat.st_mtim, start_rooms_stat.st_mtim)) {
+            fprintf(stderr, "Reloading ROOMS.SPL\n");
+            freeRoomFile(&state->rooms);
+            assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+            start_rooms_stat = rooms_stat;
+            dirty = true;
         }
+
+        dirty |= process_input();   /* blocks up to 1 s */
 
         if (state->resized) {
             get_screen_dimensions();
             state->resized = false;
+            dirty = true;
         }
-        process_input();
-        update();
-        redraw();
-        usleep(50000);
+
+        dirty |= update();
+        if (dirty) redraw();
     }
     UNREACHABLE();
     return NULL;
