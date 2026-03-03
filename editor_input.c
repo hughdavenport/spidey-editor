@@ -1,5 +1,6 @@
 #include "editor_types.h"
 #include <ctype.h>
+#include <errno.h>
 #include <poll.h>
 #include <signal.h>
 #include <string.h>
@@ -3964,7 +3965,8 @@ static state_handler_fn state_handlers[NUM_STATES] = {
 
 bool process_input() {
     struct pollfd fd = { .fd = STDIN_FILENO, .events = POLLIN };
-    assert(poll(&fd, 1, 1000) >= 0);
+    int ret = poll(&fd, 1, 1000);
+    assert(ret >= 0 || errno == EINTR);
     if (!(fd.revents & POLLIN)) return false;
 
     char buf[64];
