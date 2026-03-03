@@ -5,7 +5,7 @@ void move(int dx, int dy) {
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;
     if (x + dx < 0 || x + dx >= WIDTH_TILES || y + dy < 0 || y + dy >= HEIGHT_TILES) return;
-    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     bool moved = false;
     if (state->debug.objects) {
         struct RoomObject *object = NULL;
@@ -100,7 +100,7 @@ void move(int dx, int dy) {
 void stretch(int dx, int dy) {
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;
-    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     bool stretched = false;
     if (state->debug.objects) {
         struct RoomObject *object = NULL;
@@ -245,7 +245,7 @@ void stretch(int dx, int dy) {
 void shrink(int dx, int dy) {
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;
-    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     bool stretched = false;
     if (state->debug.objects) {
         struct RoomObject *object = NULL;

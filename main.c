@@ -34,22 +34,26 @@ typedef struct {
 
 typedef ARRAY(PatchInstruction) PatchInstructionArray;
 
+static void usage_patch(const char *program) {
+    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+}
+
 bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchInstructionArray *patches) {
     char *end = NULL;
     char *last = NULL;
     if (*argc <= 3) {
-        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+        usage_patch(program);
         return false;
     }
     long room_id = strtol((*argv)[1], &end, 0);
     if (errno == EINVAL || end == NULL || *end != '\0') {
         fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
-        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+        usage_patch(program);
         return false;
     }
     if (room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file->rooms)) {
         fprintf(stderr, "Room ID out of range 0..%lu\n", C_ARRAY_LEN(file->rooms) - 1);
-        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+        usage_patch(program);
         return false;
     }
     *argv += 2;
@@ -61,7 +65,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
             if (strcasecmp((*argv)[0], "tile") == 0 || strcasecmp((*argv)[0], "tiles") == 0) {
                 if (access((*argv)[1], R_OK) != 0) {
                     fprintf(stderr, "Could not open tile file: %s\n", (*argv)[1]);
-                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                    usage_patch(program);
                     return false;
                 }
                 ARRAY_ADD(*patches, ((PatchInstruction){ .type = TILESET, .room_id = room_id, .filename = (*argv)[1], }));
@@ -73,92 +77,92 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                 long idx = strtol((*argv)[0] + ((*argv)[0][4] == '[' ? 5 : 6), &end, 0);
                 if (errno == EINVAL || *end != ']') {
                     fprintf(stderr, "Invalid tile address: %s\n", (*argv)[0]);
-                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                    usage_patch(program);
                     return false;
                 }
                 if (end[1] == '[') {
                     long y = strtol(end + 2, &end, 0);
                     if (errno == EINVAL || strcasecmp(end, "]") != 0) {
                         fprintf(stderr, "Invalid tile address for y: %s\n", (*argv)[0]);
-                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                        usage_patch(program);
                         return false;
                     }
                     idx = TILE_IDX(idx, y);
                 }
                 if (idx >= WIDTH_TILES * HEIGHT_TILES) {
                     fprintf(stderr, "Invalid tile address, too large: %s\n", (*argv)[0]);
-                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                    usage_patch(program);
                     return false;
                 }
-                addr = offsetof(struct DecompresssedRoom, tiles) + idx;
+                addr = offsetof(struct DecompressedRoom, tiles) + idx;
             } else if (strcasecmp((*argv)[0], "tile_offset") == 0) {
                 DEPRECATED("tile_offset is now tileset");
-                addr = offsetof(struct DecompresssedRoom, tile_offset);
+                addr = offsetof(struct DecompressedRoom, tile_offset);
             } else if (strcasecmp((*argv)[0], "tileset") == 0) {
-                addr = offsetof(struct DecompresssedRoom, tile_offset);
+                addr = offsetof(struct DecompressedRoom, tile_offset);
             } else if (strcasecmp((*argv)[0], "background") == 0 || strcasecmp((*argv)[0], "back") == 0) {
-                addr = offsetof(struct DecompresssedRoom, background);
+                addr = offsetof(struct DecompressedRoom, background);
             } else if (strcasecmp((*argv)[0], "room_north") == 0) {
                 DEPRECATED("room_north is now room_up");
-                addr = offsetof(struct DecompresssedRoom, room_north);
+                addr = offsetof(struct DecompressedRoom, room_north);
             } else if (strcasecmp((*argv)[0], "room_up") == 0) {
-                addr = offsetof(struct DecompresssedRoom, room_north);
+                addr = offsetof(struct DecompressedRoom, room_north);
             } else if (strcasecmp((*argv)[0], "room_east") == 0) {
                 DEPRECATED("room_east is now room_right");
-                addr = offsetof(struct DecompresssedRoom, room_east);
+                addr = offsetof(struct DecompressedRoom, room_east);
             } else if (strcasecmp((*argv)[0], "room_right") == 0) {
-                addr = offsetof(struct DecompresssedRoom, room_east);
+                addr = offsetof(struct DecompressedRoom, room_east);
             } else if (strcasecmp((*argv)[0], "room_south") == 0) {
                 DEPRECATED("room_south is now room_down");
-                addr = offsetof(struct DecompresssedRoom, room_south);
+                addr = offsetof(struct DecompressedRoom, room_south);
             } else if (strcasecmp((*argv)[0], "room_down") == 0) {
-                addr = offsetof(struct DecompresssedRoom, room_south);
+                addr = offsetof(struct DecompressedRoom, room_south);
             } else if (strcasecmp((*argv)[0], "room_west") == 0) {
                 DEPRECATED("room_west is now room_left");
-                addr = offsetof(struct DecompresssedRoom, room_west);
+                addr = offsetof(struct DecompressedRoom, room_west);
             } else if (strcasecmp((*argv)[0], "room_left") == 0) {
-                addr = offsetof(struct DecompresssedRoom, room_west);
+                addr = offsetof(struct DecompressedRoom, room_west);
             } else if (strcasecmp((*argv)[0], "UNKNOWN_a") == 0) {
                 DEPRECATED("UNKNOWN_a is now room_damage");
-                addr = offsetof(struct DecompresssedRoom, room_damage);
+                addr = offsetof(struct DecompressedRoom, room_damage);
             } else if (strcasecmp((*argv)[0], "room_damage") == 0 ||
                     strcasecmp((*argv)[0], "damage") == 0 ||
                     strcasecmp((*argv)[0], "dmg") == 0) {
-                addr = offsetof(struct DecompresssedRoom, room_damage);
+                addr = offsetof(struct DecompressedRoom, room_damage);
             } else if (strcasecmp((*argv)[0], "gravity_vertical") == 0) {
-                addr = offsetof(struct DecompresssedRoom, gravity_vertical);
+                addr = offsetof(struct DecompressedRoom, gravity_vertical);
             } else if (strcasecmp((*argv)[0], "gravity_horizontal") == 0) {
-                addr = offsetof(struct DecompresssedRoom, gravity_horizontal);
+                addr = offsetof(struct DecompressedRoom, gravity_horizontal);
             } else if (strncasecmp((*argv)[0], "UNKNOWN2[", 9) == 0 && isdigit((*argv)[0][9])) {
                 long idx = strtol((*argv)[0] + 9, &end, 0);
                 if (errno == EINVAL || *end != ']') {
                     fprintf(stderr, "Invalid UNKNOWN2 address: %s\n", (*argv)[0]);
-                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                    usage_patch(program);
                     return false;
                 }
-                addr = offsetof(struct DecompresssedRoom, UNKNOWN_b) + idx;
+                addr = offsetof(struct DecompressedRoom, UNKNOWN_b) + idx;
             } else if (strcasecmp((*argv)[0], "UNKNOWN_b") == 0 || strcasecmp((*argv)[0], "UNKNOWN[b]") == 0) {
-                addr = offsetof(struct DecompresssedRoom, UNKNOWN_b);
+                addr = offsetof(struct DecompressedRoom, UNKNOWN_b);
             } else if (strcasecmp((*argv)[0], "UNKNOWN_c") == 0 || strcasecmp((*argv)[0], "UNKNOWN[c]") == 0) {
-                addr = offsetof(struct DecompresssedRoom, UNKNOWN_c);
+                addr = offsetof(struct DecompressedRoom, UNKNOWN_c);
             } else if (strcasecmp((*argv)[0], "UNKNOWN_d") == 0 || strcasecmp((*argv)[0], "UNKNOWN[d]") == 0) {
                 fprintf(stderr, "WARNING: This will change how much data is looped over after main loop. You must ensure the correct data\n");
                 // FIXME It'll probably blow the assert when writing
-                addr = offsetof(struct DecompresssedRoom, num_objects);
+                addr = offsetof(struct DecompressedRoom, num_objects);
             } else if (strcasecmp((*argv)[0], "UNKNOWN_e") == 0 || strcasecmp((*argv)[0], "UNKNOWN[e]") == 0) {
                 fprintf(stderr, "WARNING: This will change how much data is looped over after main loop. You must ensure the correct data\n");
                 // FIXME It'll probably blow the assert when writing
-                addr = offsetof(struct DecompresssedRoom, _num_switches);
+                addr = offsetof(struct DecompressedRoom, _num_switches);
             } else if (strcasecmp((*argv)[0], "UNKNOWN_f") == 0 || strcasecmp((*argv)[0], "UNKNOWN[f]") == 0) {
-                addr = offsetof(struct DecompresssedRoom, UNKNOWN_f);
+                addr = offsetof(struct DecompressedRoom, UNKNOWN_f);
             } else if (strcasecmp((*argv)[0], "name") == 0) {
                 size_t len = strlen((*argv)[1]);
                 if (len > 20) {
                     fprintf(stderr, "Invalid name. Max 20 characters: %s\n", (*argv)[1]);
-                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                    usage_patch(program);
                     return false;
                 }
-                addr = offsetof(struct DecompresssedRoom, name);
+                addr = offsetof(struct DecompressedRoom, name);
                 for (size_t idx = 0; idx < 20; ++ idx) {
                     if (idx < len) {
                         ARRAY_ADD(*patches, ((PatchInstruction){ .room_id = room_id, .address = addr + idx, .value = (*argv)[1][idx], }));
@@ -174,14 +178,14 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                 if (arg[0] == '.') {
                     if (last == NULL) {
                         fprintf(stderr, "Invalid use of shortcut %s. Requires longform before\n", arg);
-                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                        usage_patch(program);
                         return false;
                     }
                     if (arg[1] == '.') {
                         char *last_dot = strrchr(last, '.');
                         if (last_dot == NULL) {
                             fprintf(stderr, "Invalid use of double shortcut %s. Requires longform before\n", arg);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (last) free(last);
                             return false;
                         }
@@ -197,8 +201,9 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     long idx = strtol(str, &end, 0);
                     if (errno == EINVAL || *end != ']') {
                         fprintf(stderr, "Invalid object id: %s\n", arg);
-                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                        usage_patch(program);
                         if (arg != (*argv)[0]) free(arg);
+                        if (last != NULL) free(last);
                         return false;
                     }
                     if (end == str) {
@@ -210,7 +215,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     if (strcasecmp(end, "].tiles") == 0) {
                         if (access((*argv)[1], R_OK) != 0) {
                             fprintf(stderr, "Could not open tile file: %s\n", (*argv)[1]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
@@ -249,7 +254,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             value = strtol((*argv)[1], &end, 0);
                             if (value < 0 || value >= NUM_SPRITE_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
                                 fprintf(stderr, "Invalid sprite type: %s\n", (*argv)[1]);
-                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                usage_patch(program);
                                 if (arg != (*argv)[0]) free(arg);
                                 return false;
                             }
@@ -266,7 +271,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             value = SPRITE;
                         } else {
                             fprintf(stderr, "Invalid object type: %s\n", (*argv)[1]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (last != NULL) free(last);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
@@ -277,7 +282,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         idx = strtol(end + (end[6] == '[' ? 7 : 8), &end, 0);
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid tile address: %s\n", (*argv)[0]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             if (last != NULL) free(last);
                             return false;
@@ -286,7 +291,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             long y = strtol(end + 2, &end, 0);
                             if (errno == EINVAL || strcasecmp(end, "]") != 0) {
                                 fprintf(stderr, "Invalid tile address for y: %s\n", (*argv)[0]);
-                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                usage_patch(program);
                                 if (last != NULL) free(last);
                                 if (arg != (*argv)[0]) free(arg);
                                 return false;
@@ -295,7 +300,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         }
                         if (idx >= WIDTH_TILES * HEIGHT_TILES) {
                             fprintf(stderr, "Invalid tile address, too large: %s\n", (*argv)[0]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (last != NULL) free(last);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
@@ -303,14 +308,14 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         value = strtol((*argv)[1], &end, 0);
                         if (errno == EINVAL || end == NULL || *end != '\0') {
                             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (last != NULL) free(last);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
                         if (value < 0 || value > 0xFF) {
                             fprintf(stderr, "Value must be in the range 0..255\n");
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             if (last != NULL) free(last);
                             return false;
@@ -318,7 +323,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         value = idx << 8 | value;
                     } else {
                         fprintf(stderr, "Invalid object field: %s\n", arg);
-                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                        usage_patch(program);
                         if (arg != (*argv)[0]) free(arg);
                         if (last != NULL) free(last);
                         return false;
@@ -328,14 +333,14 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         value = strtol((*argv)[1], &end, 0);
                         if (errno == EINVAL || end == NULL || *end != '\0') {
                             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             if (last != NULL) free(last);
                             return false;
                         }
                         if (value < 0 || value > 0xFF) {
                             fprintf(stderr, "Value must be in the range 0..255\n");
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             if (last != NULL) free(last);
                             return false;
@@ -362,8 +367,9 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     long idx = strtol(str, &end, 0);
                     if (errno == EINVAL || *end != ']') {
                         fprintf(stderr, "Invalid switch id: %s\n", arg);
-                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                        usage_patch(program);
                         if (arg != (*argv)[0]) free(arg);
+                        if (last != NULL) free(last);
                         return false;
                     }
                     if (end == str) {
@@ -413,7 +419,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             value = RIGHT;
                         } else {
                             fprintf(stderr, "Invalid side: %s\n", (*argv)[1]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             if (last != NULL) free(last);
                             return false;
@@ -423,7 +429,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         chunk_idx = strtol(str, &end, 0);
                         if (errno == EINVAL || *end != ']') {
                             fprintf(stderr, "Invalid chunk index: %s\n", arg);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             return false;
                         }
@@ -460,7 +466,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 if (value == 0x20) value = VERTICAL;
                                 if (value < 0 || value >= 2 || errno == EINVAL || end == NULL || *end != '\0') {
                                     fprintf(stderr, "Invalid direction type: %s\n", (*argv)[1]);
-                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    usage_patch(program);
                                     if (arg != (*argv)[0]) free(arg);
                                     if (last != NULL) free(last);
                                     return false;
@@ -517,7 +523,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 value = RIGHT;
                             } else {
                                 fprintf(stderr, "Invalid side: %s\n", (*argv)[1]);
-                                fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                usage_patch(program);
                                 if (arg != (*argv)[0]) free(arg);
                                 if (last != NULL) free(last);
                                 return false;
@@ -528,7 +534,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             if (strcasecmp((*argv)[1], "PREAMBLE") == 0) {
                                 if (chunk_idx != 0) {
                                     fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
-                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    usage_patch(program);
                                     if (arg != (*argv)[0]) free(arg);
                                     if (last != NULL) free(last);
                                     return false;
@@ -544,14 +550,14 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                                 value = strtol((*argv)[1], &end, 0);
                                 if (value < 0 || value >= NUM_CHUNK_TYPES || errno == EINVAL || end == NULL || *end != '\0') {
                                     fprintf(stderr, "Invalid chunk type: %s\n", (*argv)[1]);
-                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    usage_patch(program);
                                     if (arg != (*argv)[0]) free(arg);
                                     if (last != NULL) free(last);
                                     return false;
                                 }
                                 if (value == PREAMBLE && idx != 0) {
                                     fprintf(stderr, "PREAMBLE type is only valid for chunk 0\n");
-                                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                                    usage_patch(program);
                                     if (arg != (*argv)[0]) free(arg);
                                     if (last != NULL) free(last);
                                     return false;
@@ -562,7 +568,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                             }
                         } else {
                             fprintf(stderr, "Invalid chunk field: %s\n", arg);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             if (last != NULL) free(last);
                             return false;
@@ -570,7 +576,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     } else {
                         fprintf(stderr, "end: %s\n", end);
                         fprintf(stderr, "Invalid switch field: %s\n", arg);
-                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                        usage_patch(program);
                         if (arg != (*argv)[0]) free(arg);
                         if (last != NULL) free(last);
                         return false;
@@ -580,7 +586,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                         value = strtol((*argv)[1], &end, 0);
                         if (errno == EINVAL || end == NULL || *end != '\0') {
                             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             if (arg != (*argv)[0]) free(arg);
                             if (last != NULL) free(last);
                             return false;
@@ -588,7 +594,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                     }
                     if (value < 0 || value > 0xFF) {
                         fprintf(stderr, "Value must be in the range 0..255\n");
-                        fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                        usage_patch(program);
                         if (arg != (*argv)[0]) free(arg);
                         if (last != NULL) free(last);
                         return false;
@@ -612,7 +618,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
                 }
                 if (addr == -1) {
                     fprintf(stderr, "Invalid address: %s\n", arg);
-                    fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                    usage_patch(program);
                     if (arg != (*argv)[0]) free(arg);
                     if (last != NULL) free(last);
                     return false;
@@ -622,7 +628,7 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
         }
         if (addr < 0) {
             fprintf(stderr, "Address must be positive\n");
-            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+            usage_patch(program);
             if (last != NULL) free(last);
             return false;
         }
@@ -630,13 +636,13 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
         long value = strtol((*argv)[1], &end, 0);
         if (errno == EINVAL || end == NULL || *end != '\0') {
             fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
-            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+            usage_patch(program);
             if (last != NULL) free(last);
             return false;
         }
         if (value < 0 || value > 0xFF) {
             fprintf(stderr, "Value must be in the range 0..255\n");
-            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+            usage_patch(program);
             if (last != NULL) free(last);
             return false;
         }
@@ -1278,11 +1284,11 @@ int main(int argc, char **argv) {
             switch (patch.type) {
                 case NORMAL:
                     assert(patch.delete == false);
-                    if ((unsigned)patch.address >= offsetof(struct DecompresssedRoom, end_marker) || (unsigned)patch.address >= sizeof(file.rooms[patch.room_id].data)) {
+                    if ((unsigned)patch.address >= offsetof(struct DecompressedRoom, end_marker) || (unsigned)patch.address >= sizeof(file.rooms[patch.room_id].data)) {
                         fprintf(stderr, "%s:%d: WARNING: Patching *rest* may not be stable currently\n", __FILE__, __LINE__);
                         if (patch.address - sizeof(file.rooms[patch.room_id].data) >= file.rooms[patch.room_id].rest.length) {
                             fprintf(stderr, "Address %d invalid\n", patch.address);
-                            fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
+                            usage_patch(program);
                             defer_return(1);
                         }
                         file.rooms[patch.room_id].rest.data[patch.address - sizeof(file.rooms[patch.room_id].data)] = patch.value;
@@ -1387,7 +1393,7 @@ int main(int argc, char **argv) {
                         defer_return(1);
                     }
 
-                    struct DecompresssedRoom *room = &file.rooms[patch.room_id].data;
+                    struct DecompressedRoom *room = &file.rooms[patch.room_id].data;
                     if (patch.object_id == -1) {
                         fprintf(stderr, "%s:%d: UNIMPLEMENTED: object tileset patch is -ve", __FILE__, __LINE__);
                         defer_return(1);

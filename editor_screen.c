@@ -9,8 +9,9 @@ int scr_printf(const char *fmt, ...) {
     char buf[4096];
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    int needed = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
+    assert(needed >= 0 && (size_t)needed < sizeof(buf) && "scr_printf output truncated");
 
     int printed = 0;
     for (int i = 0; buf[i] != '\0'; ) {
@@ -87,6 +88,8 @@ int scr_printf(const char *fmt, ...) {
 void screen_flush(void) {
     int w = state->screen_dimensions.x;
     int h = state->screen_dimensions.y;
+    if (w > SCREEN_MAX_WIDTH)  w = SCREEN_MAX_WIDTH;
+    if (h > SCREEN_MAX_HEIGHT) h = SCREEN_MAX_HEIGHT;
     int cur_x = -1, cur_y = -1;
     uint8_t cur_fg = 0, cur_bg = 0, cur_attr = 0;
 

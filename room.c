@@ -188,7 +188,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     } \
 } \
 } while (0)
-    struct DecompresssedRoom neighbour_room = {0};
+    struct DecompressedRoom neighbour_room = {0};
     char neighbour_name[25] = {0};
     printf("left: %u", room->data.room_west);
     READ_NEIGHBOUR(room->data.room_west);
@@ -541,7 +541,7 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
 #undef read_next
 
     size_t data_idx = 0;
-#define read_next(dst, a) { \
+#define read_decompressed(dst, a) { \
         if (data_idx == (a).length) { \
             log("%s:%d: Not enough compressed data at %lu bytes long\n", \
                     __FILE__, __LINE__, (a).length); \
@@ -555,30 +555,30 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
 }
 
     for (size_t i = 0; i < C_ARRAY_LEN(tmp.data.tiles); i ++) {
-        read_next(tmp.data.tiles[i], tmp.decompressed);
+        read_decompressed(tmp.data.tiles[i], tmp.decompressed);
     }
-    read_next(tmp.data.tile_offset, tmp.decompressed);
-    read_next(tmp.data.background, tmp.decompressed);
-    read_next(tmp.data.room_north, tmp.decompressed);
-    read_next(tmp.data.room_east, tmp.decompressed);
-    read_next(tmp.data.room_south, tmp.decompressed);
-    read_next(tmp.data.room_west, tmp.decompressed);
+    read_decompressed(tmp.data.tile_offset, tmp.decompressed);
+    read_decompressed(tmp.data.background, tmp.decompressed);
+    read_decompressed(tmp.data.room_north, tmp.decompressed);
+    read_decompressed(tmp.data.room_east, tmp.decompressed);
+    read_decompressed(tmp.data.room_south, tmp.decompressed);
+    read_decompressed(tmp.data.room_west, tmp.decompressed);
 
-    read_next(tmp.data.room_damage, tmp.decompressed);
+    read_decompressed(tmp.data.room_damage, tmp.decompressed);
 
-    read_next(tmp.data.gravity_vertical, tmp.decompressed);
-    read_next(tmp.data.gravity_horizontal, tmp.decompressed);
+    read_decompressed(tmp.data.gravity_vertical, tmp.decompressed);
+    read_decompressed(tmp.data.gravity_horizontal, tmp.decompressed);
 
-    read_next(tmp.data.UNKNOWN_b, tmp.decompressed);
-    read_next(tmp.data.UNKNOWN_c, tmp.decompressed);
-    read_next(tmp.data.num_objects, tmp.decompressed);
-    read_next(tmp.data._num_switches, tmp.decompressed);
+    read_decompressed(tmp.data.UNKNOWN_b, tmp.decompressed);
+    read_decompressed(tmp.data.UNKNOWN_c, tmp.decompressed);
+    read_decompressed(tmp.data.num_objects, tmp.decompressed);
+    read_decompressed(tmp.data._num_switches, tmp.decompressed);
     tmp.data.num_switches = tmp.data._num_switches >> 2;
-    read_next(tmp.data.UNKNOWN_f, tmp.decompressed);
+    read_decompressed(tmp.data.UNKNOWN_f, tmp.decompressed);
 
     log("%s:%d: Reading name at %04lu\n", __FILE__, __LINE__, data_idx);
     for (size_t i = 0; i < C_ARRAY_LEN(tmp.data.name); i ++) {
-        read_next(tmp.data.name[i], tmp.decompressed);
+        read_decompressed(tmp.data.name[i], tmp.decompressed);
     }
 
     log("%s:%d: Reading %u moving objects at %04lu\n", __FILE__, __LINE__, tmp.data.UNKNOWN_d, data_idx);
@@ -587,8 +587,8 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
     struct RoomObject *objects = tmp.data.objects;
     for (size_t i = 0; i < tmp.data.num_objects; i ++) {
         uint8_t msb, lsb;
-        read_next(msb, tmp.decompressed);
-        read_next(lsb, tmp.decompressed);
+        read_decompressed(msb, tmp.decompressed);
+        read_decompressed(lsb, tmp.decompressed);
         if ((msb & 0x80) == 0) {
             objects[i].type = BLOCK;
             objects[i].x = lsb & 0x1f;
@@ -641,16 +641,16 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
     struct SwitchObject *switches = tmp.data.switches;
     for (size_t i = 0; i < tmp.data.num_switches; i ++) {
         uint8_t msb, lsb;
-        read_next(msb, tmp.decompressed);
-        read_next(lsb, tmp.decompressed);
+        read_decompressed(msb, tmp.decompressed);
+        read_decompressed(lsb, tmp.decompressed);
         uint8_t y = msb & 0x1f;
         uint8_t x = lsb & 0x1f;
         _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
         ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y, .room_entry = (lsb & 0x80) == 0x00, .one_time_use = (msb & 0x20) != 0x00, .side = (lsb & 0x60) >> 5, .msb = msb, .lsb = lsb }));
 
         while (data_idx < tmp.decompressed.length && (tmp.decompressed.data[data_idx] & 0xc0) != 0x00) {
-            read_next(msb, tmp.decompressed);
-            read_next(lsb, tmp.decompressed);
+            read_decompressed(msb, tmp.decompressed);
+            read_decompressed(lsb, tmp.decompressed);
             switch (msb & 0xc0) {
                 case 0x80: {
                     x = lsb & 0x1f;
@@ -658,8 +658,8 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                     uint8_t size = ((lsb >> 5) & 0x7) + 1;
                     uint8_t off, on;
                     enum SwitchChunkDirection dir = ((msb & 0x20) == 0) ? HORIZONTAL : VERTICAL;
-                    read_next(off, tmp.decompressed);
-                    read_next(on, tmp.decompressed);
+                    read_decompressed(off, tmp.decompressed);
+                    read_decompressed(on, tmp.decompressed);
                     // All bits accounted for
                     ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK, .x = x, .y = y, .size = size, .dir = dir, .off = off, .on = on }));
                 }; break;
@@ -698,12 +698,12 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
     // then stuff that controls enemy placement, switch actions, etc
     while (data_idx != tmp.decompressed.length) {
         uint8_t val;
-        read_next(val, tmp.decompressed);
+        read_decompressed(val, tmp.decompressed);
         ARRAY_ADD(tmp.rest, val);
     }
 
     /* fprintf(stderr, "%s:%d: UNIMPLEMENTED\n", __FILE__, __LINE__); return false; */
-#undef read_next
+#undef read_decompressed
 #undef log
     *room = tmp;
     return true;
@@ -871,20 +871,7 @@ bool readFile(RoomFile *file, FILE *fp) {
 bool writeRoom(Room *room, FILE *fp) {
     if (fp == NULL || room == NULL || !room->valid) return false;
 
-    if (room->compressed.length > 0) {
-#if 0
-        /* printf("Writing already compressed room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp)); */
-        size_t written = 0;
-        do {
-            size_t write_ret = fwrite(room->compressed.data + written, sizeof(uint8_t), room->compressed.length - written, fp);
-            if (write_ret == 0) return false;
-            written += write_ret;
-        } while (written < room->compressed.length);
-        return true;
-#else
-        room->compressed.length = 0; // reset it
-#endif
-    }
+    room->compressed.length = 0;
 
     fprintf(stderr, "Compressing and writing Room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp));
 

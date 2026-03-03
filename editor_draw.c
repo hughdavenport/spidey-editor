@@ -352,7 +352,7 @@ void redraw() {
     if (state->debug.objects) offset_y ++;
 
     size_t level = state->current_level;
-    struct DecompresssedRoom room = state->rooms.rooms[level].data;
+    struct DecompressedRoom room = state->rooms.rooms[level].data;
     char room_name[25] = {0};
     assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room.name));
     strncpy(room_name, room.name, C_ARRAY_LEN(room.name));
@@ -539,8 +539,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     } \
 } \
 } while (0)
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
-                struct DecompresssedRoom neighbour_room = {0};
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom neighbour_room = {0};
                 char neighbour_name[25] = {0};
                 switch (state->room_detail) {
                     case 'A':
@@ -582,7 +582,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         scr_printf("\nEnter room number or q to go to main view\n\n");
         for (size_t i = 0; i < C_ARRAY_LEN(state->rooms.rooms) / 2; i ++) {
             size_t room_id = i;
-            struct DecompresssedRoom *room = &state->rooms.rooms[room_id].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[room_id].data;
             assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room->name));
             strncpy(room_name, room->name, C_ARRAY_LEN(room->name));
             bool highlight = state->roomname_cursor && strncasecmp(room_name, state->room_name, state->roomname_cursor) == 0;
@@ -1121,7 +1121,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
     if (state->debug.neighbours) {
         char neighbour_name[25] = {0};
-        struct DecompresssedRoom neighbour_room = {0};
+        struct DecompressedRoom neighbour_room = {0};
 #define READ_NEIGHBOUR(id) do { \
 neighbour_room = state->rooms.rooms[(id)].data; \
 assert(C_ARRAY_LEN(neighbour_name) >= C_ARRAY_LEN(neighbour_room.name)); \
@@ -1333,7 +1333,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             if (point >= overflow) {
                                 scr_printf("memory:");
                                 size_t offset = point - overflow;
-                                size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+                                size_t end = offsetof(struct DecompressedRoom, end_marker) - overflow;
                                 if (offset >= end) {
                                     fprintf(stderr, "way out of bounds, overflowing name end by %lu bytes\n", offset - end + 1);
                                     /* assert(false); */
@@ -1497,7 +1497,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                         case TOGGLE_BIT:
                         {
-                            struct DecompresssedRoom target_room = state->rooms.rooms[chunk->room_idx].data;
+                            struct DecompressedRoom target_room = state->rooms.rooms[chunk->room_idx].data;
                             char target_name[25] = {0};
                             assert(C_ARRAY_LEN(target_name) >= C_ARRAY_LEN(target_room.name));
                             strncpy(target_name, target_room.name, C_ARRAY_LEN(target_room.name));
@@ -1675,7 +1675,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                 if (point >= overflow) {
                                     scr_printf("memory:");
                                     size_t offset = point - overflow;
-                                    size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+                                    size_t end = offsetof(struct DecompressedRoom, end_marker) - overflow;
                                     if (offset >= end) {
                                         fprintf(stderr, "way out of bounds, overflowing name end by %lu bytes\n", offset - end + 1);
                                         /* assert(false); */

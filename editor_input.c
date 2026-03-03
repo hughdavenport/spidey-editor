@@ -30,7 +30,7 @@ static bool handle_goto_object(char *buf, int *i, int n) {
     v2 *cursor = &state->cursors[state->current_level];
     size_t *cursorlevel = &state->current_level;
     if (isxdigit(buf[*i])) {
-        struct DecompresssedRoom *room = &state->rooms.rooms[*cursorlevel].data;
+        struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
         if (room->num_objects > 15) {
             // FIXME support 2 digit nums
             UNREACHABLE();
@@ -91,7 +91,7 @@ static bool handle_goto_switch(char *buf, int *i, int n) {
     v2 *cursor = &state->cursors[state->current_level];
     size_t *cursorlevel = &state->current_level;
     if (isxdigit(buf[*i])) {
-        struct DecompresssedRoom *room = &state->rooms.rooms[*cursorlevel].data;
+        struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
         if (room->num_switches > 15) {
             // FIXME support 2 digit nums
             UNREACHABLE();
@@ -427,7 +427,7 @@ static bool handle_goto_room(char *buf, int *i, int n) {
                 size_t matching_room = 0;
                 if (state->roomname_cursor) {
                     for (size_t _room = 0; _room < C_ARRAY_LEN(state->rooms.rooms); _room ++) {
-                        struct DecompresssedRoom *room = &state->rooms.rooms[_room].data;
+                        struct DecompressedRoom *room = &state->rooms.rooms[_room].data;
                         if (strncasecmp(room->name, state->room_name, state->roomname_cursor) == 0) {
                             if (possible) {
                                 duplicate = true;
@@ -480,7 +480,7 @@ static bool handle_edit_roomname(char *buf, int *i, int n) {
 
     if (buf[*i] == '\n') {
         // ENTER
-        struct DecompresssedRoom *room = &state->rooms.rooms[*cursorlevel].data;
+        struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
         assert(C_ARRAY_LEN(state->room_name) <= C_ARRAY_LEN(room->name));
         strncpy(room->name, state->room_name, C_ARRAY_LEN(room->name));
         state->current_state = state->previous_state;
@@ -779,7 +779,7 @@ static bool handle_edit_roomdetails_num(char *buf, int *i, int n) {
                 value += 10 * (state->partial_byte & 0xFF);
             }
 
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             switch (state->room_detail) {
                 case 'g': room->background = value; break;
                 case 't': room->tile_offset = value; break;
@@ -913,7 +913,7 @@ static bool handle_edit_roomdetails_room(char *buf, int *i, int n) {
             room_id += 10 * (state->partial_byte & 0xFF);
         }
         if (room_id < C_ARRAY_LEN(state->rooms.rooms)) {
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             switch (state->room_detail) {
                 case 'A':
                 case 'k':
@@ -1078,7 +1078,7 @@ static bool handle_edit_roomdetails_room(char *buf, int *i, int n) {
                 size_t matching_room = 0;
                 if (state->roomname_cursor) {
                     for (size_t _room = 0; _room < C_ARRAY_LEN(state->rooms.rooms); _room ++) {
-                        struct DecompresssedRoom *room = &state->rooms.rooms[_room].data;
+                        struct DecompressedRoom *room = &state->rooms.rooms[_room].data;
                         if (strncasecmp(room->name, state->room_name, state->roomname_cursor) == 0) {
                             if (possible) {
                                 duplicate = true;
@@ -1096,7 +1096,7 @@ static bool handle_edit_roomdetails_room(char *buf, int *i, int n) {
                 if (!possible) {
                     state->room_name[--state->roomname_cursor] = 0;
                 } else if (!duplicate) {
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     switch (state->room_detail) {
                         case 'A':
                         case 'k':
@@ -1158,7 +1158,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
                             case 3:
                             {
                                 if (!state->current_switch) UNREACHABLE();
-                                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                                 size_t sw_i = state->current_switch - 1;
                                 while (sw_i < (size_t)(room->num_switches - 1)) {
                                     room->switches[sw_i] = room->switches[sw_i+1];
@@ -1187,7 +1187,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
                     case 'A':
                     {
-                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                         room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
@@ -1195,7 +1195,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
                     case 'B':
                     {
-                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                         room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
@@ -1203,7 +1203,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
                     case 'C':
                     {
-                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                         room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
@@ -1211,7 +1211,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
                     case 'D':
                     {
-                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                         room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
@@ -1243,7 +1243,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
             case 0x7f:
             {
                 if (!state->current_switch) UNREACHABLE();
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 size_t sw_i = state->current_switch - 1;
                 while (sw_i < (size_t)(room->num_switches - 1)) {
                     room->switches[sw_i] = room->switches[sw_i+1];
@@ -1269,7 +1269,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
             case '+':
             {
                 if (state->current_switch) {
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     size_t sw_i = state->current_switch - 1;
                     struct SwitchObject sw = room->switches[sw_i];
                     if (sw_i < (unsigned)room->num_switches - 1) {
@@ -1285,7 +1285,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
             case '-':
             {
                 if (state->current_switch) {
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     size_t sw_i = state->current_switch - 1;
                     struct SwitchObject sw = room->switches[sw_i];
                     if (sw_i) {
@@ -1300,7 +1300,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 'h':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -1308,7 +1308,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 'j':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -1316,7 +1316,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 'k':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -1324,7 +1324,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 'l':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -1332,7 +1332,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 'o':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 room->switches[state->current_switch - 1].chunks.data[0].one_time_use = !room->switches[state->current_switch - 1].chunks.data[0].one_time_use;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -1340,7 +1340,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 'e':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 room->switches[state->current_switch - 1].chunks.data[0].room_entry = !room->switches[state->current_switch - 1].chunks.data[0].room_entry;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -1348,7 +1348,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 's':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 room->switches[state->current_switch - 1].chunks.data[0].side = (room->switches[state->current_switch - 1].chunks.data[0].side + 1) % NUM_SIDES;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -1357,11 +1357,11 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
             case 'c':
             {
 
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 struct SwitchObject *sw = room->switches + state->current_switch - 1;
                 if (sw->chunks.length == 1) {
                     // create new one
-                    struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     struct SwitchObject *sw = room->switches + state->current_switch - 1;
                     state->current_chunk = sw->chunks.length;
                     ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
@@ -1404,7 +1404,7 @@ static bool handle_edit_switchdetails(char *buf, int *i, int n) {
 
             case 'C':
             {
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 struct SwitchObject *sw = room->switches + state->current_switch - 1;
                 if (sw->chunks.length == 16) {
                     (*i)++;
@@ -1519,7 +1519,7 @@ static bool handle_edit_switchdetails_select_chunk(char *buf, int *i, int n) {
         state->help = !state->help;
     } else if (buf[*i] == '+') {
         // create new one
-        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
         struct SwitchObject *sw = room->switches + state->current_switch - 1;
         if (sw->chunks.length == 16) {
             (*i)++;
@@ -1597,7 +1597,7 @@ static bool handle_edit_switchdetails_chunk_switch(char *buf, int *i, int n) {
         } else {
             if (!state->current_switch) UNREACHABLE();
             if (!state->current_chunk) UNREACHABLE();
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             struct SwitchObject *sw = room->switches + state->current_switch - 1;
             size_t ch_i = state->current_chunk;
             if (sw->chunks.length <= 1) UNREACHABLE();
@@ -1664,7 +1664,7 @@ static bool handle_edit_switchdetails_chunk_switch(char *buf, int *i, int n) {
                                     } else {
                                         if (!state->current_switch) UNREACHABLE();
                                         if (!state->current_chunk) UNREACHABLE();
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                                         struct SwitchObject *sw = room->switches + state->current_switch - 1;
                                         size_t ch_i = state->current_chunk;
                                         if (sw->chunks.length <= 1) UNREACHABLE();
@@ -2016,7 +2016,7 @@ static bool handle_edit_switchdetails_chunk_switch_room(char *buf, int *i, int n
                 size_t matching_room = 0;
                 if (state->roomname_cursor) {
                     for (size_t _room = 0; _room < C_ARRAY_LEN(state->rooms.rooms); _room ++) {
-                        struct DecompresssedRoom *room = &state->rooms.rooms[_room].data;
+                        struct DecompressedRoom *room = &state->rooms.rooms[_room].data;
                         if (strncasecmp(room->name, state->room_name, state->roomname_cursor) == 0) {
                             if (possible) {
                                 duplicate = true;
@@ -2100,8 +2100,8 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
             chunk->x --;
         } else {
             if (chunk->y == HEIGHT_TILES) {
-                chunk->y = (offsetof(struct DecompresssedRoom, end_marker) - 1) / WIDTH_TILES;
-                chunk->x = (offsetof(struct DecompresssedRoom, end_marker) - 1) % WIDTH_TILES;
+                chunk->y = (offsetof(struct DecompressedRoom, end_marker) - 1) / WIDTH_TILES;
+                chunk->x = (offsetof(struct DecompressedRoom, end_marker) - 1) % WIDTH_TILES;
             } else {
                 chunk->y --;
                 chunk->x = WIDTH_TILES - 1;
@@ -2121,7 +2121,7 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
         size_t overflow = WIDTH_TILES * HEIGHT_TILES;
         size_t point = chunk->y * WIDTH_TILES + chunk->x;
         size_t offset = point - overflow;
-        size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+        size_t end = offsetof(struct DecompressedRoom, end_marker) - overflow;
         if (offset >= end) {
             chunk->y = HEIGHT_TILES;
             chunk->x = 0;
@@ -2136,8 +2136,8 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
             chunk->x --;
         } else {
             if (chunk->y == HEIGHT_TILES) {
-                chunk->y = (offsetof(struct DecompresssedRoom, end_marker) - 1) / WIDTH_TILES;
-                chunk->x = (offsetof(struct DecompresssedRoom, end_marker) - 1) % WIDTH_TILES;
+                chunk->y = (offsetof(struct DecompressedRoom, end_marker) - 1) / WIDTH_TILES;
+                chunk->x = (offsetof(struct DecompressedRoom, end_marker) - 1) % WIDTH_TILES;
             } else {
                 chunk->y --;
                 chunk->x = WIDTH_TILES - 1;
@@ -2157,7 +2157,7 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
         size_t overflow = WIDTH_TILES * HEIGHT_TILES;
         size_t point = chunk->y * WIDTH_TILES + chunk->x;
         size_t offset = point - overflow;
-        size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+        size_t end = offsetof(struct DecompressedRoom, end_marker) - overflow;
         if (offset >= end) {
             chunk->y = HEIGHT_TILES;
             chunk->x = 0;
@@ -2178,7 +2178,7 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
         size_t overflow = WIDTH_TILES * HEIGHT_TILES;
         size_t point = chunk->y * WIDTH_TILES + chunk->x;
         size_t offset = point - overflow;
-        size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+        size_t end = offsetof(struct DecompressedRoom, end_marker) - overflow;
         if (offset >= end) {
             chunk->y = HEIGHT_TILES;
             chunk->x = 0;
@@ -2212,7 +2212,7 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
         } else {
             if (!state->current_switch) UNREACHABLE();
             if (!state->current_chunk) UNREACHABLE();
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             struct SwitchObject *sw = room->switches + state->current_switch - 1;
             size_t ch_i = state->current_chunk;
             if (sw->chunks.length <= 1) UNREACHABLE();
@@ -2279,7 +2279,7 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
                                     } else {
                                         if (!state->current_switch) UNREACHABLE();
                                         if (!state->current_chunk) UNREACHABLE();
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                                         struct SwitchObject *sw = room->switches + state->current_switch - 1;
                                         size_t ch_i = state->current_chunk;
                                         if (sw->chunks.length <= 1) UNREACHABLE();
@@ -2339,8 +2339,8 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
                                 chunk->x --;
                             } else {
                                 if (chunk->y == HEIGHT_TILES) {
-                                    chunk->y = (offsetof(struct DecompresssedRoom, end_marker) - 1) / WIDTH_TILES;
-                                    chunk->x = (offsetof(struct DecompresssedRoom, end_marker) - 1) % WIDTH_TILES;
+                                    chunk->y = (offsetof(struct DecompressedRoom, end_marker) - 1) / WIDTH_TILES;
+                                    chunk->x = (offsetof(struct DecompressedRoom, end_marker) - 1) % WIDTH_TILES;
                                 } else {
                                     chunk->y --;
                                     chunk->x = WIDTH_TILES - 1;
@@ -2363,7 +2363,7 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
                             size_t overflow = WIDTH_TILES * HEIGHT_TILES;
                             size_t point = chunk->y * WIDTH_TILES + chunk->x;
                             size_t offset = point - overflow;
-                            size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+                            size_t end = offsetof(struct DecompressedRoom, end_marker) - overflow;
                             if (offset >= end) {
                                 chunk->y = HEIGHT_TILES;
                                 chunk->x = 0;
@@ -2385,7 +2385,7 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
                             size_t overflow = WIDTH_TILES * HEIGHT_TILES;
                             size_t point = chunk->y * WIDTH_TILES + chunk->x;
                             size_t offset = point - overflow;
-                            size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
+                            size_t end = offsetof(struct DecompressedRoom, end_marker) - overflow;
                             if (offset >= end) {
                                 chunk->y = HEIGHT_TILES;
                                 chunk->x = 0;
@@ -2403,8 +2403,8 @@ static bool handle_edit_switchdetails_chunk_memory(char *buf, int *i, int n) {
                                 chunk->x --;
                             } else {
                                 if (chunk->y == HEIGHT_TILES) {
-                                    chunk->y = (offsetof(struct DecompresssedRoom, end_marker) - 1) / WIDTH_TILES;
-                                    chunk->x = (offsetof(struct DecompresssedRoom, end_marker) - 1) % WIDTH_TILES;
+                                    chunk->y = (offsetof(struct DecompressedRoom, end_marker) - 1) / WIDTH_TILES;
+                                    chunk->x = (offsetof(struct DecompressedRoom, end_marker) - 1) % WIDTH_TILES;
                                 } else {
                                     chunk->y --;
                                     chunk->x = WIDTH_TILES - 1;
@@ -2643,7 +2643,7 @@ static bool handle_edit_switchdetails_chunk_block(char *buf, int *i, int n) {
         } else {
             if (!state->current_switch) UNREACHABLE();
             if (!state->current_chunk) UNREACHABLE();
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             struct SwitchObject *sw = room->switches + state->current_switch - 1;
             size_t ch_i = state->current_chunk;
             if (sw->chunks.length <= 1) UNREACHABLE();
@@ -2710,7 +2710,7 @@ static bool handle_edit_switchdetails_chunk_block(char *buf, int *i, int n) {
                                     } else {
                                         if (!state->current_switch) UNREACHABLE();
                                         if (!state->current_chunk) UNREACHABLE();
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                                         struct SwitchObject *sw = room->switches + state->current_switch - 1;
                                         size_t ch_i = state->current_chunk;
                                         if (sw->chunks.length <= 1) UNREACHABLE();
@@ -2974,7 +2974,7 @@ static bool handle_edit_switchdetails_chunk_object(char *buf, int *i, int n) {
         } else {
             if (!state->current_switch) UNREACHABLE();
             if (!state->current_chunk) UNREACHABLE();
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             struct SwitchObject *sw = room->switches + state->current_switch - 1;
             size_t ch_i = state->current_chunk;
             if (sw->chunks.length <= 1) UNREACHABLE();
@@ -3041,7 +3041,7 @@ static bool handle_edit_switchdetails_chunk_object(char *buf, int *i, int n) {
                                     } else {
                                         if (!state->current_switch) UNREACHABLE();
                                         if (!state->current_chunk) UNREACHABLE();
-                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                                         struct SwitchObject *sw = room->switches + state->current_switch - 1;
                                         size_t ch_i = state->current_chunk;
                                         if (sw->chunks.length <= 1) UNREACHABLE();
@@ -3447,7 +3447,7 @@ static bool handle_normal(char *buf, int *i, int n) {
                                                         struct SwitchChunk *chunk_underneath = NULL;
                                                         struct SwitchObject *chunk_switch_underneath = NULL;
 
-                                                        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                                                        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                                                         int x = state->cursors[state->current_level].x;
                                                         int y = state->cursors[state->current_level].y;
                                                         int i;
@@ -3589,7 +3589,7 @@ static bool handle_tile_edit(char *buf, int *i, int n) {
             bool ch = false;
             int x = state->cursors[state->current_level].x;
             int y = state->cursors[state->current_level].y;
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             for (size_t i = 0; i < room->num_objects; i ++) {
                 struct RoomObject *object = room->objects + i;
                 if (object->type == BLOCK &&
@@ -3657,7 +3657,7 @@ static bool handle_tile_edit(char *buf, int *i, int n) {
         struct SwitchChunk *chunk_underneath = NULL;
         struct SwitchObject *chunk_switch_underneath = NULL;
 
-        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
         int x = state->cursors[state->current_level].x;
         int y = state->cursors[state->current_level].y;
         int i;
@@ -3732,7 +3732,7 @@ static bool handle_tile_edit(char *buf, int *i, int n) {
         struct SwitchChunk *chunk_underneath = NULL;
         struct SwitchObject *chunk_switch_underneath = NULL;
 
-        struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
         int x = state->cursors[state->current_level].x;
         int y = state->cursors[state->current_level].y;
         int i;
@@ -3810,7 +3810,7 @@ static bool handle_tile_edit(char *buf, int *i, int n) {
             struct SwitchChunk *chunk_underneath = NULL;
             struct SwitchObject *chunk_switch_underneath = NULL;
 
-            struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+            struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             int x = state->cursors[state->current_level].x;
             int y = state->cursors[state->current_level].y;
             int i;
@@ -3905,7 +3905,7 @@ static bool handle_tile_edit(char *buf, int *i, int n) {
             case 'S':
             {
                 state->previous_state = state->current_state;
-                struct DecompresssedRoom *room = &state->rooms.rooms[state->current_level].data;
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 size_t num_switches = room->num_switches;
                 if (state->current_switch) {
                     state->current_state = EDIT_SWITCHDETAILS;
