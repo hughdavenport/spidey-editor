@@ -264,46 +264,59 @@ void shrink(int dx, int dy) {
             assert(object->type == BLOCK);
             assert(object->tiles);
             if (dx) {
-                /* Remove the trailing column in the direction pressed */
+                /* Press right (dx=1): pull leftmost column inward → remove left edge
+                 * Press left (dx=-1): pull rightmost column inward → remove right edge */
                 size_t new_w = object->block.width - 1;
                 uint8_t *tiles = malloc(new_w * object->block.height);
                 assert(tiles != NULL);
                 for (size_t _y = 0; _y < object->block.height; _y++) {
                     if (dx > 0) {
-                        /* Remove rightmost column: keep cols 0..new_w-1 */
-                        memcpy(tiles + _y * new_w,
-                               object->tiles + _y * object->block.width,
-                               new_w);
-                    } else {
                         /* Remove leftmost column: keep cols 1..width-1 */
                         memcpy(tiles + _y * new_w,
                                object->tiles + _y * object->block.width + 1,
                                new_w);
+                    } else {
+                        /* Remove rightmost column: keep cols 0..new_w-1 */
+                        memcpy(tiles + _y * new_w,
+                               object->tiles + _y * object->block.width,
+                               new_w);
                     }
                 }
-                if (dx < 0) object->x++;
+                if (dx > 0) object->x++;
                 object->block.width = new_w;
                 free(object->tiles);
                 object->tiles = tiles;
             } else {
-                /* Remove the trailing row in the direction pressed */
+                /* Press down (dy=1): pull top row inward → remove top edge
+                 * Press up (dy=-1): pull bottom row inward → remove bottom edge */
                 size_t new_h = object->block.height - 1;
                 uint8_t *tiles = malloc(object->block.width * new_h);
                 assert(tiles != NULL);
                 if (dy > 0) {
-                    /* Remove bottom row: keep rows 0..new_h-1 */
-                    memcpy(tiles, object->tiles,
-                           object->block.width * new_h);
-                } else {
                     /* Remove top row: keep rows 1..height-1 */
                     memcpy(tiles, object->tiles + object->block.width,
                            object->block.width * new_h);
                     object->y++;
+                } else {
+                    /* Remove bottom row: keep rows 0..new_h-1 */
+                    memcpy(tiles, object->tiles,
+                           object->block.width * new_h);
                 }
                 object->block.height = new_h;
                 free(object->tiles);
                 object->tiles = tiles;
             }
+            /* Clamp cursor so it stays on the (now smaller) object */
+            int cx = state->cursors[state->current_level].x;
+            int cy = state->cursors[state->current_level].y;
+            if (cx < (int)object->x) cx = (int)object->x;
+            if (cx >= (int)(object->x + object->block.width))
+                cx = (int)(object->x + object->block.width) - 1;
+            if (cy < (int)object->y) cy = (int)object->y;
+            if (cy >= (int)(object->y + object->block.height))
+                cy = (int)(object->y + object->block.height) - 1;
+            state->cursors[state->current_level].x = cx;
+            state->cursors[state->current_level].y = cy;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
             shrank = true;
@@ -330,8 +343,8 @@ void shrink(int dx, int dy) {
         }
         if (ch) {
             chunk->size--;
-            if (dy < 0) chunk->y++;
-            if (dx < 0) chunk->x++;
+            if (dy > 0) chunk->y++;  /* remove top: origin moves down */
+            if (dx > 0) chunk->x++;  /* remove left: origin moves right */
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
             shrank = true;
