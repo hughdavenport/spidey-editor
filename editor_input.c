@@ -654,6 +654,25 @@ static bool handle_toggle_display(Key key) {
     return true;
 }
 
+/* Exit the Ctrl-R submenu entirely back to TILE_EDIT */
+static void exit_roomdetails(void) {
+    state->current_state = state->previous_state;
+    state->previous_state = TILE_EDIT;
+    state->current_switch = 0;
+    state->switch_on = false;
+    state->current_chunk = 0;
+    state->partial_byte = 0;
+    state->room_detail = 0;
+    memset(state->room_name, 0, state->roomname_cursor);
+    state->roomname_cursor = 0;
+}
+
+/* Exit the Ctrl-S submenu entirely back to TILE_EDIT (preserves current_switch) */
+static void exit_switchdetails(void) {
+    state->current_state = state->previous_state;
+    state->previous_state = NORMAL;
+}
+
 static bool handle_edit_roomdetails(Key key) {
     if (key.code == KEY_UP) {
         state->room_detail = 'k';
@@ -754,6 +773,7 @@ static bool handle_edit_roomdetails(Key key) {
                     }
                 }
                 break;
+            case 'R': if (!state->help) exit_roomdetails(); break;
         }
     }
     return true;
@@ -835,6 +855,7 @@ static bool handle_edit_roomdetails_num(Key key) {
                 }
                 break;
             case 'P': fork_play(); break;
+            case 'R': if (!state->help) exit_roomdetails(); break;
         }
     } else if (key.code == KEY_CHAR && key.ch == 'q') {
         if (state->help) {
@@ -944,6 +965,7 @@ static bool handle_edit_roomdetails_room(Key key) {
                     }
                 }
                 break;
+            case 'R': if (!state->help) exit_roomdetails(); break;
         }
     } else if (key.code == KEY_CHAR && state->partial_byte == 0) {
         if (state->roomname_cursor < C_ARRAY_LEN(state->room_name) - 1) {
@@ -1260,6 +1282,7 @@ static bool handle_edit_switchdetails(Key key) {
                 }
                 break;
             case 'P': fork_play(); break;
+            case 'S': if (!state->help) exit_switchdetails(); break;
         }
     }
     return true;
@@ -1316,6 +1339,7 @@ static bool handle_edit_switchdetails_select_chunk(Key key) {
             case '_': state->help = !state->help; break;
             case 'H': state->debug.hex = !state->debug.hex; break;
             case 'P': fork_play(); break;
+            case 'S': if (!state->help) exit_switchdetails(); break;
         }
     } else if (key.code == KEY_CHAR && key.ch == 'q') {
         if (state->help) {
@@ -1456,6 +1480,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
             case '_': state->help = !state->help; break;
             case 'H': state->debug.hex = !state->debug.hex; break;
             case 'P': fork_play(); break;
+            case 'S': if (!state->help) exit_switchdetails(); break;
         }
     } else if (key.code == KEY_CHAR && key.ch == 'q') {
         if (state->help) {
@@ -1563,6 +1588,7 @@ static bool handle_edit_switchdetails_chunk_switch_room(Key key) {
                     RESTORE_ROOM_NAME();
                 }
                 break;
+            case 'S': if (!state->help) exit_switchdetails(); break;
         }
     } else if (key.code == KEY_CHAR && state->partial_byte == 0) {
         if (state->roomname_cursor < C_ARRAY_LEN(state->room_name) - 1) {
@@ -1813,6 +1839,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
             case '_': state->help = !state->help; break;
             case 'H': state->debug.hex = !state->debug.hex; break;
             case 'P': fork_play(); break;
+            case 'S': if (!state->help) exit_switchdetails(); break;
         }
     } else if (key.code == KEY_CHAR && key.ch == 'q') {
         if (state->help) {
@@ -2026,6 +2053,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
             case '_': state->help = !state->help; break;
             case 'H': state->debug.hex = !state->debug.hex; break;
             case 'P': fork_play(); break;
+            case 'S': if (!state->help) exit_switchdetails(); break;
         }
     } else if (key.code == KEY_CHAR && key.ch == 'q') {
         if (state->help) {
@@ -2147,6 +2175,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
             case '_': state->help = !state->help; break;
             case 'H': state->debug.hex = !state->debug.hex; break;
             case 'P': fork_play(); break;
+            case 'S': if (!state->help) exit_switchdetails(); break;
         }
     } else if (key.code == KEY_CHAR && key.ch == 'q') {
         if (state->help) {
