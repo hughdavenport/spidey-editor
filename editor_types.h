@@ -36,59 +36,38 @@
 #define MIN_HEIGHT (HEIGHT_TILES + 1)
 #define MIN_WIDTH (2 * WIDTH_TILES)
 
-/* Key sequences */
-#define KEY_UP    "\x1b[A"
-#define KEY_DOWN  "\x1b[B"
-#define KEY_RIGHT "\x1b[C"
-#define KEY_LEFT  "\x1b[D"
-
-#define SHIFT_UP    "\x1b[1;2A"
-#define SHIFT_DOWN  "\x1b[1;2B"
-#define SHIFT_RIGHT "\x1b[1;2C"
-#define SHIFT_LEFT  "\x1b[1;2D"
-
-#define ALT_UP    "\x1b[1;3A"
-#define ALT_DOWN  "\x1b[1;3B"
-#define ALT_RIGHT "\x1b[1;3C"
-#define ALT_LEFT  "\x1b[1;3D"
-
-#define ALT_SHIFT_UP    "\x1b[1;4A"
-#define ALT_SHIFT_DOWN  "\x1b[1;4B"
-#define ALT_SHIFT_RIGHT "\x1b[1;4C"
-#define ALT_SHIFT_LEFT  "\x1b[1;4D"
-
-#define HOME      "\x1b[1~"
-#define INSERT    "\x1b[2~"
-#define DELETE    "\x1b[3~"
-#define END       "\x1b[4~"
-#define PAGE_UP   "\x1b[5~"
-#define PAGE_DOWN "\x1b[6~"
-
-#define KEYPAD_1  END
-#define KEYPAD_2  "2"
-#define KEYPAD_3  PAGE_DOWN
-#define KEYPAD_4  "4"
-#define KEYPAD_5  "\x1b[E"
-#define KEYPAD_6  "6"
-#define KEYPAD_7  HOME
-#define KEYPAD_8  "8"
-#define KEYPAD_9  PAGE_UP
-#define KEYPAD_0  INSERT
-
-#define F1  "\x1b[OP"
-#define F2  "\x1b[OQ"
-#define F3  "\x1b[OR"
-#define F4  "\x1b[OS"
-#define F5  "\x1b[15~"
-#define F6  "\x1b[17~"
-#define F7  "\x1b[18~"
-#define F8  "\x1b[19~"
-#define F9  "\x1b[20~"
-#define F10  "\x1b[21~"
-#define F11  "\x1b[23~"
-#define F12  "\x1b[24~"
-
+/* Key sequences — raw char for ESC (used in help text / terminal sequences) */
 #define ESCAPE '\033'
+
+/* Key modifier bitmask */
+typedef enum {
+    MOD_NONE  = 0,
+    MOD_SHIFT = 1,
+    MOD_ALT   = 2,
+    MOD_CTRL  = 4,
+} KeyMod;
+
+/* Logical key code */
+typedef enum {
+    KEY_CHAR,        /* printable; .ch holds the character */
+    KEY_CTRL,        /* control byte; .ch holds 'A'–'_' (e.g. Ctrl-P → .ch='P') */
+    KEY_ESC,
+    KEY_BS,          /* 0x7f — backspace/delete on most terminals */
+    KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
+    KEY_HOME, KEY_END,
+    KEY_PAGE_UP, KEY_PAGE_DOWN,
+    KEY_INSERT, KEY_DELETE,
+    KEY_F1, KEY_F2, KEY_F3, KEY_F4,  KEY_F5,  KEY_F6,
+    KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+    KEY_UNKNOWN,
+} KeyCode;
+
+/* Decoded key */
+typedef struct {
+    KeyCode  code;
+    char     ch;    /* KEY_CHAR: the char; KEY_CTRL: 'A'–'_' */
+    uint8_t  mod;   /* bitmask of KeyMod */
+} Key;
 
 /* Screen buffer */
 #define SCREEN_MAX_WIDTH  256
@@ -148,6 +127,23 @@ typedef enum {
     NUM_STATES
 } game_state_state;
 
+typedef enum {
+    CLIP_NONE,
+    CLIP_OBJECT,
+    CLIP_SWITCH,
+    CLIP_CHUNK,
+} ClipType;
+
+typedef struct {
+    ClipType type;
+    uint8_t tile;  /* background tile stored when type == CLIP_SWITCH */
+    union {
+        struct RoomObject object; /* tiles malloc'd, must free before overwrite */
+        struct SwitchObject sw;  /* chunks.data malloc'd, must free before overwrite */
+        struct SwitchChunk chunk; /* plain copy, no pointers */
+    };
+} Clipboard;
+
 typedef struct {
     game_state_state current_state;
     game_state_state previous_state;
@@ -172,6 +168,8 @@ typedef struct {
     size_t current_switch;
     size_t current_chunk;
     bool switch_on;
+
+    Clipboard clipboard;
 
     Cell screen_prev[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
     Cell screen_curr[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
@@ -199,6 +197,9 @@ void screen_flush(void);
     } \
     exit(1); \
 } while (false)
+
+/* Key parser — decodes raw bytes into a Key struct, advancing *i */
+Key parse_key(const char *buf, int *i, int n);
 
 /* Forward declarations for cross-module calls */
 void end(void);
