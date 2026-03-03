@@ -106,6 +106,7 @@ void setup() {
     state = calloc(1, sizeof(game_state));
     assert(state != NULL && "Not enough memory");
     state->size = sizeof(game_state);
+    memset(state->screen_prev, 0xFF, sizeof(state->screen_prev));
 
     debugalltoggle();
     state->current_state = TILE_EDIT;
@@ -194,6 +195,7 @@ void *loop_main(char *library, void *call_state) {
         if (state->resized) {
             get_screen_dimensions();
             state->resized = false;
+            memset(state->screen_prev, 0xFF, sizeof(state->screen_prev));
             dirty = true;
         }
 
