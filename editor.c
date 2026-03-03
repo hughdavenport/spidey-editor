@@ -6340,11 +6340,17 @@ show_help_if_needed:
 }
 
 void get_screen_dimensions() {
-    struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    struct winsize w = {0};
+    int fds[] = { STDOUT_FILENO, STDERR_FILENO, STDIN_FILENO };
+    for (size_t i = 0; i < C_ARRAY_LEN(fds); i++) {
+        if (ioctl(fds[i], TIOCGWINSZ, &w) == 0 && w.ws_col && w.ws_row)
+            break;
+        w = (struct winsize){0};
+    }
 
-    state->screen_dimensions.x = w.ws_col;
-    state->screen_dimensions.y = w.ws_row;
+    /* Non-tty fallback: use the minimum dimensions the editor can work with */
+    state->screen_dimensions.x = w.ws_col ? w.ws_col : MIN_WIDTH;
+    state->screen_dimensions.y = w.ws_row ? w.ws_row : MIN_HEIGHT;
 }
 
 void sigwinch_handler(int arg) {
