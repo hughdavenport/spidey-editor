@@ -15,7 +15,7 @@ help_keys help[][100] = {
         {"Right/l", "Move cursor right"},
         {"r[nn]", "goto room"},
         {"s[n]", "goto switch"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "quit"},
         {"Ctrl-?", "toggle help"},
         {"Escape", "close/cancel"},
@@ -29,7 +29,7 @@ help_keys help[][100] = {
         {"0-9a-fA-F", "Enter hex nibble"},
         {"Shift+dir", "Move thing under cursor"},
         {"Alt+dir", "Stretch thing under cursor"},
-        {"Alt+S+dir", "TODO Shrink thing under cursor"},
+        {"Alt+S+dir", "Shrink thing under cursor"},
         {"Left/h", "Move cursor left"},
         {"Down/j", "Move cursor down"},
         {"Up/k", "Move cursor up"},
@@ -38,14 +38,15 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"Ctrl-r[ktdbcef|-]", "edit room detail"},
         {"Ctrl-s[eorcs]", "create/edit switch"},
-        {"Ctrl-o", "TODO create/edit object"},
+        {"Ctrl-o", "create object (1x1 block at cursor)"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
-        {"y", "TODO copy thing"},
+        {"y", "copy thing under cursor (object/switch/block)"},
+        {"p", "paste copied thing at cursor"},
         {"+", "increase id of thing under cursor"},
         {"-", "decrease id of thing under cursor"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "quit"},
         {"Ctrl-?", "toggle help"},
         {"Escape", "close/cancel"},
@@ -135,7 +136,7 @@ help_keys help[][100] = {
         {"DOWN", "Edit room below"},
 
         {"ESC", "go back to main view"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -145,7 +146,7 @@ help_keys help[][100] = {
     [EDIT_ROOMDETAILS_NUM]={
         {"0-9a-fA-F", "value"},
         {"ESC", "go back to main view"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -174,13 +175,14 @@ help_keys help[][100] = {
         {"Right/l", "set switch side to right"},
         {"+", "increase switch id (shuffles up)"},
         {"-", "decrease switch id (shuffles down)"},
-        {"y", "TODO copy switch"},
+        {"y", "copy switch to clipboard"},
+        {"p", "paste clipboard chunk into this switch"},
         {"c[n]", "select chunk"},
         {"C", "create new chunk"},
         {"ESC", "go back to main view"},
         {"DEL", "delete switch"},
         {"BACKSPACE", "delete switch"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -190,7 +192,7 @@ help_keys help[][100] = {
     [EDIT_SWITCHDETAILS_SELECT_CHUNK]={
         {"0-9a-fA-F", "chunk number"},
         {"ESC", "go back to main view"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"+", "add new chunk"},
         {"Ctrl-?", "toggle help"},
@@ -202,7 +204,7 @@ help_keys help[][100] = {
         {"t", "change chunk type"},
         {"DEL", "delete chunk"},
         {"BACKSPACE", "delete chunk"},
-        {"y", "TODO copy chunk"},
+        {"y", "copy chunk to clipboard"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change switch number"},
@@ -210,7 +212,7 @@ help_keys help[][100] = {
         {"n", "cycle possible on values"},
         {"o", "cycle possible off values"},
         {"ESC", "go back to main view"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -233,7 +235,7 @@ help_keys help[][100] = {
         {"t", "change chunk type"},
         {"DEL", "remove partial entry or delete chunk"},
         {"BACKSPACE", "remove partial entry or delete chunk"},
-        {"y", "TODO copy chunk"},
+        {"y", "copy chunk to clipboard"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
@@ -246,7 +248,7 @@ help_keys help[][100] = {
         {"Space", "toggle vertical/horizontal"},
         {"o", "toggle between editing on and off value"},
         {"ESC", "go back to main view"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -257,7 +259,7 @@ help_keys help[][100] = {
         {"t", "change chunk type"},
         {"DEL", "remove partial entry or delete chunk"},
         {"BACKSPACE", "remove partial entry or delete chunk"},
-        {"y", "TODO copy chunk"},
+        {"y", "copy chunk to clipboard"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
@@ -267,7 +269,7 @@ help_keys help[][100] = {
         {"v", "decrease block size (advanced)"},
         {"r", "toggle direction (advanced)"},
         {"ESC", "go back to main view"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -278,7 +280,7 @@ help_keys help[][100] = {
         {"t", "change chunk type"},
         {"DEL", "remove partial entry or delete chunk"},
         {"BACKSPACE", "remove partial entry or delete chunk"},
-        {"y", "TODO copy chunk"},
+        {"y", "copy chunk to clipboard"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"i", "cycle through possible index values"},
@@ -286,7 +288,7 @@ help_keys help[][100] = {
         {" TODO dir keys ?", "change value"},
         {"0-9a-fA-F", "change raw value (advanced)"},
         {"ESC", "go back to main view"},
-        {"p", "play (runs play.sh)"},
+        {"Ctrl-p", "play (runs play.sh)"},
         {"q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -492,6 +494,12 @@ void redraw() {
 
     GOTO(6, 0);
     scr_printf("%s", state->debug.hex ? "[HEX]" : "[DEC]");
+    switch (state->clipboard.type) {
+        case CLIP_OBJECT: scr_printf(" \033[1m[Y:obj]\033[m"); break;
+        case CLIP_SWITCH: scr_printf(" \033[1m[Y:sw]\033[m"); break;
+        case CLIP_CHUNK:  scr_printf(" \033[1m[Y:chk]\033[m"); break;
+        case CLIP_NONE: break;
+    }
 
     GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
     if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM || state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM) {
@@ -797,17 +805,24 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 case BLOCK:
                     assert(object->x + object->block.width <= WIDTH_TILES);
                     assert(object->y + object->block.height <= HEIGHT_TILES);
-                    scr_printf("\033[3%ldm", (i % 3) + 1);
-                    for (int y = object->y; y < object->y + object->block.height; y ++) {
-                        GOTO(2 * object->x, y + 1);
-                        for (int x = object->x; x < object->x + object->block.width; x ++) {
-                            if (dirty[y * MIN_WIDTH + x] == 1) continue;
-                            dirty[y * MIN_WIDTH + x] = 1;
-                            uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-                            if (tile == BLANK_TILE) {
-                                scr_printf("  ");
-                            } else {
-                                scr_printf("%02X", tile);
+                    {
+                        size_t tile_n = object->block.width * object->block.height;
+                        bool all_blank = true;
+                        for (size_t t = 0; t < tile_n; t++) {
+                            if (object->tiles[t] != BLANK_TILE) { all_blank = false; break; }
+                        }
+                        scr_printf("\033[3%ldm", (i % 3) + 1);
+                        for (int y = object->y; y < object->y + object->block.height; y ++) {
+                            GOTO(2 * object->x, y + 1);
+                            for (int x = object->x; x < object->x + object->block.width; x ++) {
+                                if (dirty[y * MIN_WIDTH + x] == 1) continue;
+                                dirty[y * MIN_WIDTH + x] = 1;
+                                uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
+                                if (tile == BLANK_TILE && !all_blank) {
+                                    scr_printf("  ");
+                                } else {
+                                    scr_printf("%02X", tile);
+                                }
                             }
                         }
                     }
@@ -1266,8 +1281,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     PRINTF_DATA(object_underneath->sprite.damage);
                     break;
             }
-        } else if (state->current_state == TILE_EDIT) {
-            scr_printf("No object here, TODO create new?");
         }
     }
 

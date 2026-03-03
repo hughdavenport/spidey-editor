@@ -2325,37 +2325,32 @@ static bool handle_normal(Key key) {
     }
 
     if (is_tile) {
-        /* SHIFT+arrows or uppercase HJKL: move() */
-        if ((key.code == KEY_LEFT  && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.ch == 'H')) {
-            move(-1, 0);
-        } else if ((key.code == KEY_DOWN  && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.ch == 'J')) {
-            move(0, +1);
-        } else if ((key.code == KEY_UP    && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.ch == 'K')) {
-            move(0, -1);
-        } else if ((key.code == KEY_RIGHT && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.ch == 'L')) {
-            move(+1, 0);
-        }
-
-        /* ALT+arrows or alt+hjkl: stretch() */
-        if ((key.code == KEY_LEFT  && (key.mod & MOD_ALT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'h')) {
-            stretch(-1, 0);
-        } else if ((key.code == KEY_DOWN  && (key.mod & MOD_ALT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'j')) {
-            stretch(0, +1);
-        } else if ((key.code == KEY_UP    && (key.mod & MOD_ALT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'k')) {
-            stretch(0, -1);
-        } else if ((key.code == KEY_RIGHT && (key.mod & MOD_ALT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'l')) {
-            stretch(+1, 0);
-        }
-
-        /* ALT+SHIFT+arrows or alt+HJKL: shrink() */
-        if ((key.code == KEY_LEFT  && (key.mod & MOD_ALT) && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'H')) {
-            shrink(-1, 0);
-        } else if ((key.code == KEY_DOWN  && (key.mod & MOD_ALT) && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'J')) {
-            shrink(0, +1);
-        } else if ((key.code == KEY_UP    && (key.mod & MOD_ALT) && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'K')) {
-            shrink(0, -1);
-        } else if ((key.code == KEY_RIGHT && (key.mod & MOD_ALT) && (key.mod & MOD_SHIFT)) || (key.code == KEY_CHAR && key.mod == MOD_ALT && key.ch == 'L')) {
-            shrink(+1, 0);
+        if (key.code == KEY_LEFT || key.code == KEY_DOWN || key.code == KEY_UP || key.code == KEY_RIGHT) {
+            int dx = (key.code == KEY_LEFT) ? -1 : (key.code == KEY_RIGHT) ? 1 : 0;
+            int dy = (key.code == KEY_UP)   ? -1 : (key.code == KEY_DOWN)  ? 1 : 0;
+            if      (key.mod == MOD_SHIFT)             { move(dx, dy); }
+            else if (key.mod == MOD_ALT)               { stretch(dx, dy); }
+            else if (key.mod == (MOD_ALT | MOD_SHIFT)) { shrink(dx, dy); }
+        } else if (key.code == KEY_CHAR && key.mod == MOD_NONE) {
+            /* SHIFT+hjkl (uppercase): move() */
+            switch (key.ch) {
+                case 'H': move(-1,  0); break;
+                case 'J': move( 0, +1); break;
+                case 'K': move( 0, -1); break;
+                case 'L': move(+1,  0); break;
+            }
+        } else if (key.code == KEY_CHAR && key.mod == MOD_ALT) {
+            /* Alt+hjkl: stretch(); Alt+HJKL: shrink() */
+            switch (key.ch) {
+                case 'h': stretch(-1,  0); break;
+                case 'j': stretch( 0, +1); break;
+                case 'k': stretch( 0, -1); break;
+                case 'l': stretch(+1,  0); break;
+                case 'H': shrink(-1,  0); break;
+                case 'J': shrink( 0, +1); break;
+                case 'K': shrink( 0, -1); break;
+                case 'L': shrink(+1,  0); break;
+            }
         }
     }
 
