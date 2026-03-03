@@ -343,6 +343,16 @@ void show_help()
 void redraw() {
 #define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
 
+    /* Guard before any GOTO: terminal must meet the absolute floor.
+     * The existing check further down handles the debug-panel overage case. */
+    if (state->screen_dimensions.x < MIN_WIDTH || state->screen_dimensions.y < MIN_HEIGHT) {
+        scr_printf("\033[1;1HTerminal too small (need %dx%d, have %dx%d)",
+                   MIN_WIDTH, MIN_HEIGHT,
+                   state->screen_dimensions.x, state->screen_dimensions.y);
+        screen_flush();
+        return;
+    }
+
     int offset_y = 0;
     int offset_x = 0;
     if (debugany()) offset_y ++;
@@ -470,9 +480,9 @@ void redraw() {
         int x = state->screen_dimensions.x / 2 - (int)(strlen(message) - 7) / 2;
         int y = state->screen_dimensions.y / 2;
         if (x < 0) x = 0;
-        if (x >= MIN_WIDTH) x = MIN_WIDTH - 1;
+        if (x >= state->screen_dimensions.x) x = state->screen_dimensions.x - 1;
         if (y < 0) y = 0;
-        if (y >= MIN_HEIGHT) y = MIN_HEIGHT - 1;
+        if (y + 1 >= state->screen_dimensions.y) y = state->screen_dimensions.y - 2;
         GOTO(x, y);
         scr_printf("%s", message);
         free(message);
