@@ -121,4 +121,8 @@ void screen_flush(void) {
            sizeof(Cell) * SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH);
     memset(state->screen_curr, 0,
            sizeof(Cell) * SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH);
+
+    /* Reset draw-state so next frame's scr_printf calls start with default colour */
+    scr_x = 0; scr_y = 0;
+    scr_fg = 0; scr_bg = 0; scr_attr = 0;
 }
