@@ -446,13 +446,7 @@ static bool handle_goto_room(Key key) {
                key.code == KEY_CHAR && key.ch >= '0' &&
                key.ch <= (state->debug.hex ? '3' : '6')) {
         state->partial_byte = 0xFF00 | (key.ch - '0');
-    } else if (key.code == KEY_BS) {
-        if (state->roomname_cursor) {
-            state->room_name[--state->roomname_cursor] = 0;
-        } else {
-            state->partial_byte = 0;
-        }
-    } else if (key.code == KEY_DELETE) {
+    } else if (key.code == KEY_BS || key.code == KEY_DELETE) {
         if (state->roomname_cursor) {
             state->room_name[--state->roomname_cursor] = 0;
         } else {
@@ -557,13 +551,6 @@ static bool handle_goto_room(Key key) {
 
 static bool handle_edit_roomname(Key key) {
     size_t *cursorlevel = &state->current_level;
-    if (state->help) {
-        if (key.code == KEY_ESC || (key.code == KEY_CHAR && key.ch == 'q') ||
-                (key.code == KEY_CTRL && key.ch == '_')) {
-            state->help = false;
-        }
-        return true;
-    }
 
     if (key.code == KEY_CTRL && key.ch == 'J') {
         /* ENTER (Ctrl-J = \n) */
@@ -602,11 +589,15 @@ static bool handle_edit_roomname(Key key) {
             state->roomname_cursor --;
         }
     } else if (key.code == KEY_ESC) {
-        state->current_state = state->previous_state;
-        state->current_switch = 0;
-        state->switch_on = false;
-        state->current_chunk = 0;
-        state->previous_state = NORMAL;
+        if (state->help) {
+            state->help = false;
+        } else {
+            state->current_state = state->previous_state;
+            state->current_switch = 0;
+            state->switch_on = false;
+            state->current_chunk = 0;
+            state->previous_state = NORMAL;
+        }
     } else if (key.code == KEY_BS) {
         if (state->roomname_cursor) {
             for (size_t c = state->roomname_cursor - 1; c < C_ARRAY_LEN(state->room_name) - 1; c ++) {
@@ -627,16 +618,6 @@ static bool handle_edit_roomname(Key key) {
 }
 
 static bool handle_toggle_display(Key key) {
-    if (state->help) {
-        if (key.code == KEY_CTRL && key.ch == 'H') {
-            state->debug.hex = !state->debug.hex;
-        } else if (key.code == KEY_ESC || (key.code == KEY_CHAR && (key.ch == 'q' || key.ch == '?')) ||
-                   (key.code == KEY_CTRL && key.ch == '_')) {
-            state->help = false;
-        }
-        return true;
-    }
-
     uint8_t changed = 1;
     if (key.code == KEY_CHAR) {
         switch (key.ch) {
@@ -648,21 +629,17 @@ static bool handle_toggle_display(Key key) {
             case 's': state->debug.switches = !state->debug.switches; break;
             case 'u': state->debug.unknowns = !state->debug.unknowns; break;
             case 'q': break;
-            case '?':
-            case 0x1F:  /* not reachable via KEY_CHAR but keep for safety */
-                state->help = !state->help;
-                fallthrough;
-            default: fprintf(stderr, "key.ch = %02x\n", (unsigned char)key.ch); UNREACHABLE(); changed = 0;
+            case '?': state->help = !state->help; changed = 0; break;
+            default: changed = 0; break;
         }
     } else if (key.code == KEY_ESC) {
-        /* exit toggle display */
+        if (state->help) { state->help = false; changed = 0; }
+        /* else: exit toggle display (changed stays 1) */
     } else if (key.code == KEY_CTRL) {
         switch (key.ch) {
             case 'H': state->debug.hex = !state->debug.hex; break;
-            case '_':
-                state->help = !state->help;
-                fallthrough;
-            default: fprintf(stderr, "key.ch = %02x\n", (unsigned char)key.ch); UNREACHABLE(); changed = 0;
+            case '_': state->help = !state->help; changed = 0; break;
+            default: changed = 0; break;
         }
     } else {
         changed = 0;
@@ -919,13 +896,7 @@ static bool handle_edit_roomdetails_room(Key key) {
                key.code == KEY_CHAR && key.ch >= '0' &&
                key.ch <= (state->debug.hex ? '3' : '6')) {
         state->partial_byte = 0xFF00 | (key.ch - '0');
-    } else if (key.code == KEY_BS) {
-        if (state->roomname_cursor) {
-            state->room_name[--state->roomname_cursor] = 0;
-        } else {
-            state->partial_byte = 0;
-        }
-    } else if (key.code == KEY_DELETE) {
+    } else if (key.code == KEY_BS || key.code == KEY_DELETE) {
         if (state->roomname_cursor) {
             state->room_name[--state->roomname_cursor] = 0;
         } else {
@@ -1050,29 +1021,7 @@ static bool handle_edit_switchdetails(Key key) {
         room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
         assert(writeRooms(&state->rooms));
-    } else if (key.code == KEY_DELETE) {
-        if (!state->current_switch) UNREACHABLE();
-        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
-        size_t sw_i = state->current_switch - 1;
-        while (sw_i < (size_t)(room->num_switches - 1)) {
-            room->switches[sw_i] = room->switches[sw_i+1];
-            sw_i++;
-        }
-        memset(room->switches + sw_i, 0, sizeof(struct SwitchObject));
-        room->num_switches --;
-        state->current_state = state->previous_state;
-        state->current_switch = 0;
-        state->switch_on = false;
-        state->current_chunk = 0;
-        state->previous_state = NORMAL;
-        state->partial_byte = 0;
-        if (state->roomname_cursor) {
-            memset(state->room_name, 0, state->roomname_cursor);
-            state->roomname_cursor = 0;
-        }
-        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-        assert(writeRooms(&state->rooms));
-    } else if (key.code == KEY_BS) {
+    } else if (key.code == KEY_BS || key.code == KEY_DELETE) {
         if (!state->current_switch) UNREACHABLE();
         struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
         size_t sw_i = state->current_switch - 1;
@@ -1354,7 +1303,7 @@ static bool handle_edit_switchdetails_select_chunk(Key key) {
                 default: UNREACHABLE();
             }
         }
-    } else if (key.code == KEY_BS) {
+    } else if (key.code == KEY_BS || key.code == KEY_DELETE) {
         state->partial_byte = 0;
     } else if (key.code == KEY_ESC) {
         if (state->help) {
@@ -1576,13 +1525,7 @@ static bool handle_edit_switchdetails_chunk_switch_room(Key key) {
                key.code == KEY_CHAR && key.ch >= '0' &&
                key.ch <= (state->debug.hex ? '3' : '6')) {
         state->partial_byte = 0xFF00 | (key.ch - '0');
-    } else if (key.code == KEY_BS) {
-        if (state->roomname_cursor) {
-            state->room_name[--state->roomname_cursor] = 0;
-        } else {
-            state->partial_byte = 0;
-        }
-    } else if (key.code == KEY_DELETE) {
+    } else if (key.code == KEY_BS || key.code == KEY_DELETE) {
         if (state->roomname_cursor) {
             state->room_name[--state->roomname_cursor] = 0;
         } else {
@@ -2629,7 +2572,7 @@ static bool handle_tile_edit(Key key) {
         }
         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
         assert(writeRooms(&state->rooms));
-    } else if (key.code == KEY_BS) {
+    } else if (key.code == KEY_BS || key.code == KEY_DELETE) {
         if (state->partial_byte) {
             state->partial_byte = 0;
         } else {
