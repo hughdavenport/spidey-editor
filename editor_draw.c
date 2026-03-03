@@ -313,37 +313,35 @@ void show_help()
     if (x % 2) x++;
     y += 3;
     GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
-    printf("\033[47;30;1m");
-    printf("+");
-    for (int i = 0; i < x / 2 - 3; i ++) printf("-");
-    printf("help");
-    for (int i = 0; i < x / 2 - 3; i ++) printf("-");
-    printf("+\033[m ");
+    scr_printf("\033[47;30;1m");
+    scr_printf("+");
+    for (int i = 0; i < x / 2 - 3; i ++) scr_printf("-");
+    scr_printf("help");
+    for (int i = 0; i < x / 2 - 3; i ++) scr_printf("-");
+    scr_printf("+\033[m ");
     for (int _y = 1; _y < y - 1; _y ++) {
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + _y);
-        printf("\033[47;30;1;m|%*s|\033[40;37;1m ", x - 2, "");
+        scr_printf("\033[47;30;1;m|%*s|\033[40;37;1m ", x - 2, "");
     }
     GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + (y - 2));
-    printf("\033[47;30;1m");
-    printf("+");
-    for (int i = 0; i < x - 2; i ++) printf("-");
-    printf("+\033[40;37;1m ");
+    scr_printf("\033[47;30;1m");
+    scr_printf("+");
+    for (int i = 0; i < x - 2; i ++) scr_printf("-");
+    scr_printf("+\033[40;37;1m ");
     GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + (y - 1));
-    printf("\033[m \033[40;37;1m%*s", x, "");
-    printf("\033[47;30;1m");
+    scr_printf("\033[m \033[40;37;1m%*s", x, "");
+    scr_printf("\033[47;30;1m");
 
     int line = 1;
     for (size_t i = 0; i < C_ARRAY_LEN(help[state->current_state]); i ++) {
         if (help[state->current_state][i].key == NULL) break;
         GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
-        printf("|%-*s - %-*s|", x1, help[state->current_state][i].key, x - x1 - 5, help[state->current_state][i].action);
+        scr_printf("|%-*s - %-*s|", x1, help[state->current_state][i].key, x - x1 - 5, help[state->current_state][i].action);
     }
 }
 
 void redraw() {
-    GOTO(0, 0);
-    printf(RESET_GFX_MODE CLEAR_SCREEN);
-#define PRINTF_DATA(num) printf(state->debug.hex ? "%02X" : "%d", (num))
+#define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
 
     int offset_y = 0;
     int offset_x = 0;
@@ -476,14 +474,14 @@ void redraw() {
         if (y < 0) y = 0;
         if (y >= MIN_HEIGHT) y = MIN_HEIGHT - 1;
         GOTO(x, y);
-        printf("%s", message);
+        scr_printf("%s", message);
         free(message);
-        fflush(stdout);
+        screen_flush();
         return;
     }
 
     GOTO(6, 0);
-    printf("%s", state->debug.hex ? "[HEX]" : "[DEC]");
+    scr_printf("%s", state->debug.hex ? "[HEX]" : "[DEC]");
 
     GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
     if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM || state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM) {
@@ -491,22 +489,22 @@ void redraw() {
             switch (state->room_detail) {
                 case 'A':
                 case 'k':
-                    printf("up: ");
+                    scr_printf("up: ");
                     break;
 
                 case 'B':
                 case 'j':
-                    printf("down: ");
+                    scr_printf("down: ");
                     break;
 
                 case 'C':
                 case 'l':
-                    printf("right: ");
+                    scr_printf("right: ");
                     break;
 
                 case 'D':
                 case 'h':
-                    printf("left: ");
+                    scr_printf("left: ");
                     break;
 
                 default: UNREACHABLE();
@@ -514,17 +512,17 @@ void redraw() {
         }
         if (state->partial_byte) {
             if (state->debug.hex) {
-                printf("%x", state->partial_byte & 0xFF);
+                scr_printf("%x", state->partial_byte & 0xFF);
             } else {
-                printf("%u", state->partial_byte & 0xFF);
+                scr_printf("%u", state->partial_byte & 0xFF);
             }
         } else {
-            printf("\033[4;5m_\033[m");
+            scr_printf("\033[4;5m_\033[m");
         }
         switch (state->current_state) {
             case GOTO_ROOM:
             case EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM:
-                printf("\033[4;5m_\033[m - \"%s???\"", state->room_name);
+                scr_printf("\033[4;5m_\033[m - \"%s???\"", state->room_name);
                 break;
 
             case EDIT_ROOMDETAILS_ROOM:
@@ -567,7 +565,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                     default: UNREACHABLE();
                 }
-                printf("\033[4;5m_\033[m - \"%s\"", neighbour_name);
+                scr_printf("\033[4;5m_\033[m - \"%s\"", neighbour_name);
 #undef READ_NEIGHBOUR
             }; break;
 
@@ -575,13 +573,13 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
         for (int y = 0; y < HEIGHT_TILES; y ++) {
             for (int x = 0; x < WIDTH_TILES; x ++) {
-                printf("  ");
+                scr_printf("  ");
             }
-            printf("\n");
+            scr_printf("\n");
         }
 
         GOTO(0,1);
-        printf("\nEnter room number or q to go to main view\n\n");
+        scr_printf("\nEnter room number or q to go to main view\n\n");
         for (size_t i = 0; i < C_ARRAY_LEN(state->rooms.rooms) / 2; i ++) {
             size_t room_id = i;
             struct DecompresssedRoom *room = &state->rooms.rooms[room_id].data;
@@ -600,36 +598,36 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             int printed = 0;
             uint8_t underline = 0;
             if (state->partial_byte && ((room_id / (state->debug.hex ? 16 : 10)) == (state->partial_byte & 0xFF))) {
-                printf("\033[4;1m");
+                scr_printf("\033[4;1m");
                 underline = 1;
-                printed += printf(state->debug.hex ? "%01lx" : "%01ld", room_id / (state->debug.hex ? 16 : 10));
-                printf("\033[m");
-                printed += printf(state->debug.hex ? "%01lx" : "%01ld", room_id % (state->debug.hex ? 16 : 10));
+                printed += scr_printf(state->debug.hex ? "%01lx" : "%01ld", room_id / (state->debug.hex ? 16 : 10));
+                scr_printf("\033[m");
+                printed += scr_printf(state->debug.hex ? "%01lx" : "%01ld", room_id % (state->debug.hex ? 16 : 10));
             } else {
-                if (highlight) printf("\033[4;1m");
-                printed += printf(state->debug.hex ? "%02lx" : "%02ld", room_id);
+                if (highlight) scr_printf("\033[4;1m");
+                printed += scr_printf(state->debug.hex ? "%02lx" : "%02ld", room_id);
             }
-            printed += printf(" - \"");
+            printed += scr_printf(" - \"");
             if (underline) {
-                printf("\033[4;1m");
+                scr_printf("\033[4;1m");
             }
             if (highlight) {
                 char tmp = room_name[state->roomname_cursor];
                 room_name[state->roomname_cursor] = 0;
-                printed += printf("%s", room_name);
+                printed += scr_printf("%s", room_name);
                 room_name[state->roomname_cursor] = tmp;
-                printf("\033[m");
-                printed += printf("%s", room_name + state->roomname_cursor);
+                scr_printf("\033[m");
+                printed += scr_printf("%s", room_name + state->roomname_cursor);
             } else {
-                printed += printf("%s", room_name);
+                printed += scr_printf("%s", room_name);
             }
             if (underline) {
-                printf("\033[m");
+                scr_printf("\033[m");
                 underline = 0;
             }
-            printed += printf("\"");
+            printed += scr_printf("\"");
             for (int j = printed; j < WIDTH_TILES; j ++) {
-                printed += printf(" ");
+                printed += scr_printf(" ");
             }
 
             room_id = C_ARRAY_LEN(state->rooms.rooms) / 2 + i;
@@ -646,54 +644,54 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 }
             }
             if (state->partial_byte && ((room_id / (state->debug.hex ? 16 : 10)) == (state->partial_byte & 0xFF))) {
-                printf("\033[4;1m");
+                scr_printf("\033[4;1m");
                 underline = 1;
-                printf(state->debug.hex ? "%01lx" : "%01ld", room_id / (state->debug.hex ? 16 : 10));
-                printf("\033[m");
-                printf(state->debug.hex ? "%01lx" : "%01ld", room_id % (state->debug.hex ? 16 : 10));
+                scr_printf(state->debug.hex ? "%01lx" : "%01ld", room_id / (state->debug.hex ? 16 : 10));
+                scr_printf("\033[m");
+                scr_printf(state->debug.hex ? "%01lx" : "%01ld", room_id % (state->debug.hex ? 16 : 10));
             } else {
-                if (highlight) printf("\033[4;1m");
-                printf(state->debug.hex ? "%02lx" : "%02ld", room_id);
+                if (highlight) scr_printf("\033[4;1m");
+                scr_printf(state->debug.hex ? "%02lx" : "%02ld", room_id);
             }
-            printf(" - \"");
+            scr_printf(" - \"");
             if (underline) {
-                printf("\033[4;1m");
+                scr_printf("\033[4;1m");
             }
             if (highlight) {
                 char tmp = room_name[state->roomname_cursor];
                 room_name[state->roomname_cursor] = 0;
-                printed += printf("%s", room_name);
+                printed += scr_printf("%s", room_name);
                 room_name[state->roomname_cursor] = tmp;
-                printf("\033[m");
-                printed += printf("%s", room_name + state->roomname_cursor);
+                scr_printf("\033[m");
+                printed += scr_printf("%s", room_name + state->roomname_cursor);
             } else {
-                printed += printf("%s", room_name);
+                printed += scr_printf("%s", room_name);
             }
             if (underline) {
-                printf("\033[m");
+                scr_printf("\033[m");
                 underline = 0;
             }
-            printf("\"");
+            scr_printf("\"");
 
-            if (i != C_ARRAY_LEN(state->rooms.rooms) / 2 - 1) printf("\n");
+            if (i != C_ARRAY_LEN(state->rooms.rooms) / 2 - 1) scr_printf("\n");
         }
         goto show_help_if_needed;
     } else {
         PRINTF_DATA((int)level);
-        printf(" - \"");
+        scr_printf(" - \"");
         if (state->current_state == EDIT_ROOMNAME) {
             for (size_t i = 0; i < state->roomname_cursor; i ++) {
-                printf("%c", state->room_name[i]);
+                scr_printf("%c", state->room_name[i]);
             }
-            printf("\033[40;4;5m%c\033[m", state->room_name[state->roomname_cursor] ? state->room_name[state->roomname_cursor] : '_');
+            scr_printf("\033[40;4;5m%c\033[m", state->room_name[state->roomname_cursor] ? state->room_name[state->roomname_cursor] : '_');
             for (size_t i = state->roomname_cursor + 1; i < C_ARRAY_LEN(state->room_name); i ++) {
                 if (state->room_name[i] == '\0') break;
-                printf("%c", state->room_name[i]);
+                scr_printf("%c", state->room_name[i]);
             }
         } else {
-            printf("%s", room_name);
+            scr_printf("%s", room_name);
         }
-        printf("\"");
+        scr_printf("\"");
     }
 
 
@@ -713,18 +711,18 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 }
                 GOTO(2 * x, y + 1);
                 if (found_switch) {
-                    printf("\033[4%d;30;1m", (s % 3) + 4);
+                    scr_printf("\033[4%d;30;1m", (s % 3) + 4);
                     if (s > 15) {
                         // FIXME support 2 digit nums
                         UNREACHABLE();
                     }
-                    printf(" %x", s);
-                    printf("\033[m");
+                    scr_printf(" %x", s);
+                    scr_printf("\033[m");
                 } else {
                     if (tile == BLANK_TILE) {
-                        printf("  ");
+                        scr_printf("  ");
                     } else {
-                        printf("%02X", tile);
+                        scr_printf("%02X", tile);
                     }
                 }
             }
@@ -740,7 +738,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
                     if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
                         colored = true;
-                        printf("\033[4%d;30m", (s % 3) + 4);
+                        scr_printf("\033[4%d;30m", (s % 3) + 4);
                         break;
                     }
                     for (size_t c = 1; !colored && c < sw->chunks.length; c ++) {
@@ -748,7 +746,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         if (chunk->type == TOGGLE_BLOCK) {
                             if (chunk->dir == HORIZONTAL) {
                                 if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                                    printf("\033[3%d;40m", (s % 3) + 4);
+                                    scr_printf("\033[3%d;40m", (s % 3) + 4);
                                     colored = true;
                                     if ((size_t)s + 1 == state->current_switch && c == state->current_chunk) {
                                         tile = state->switch_on ? chunk->on : chunk->off;
@@ -757,7 +755,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     }
                                 }
                             } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                                printf("\033[3%d;40m", (s % 3) + 4);
+                                scr_printf("\033[3%d;40m", (s % 3) + 4);
                                 colored = true;
                                 if ((size_t)s + 1 == state->current_switch && c == state->current_chunk) {
                                     tile = state->switch_on ? chunk->on : chunk->off;
@@ -770,8 +768,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 }
                 if (colored || tile != BLANK_TILE) {
                     GOTO(2 * x, y + 1);
-                    printf("%02X", tile);
-                    if (colored) printf("\033[m");
+                    scr_printf("%02X", tile);
+                    if (colored) scr_printf("\033[m");
                 }
             }
         }
@@ -789,7 +787,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 case BLOCK:
                     assert(object->x + object->block.width <= WIDTH_TILES);
                     assert(object->y + object->block.height <= HEIGHT_TILES);
-                    printf("\033[3%ldm", (i % 3) + 1);
+                    scr_printf("\033[3%ldm", (i % 3) + 1);
                     for (int y = object->y; y < object->y + object->block.height; y ++) {
                         GOTO(2 * object->x, y + 1);
                         for (int x = object->x; x < object->x + object->block.width; x ++) {
@@ -797,9 +795,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             dirty[y * MIN_WIDTH + x] = 1;
                             uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
                             if (tile == BLANK_TILE) {
-                                printf("  ");
+                                scr_printf("  ");
                             } else {
-                                printf("%02X", tile);
+                                scr_printf("%02X", tile);
                             }
                         }
                     }
@@ -811,10 +809,10 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     assert((unsigned)(object->y * MIN_WIDTH + object->x) < sizeof(dirty));
                     if (dirty[object->y * MIN_WIDTH + object->x] == 1) continue;
                     dirty[object->y * MIN_WIDTH + object->x] = 1;
-                    printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
+                    scr_printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
                     break;
             }
-            printf("\033[m");
+            scr_printf("\033[m");
         }
         if (state->current_state == GOTO_OBJECT) {
             for (int y = 0; y < HEIGHT_TILES; y ++) {
@@ -830,14 +828,14 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     }
                     GOTO(2 * x, y + 1);
                     if (found_object) {
-                        printf("\033[4%d;30;1m", (o % 3) + 1);
+                        scr_printf("\033[4%d;30;1m", (o % 3) + 1);
 
                         if (o > 15) {
                             // FIXME support 2 digit nums
                             UNREACHABLE();
                         }
-                        printf(" %x", o);
-                        printf("\033[m");
+                        scr_printf(" %x", o);
+                        scr_printf("\033[m");
                     }
                 }
             }
@@ -849,26 +847,26 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         size_t ch_i = i;
         if (obj) {
             if (sprite) {
-                printf("\033[3%ld;40;1m", (obj_i % 3) + 1);
+                scr_printf("\033[3%ld;40;1m", (obj_i % 3) + 1);
             } else {
-                printf("\033[30;4%ld;1m", (obj_i % 8) + 1);
+                scr_printf("\033[30;4%ld;1m", (obj_i % 8) + 1);
             }
         }
         if (!obj && sw) {
-            printf("\033[3%ld;1m", (sw_i % 3) + 4);
+            scr_printf("\033[3%ld;1m", (sw_i % 3) + 4);
         }
         if (!obj && !sw && ch) {
-            printf("\033[4%ld;30;1m", (ch_i % 3) + 4);
+            scr_printf("\033[4%ld;30;1m", (ch_i % 3) + 4);
         }
         if (obj || sw || ch) {
             if (state->current_state == GOTO_SWITCH) {
-                printf("@");
+                scr_printf("@");
             } else {
-                printf("%02X", tile);
+                scr_printf("%02X", tile);
             }
-            printf("\033[m");
+            scr_printf("\033[m");
         } else {
-            printf("\033[47;30;1m%02X\033[m", tile);
+            scr_printf("\033[47;30;1m%02X\033[m", tile);
         }
         switch (state->current_state) {
             case EDIT_ROOMDETAILS_NUM:
@@ -891,18 +889,18 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     GOTO(2 * x, y + 1);
                     if (obj) {
                         if (sprite) {
-                            printf("\033[30;4%ld;1m", (obj_i % 3) + 1);
+                            scr_printf("\033[30;4%ld;1m", (obj_i % 3) + 1);
                         } else {
-                            printf("\033[3%ld;1m", (obj_i % 8) + 1);
+                            scr_printf("\033[3%ld;1m", (obj_i % 8) + 1);
                         }
                     } else if (sw) {
-                        printf("\033[30;4%ld;1m", (sw_i % 3) + 4);
+                        scr_printf("\033[30;4%ld;1m", (sw_i % 3) + 4);
                     } else if (ch) {
-                        printf("\033[40;3%ld;1m", (ch_i % 3) + 4);
+                        scr_printf("\033[40;3%ld;1m", (ch_i % 3) + 4);
                     } else {
-                        printf("\033[1m");
+                        scr_printf("\033[1m");
                     }
-                    printf("%X\033[m", state->partial_byte & 0xFF);
+                    scr_printf("%X\033[m", state->partial_byte & 0xFF);
                 }
                 break;
 
@@ -918,22 +916,22 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         assert(state->cursors[state->current_level].y < HEIGHT_TILES);
         if (state->cursors[state->current_level].y - 2 >= 0) {
             GOTO(2 * state->cursors[state->current_level].x, state->cursors[state->current_level].y - 1);
-            printf("\033[41;30;1m@@\033[m");
+            scr_printf("\033[41;30;1m@@\033[m");
         }
         if (state->cursors[state->current_level].y - 1 >= 0) {
             GOTO(2 * state->cursors[state->current_level].x, state->cursors[state->current_level].y);
-            printf("\033[41;30;1m@@\033[m");
+            scr_printf("\033[41;30;1m@@\033[m");
         }
         if (state->cursors[state->current_level].y >= 0) {
             GOTO(2 * state->cursors[state->current_level].x, state->cursors[state->current_level].y + 1);
-            printf("\033[41;30;1m@@\033[m");
+            scr_printf("\033[41;30;1m@@\033[m");
         }
     }
 
     if (state->debug.pos) {
         GOTO(0, 0);
         PRINTF_DATA(state->cursors[state->current_level].x);
-        printf(",");
+        scr_printf(",");
         PRINTF_DATA(state->cursors[state->current_level].y);
     }
 
@@ -944,181 +942,181 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         GOTO(0, bottom); bottom ++;
         switch (state->current_state) {
             case EDIT_ROOMDETAILS:
-                printf("bk\033[1;4mg\033[mrnd: ");PRINTF_DATA(room.background);
-                printf(", \033[1;4mt\033[miles: ");PRINTF_DATA(room.tile_offset);
-                printf(", \033[1;4md\033[mmg: ");PRINTF_DATA(room.room_damage);
-                printf(", gravity (\033[1;4m|\033[m): ");PRINTF_DATA(room.gravity_vertical);
-                printf(", gravity (\033[1;4m-\033[m): ");PRINTF_DATA(room.gravity_horizontal);
+                scr_printf("bk\033[1;4mg\033[mrnd: ");PRINTF_DATA(room.background);
+                scr_printf(", \033[1;4mt\033[miles: ");PRINTF_DATA(room.tile_offset);
+                scr_printf(", \033[1;4md\033[mmg: ");PRINTF_DATA(room.room_damage);
+                scr_printf(", gravity (\033[1;4m|\033[m): ");PRINTF_DATA(room.gravity_vertical);
+                scr_printf(", gravity (\033[1;4m-\033[m): ");PRINTF_DATA(room.gravity_horizontal);
                 break;
 
             case EDIT_ROOMDETAILS_NUM:
                 if (state->room_detail == 'g') {
-                    printf("\033[1;4mbkgrnd\033[m: ");
+                    scr_printf("\033[1;4mbkgrnd\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf("bkgrnd: ");PRINTF_DATA(room.background);
+                    scr_printf("bkgrnd: ");PRINTF_DATA(room.background);
                 }
                 if (state->room_detail == 't') {
-                    printf(", \033[1;4mt\033[miles: ");
+                    scr_printf(", \033[1;4mt\033[miles: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf(", tiles: ");PRINTF_DATA(room.tile_offset);
+                    scr_printf(", tiles: ");PRINTF_DATA(room.tile_offset);
                 }
                 if (state->room_detail == 'd') {
-                    printf(", \033[1;4md\033[mmg: ");
+                    scr_printf(", \033[1;4md\033[mmg: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf(", dmg: ");PRINTF_DATA(room.room_damage);
+                    scr_printf(", dmg: ");PRINTF_DATA(room.room_damage);
                 }
                 if (state->room_detail == '|') {
-                    printf(", gravity (\033[1;4m|\033[m): ");
+                    scr_printf(", gravity (\033[1;4m|\033[m): ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
+                    scr_printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
                 }
                 if (state->room_detail == '-') {
-                    printf(", gravity (\033[1;4m-\033[m): ");
+                    scr_printf(", gravity (\033[1;4m-\033[m): ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
+                    scr_printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
                 }
                 break;
 
             default:
-                printf("bkgrnd: ");PRINTF_DATA(room.background);
-                printf(", tiles: ");PRINTF_DATA(room.tile_offset);
-                printf(", dmg: ");PRINTF_DATA(room.room_damage);
-                printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
-                printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
+                scr_printf("bkgrnd: ");PRINTF_DATA(room.background);
+                scr_printf(", tiles: ");PRINTF_DATA(room.tile_offset);
+                scr_printf(", dmg: ");PRINTF_DATA(room.room_damage);
+                scr_printf(", gravity (|): ");PRINTF_DATA(room.gravity_vertical);
+                scr_printf(", gravity (-): ");PRINTF_DATA(room.gravity_horizontal);
         }
     }
     if (state->debug.unknowns) {
         GOTO(0, bottom); bottom ++;
         switch (state->current_state) {
             case EDIT_ROOMDETAILS:
-                printf("UNKNOWN_\033[1;4mb\033[m: ");PRINTF_DATA(room.UNKNOWN_b);
-                printf(", UNKNOWN_\033[1;4mc\033[m: ");PRINTF_DATA(room.UNKNOWN_c);
-                printf(", UNKNOWN_\033[1;4me\033[m: ");PRINTF_DATA(room._num_switches & 0x3);
-                printf(", UNKNOWN_\033[1;4mf\033[m: ");PRINTF_DATA(room.UNKNOWN_f);
+                scr_printf("UNKNOWN_\033[1;4mb\033[m: ");PRINTF_DATA(room.UNKNOWN_b);
+                scr_printf(", UNKNOWN_\033[1;4mc\033[m: ");PRINTF_DATA(room.UNKNOWN_c);
+                scr_printf(", UNKNOWN_\033[1;4me\033[m: ");PRINTF_DATA(room._num_switches & 0x3);
+                scr_printf(", UNKNOWN_\033[1;4mf\033[m: ");PRINTF_DATA(room.UNKNOWN_f);
                 break;
 
             case EDIT_ROOMDETAILS_NUM:
                 if (state->room_detail == 'b') {
-                    printf("UNKNOWN_\033[1;4mb\033[m: ");
+                    scr_printf("UNKNOWN_\033[1;4mb\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
+                    scr_printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
                 }
 
                 if (state->room_detail == 'c') {
-                    printf(", UNKNOWN_\033[1;4mc\033[m: ");
+                    scr_printf(", UNKNOWN_\033[1;4mc\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
+                    scr_printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
                 }
 
                 if (state->room_detail == 'e') {
-                    printf(", UNKNOWN_\033[1;4me\033[m: ");
+                    scr_printf(", UNKNOWN_\033[1;4me\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
+                    scr_printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
                 }
 
                 if (state->room_detail == 'f') {
-                    printf(", UNKNOWN_\033[1;4mf\033[m: ");
+                    scr_printf(", UNKNOWN_\033[1;4mf\033[m: ");
                     if (state->partial_byte) {
                         if (state->debug.hex) {
-                            printf("%x", state->partial_byte & 0xFF);
+                            scr_printf("%x", state->partial_byte & 0xFF);
                         } else {
-                            printf("%u", state->partial_byte & 0xFF);
+                            scr_printf("%u", state->partial_byte & 0xFF);
                         }
                     } else {
-                        printf("\033[4;5m_\033[m");
+                        scr_printf("\033[4;5m_\033[m");
                     }
-                    printf("\033[4;5m_\033[m");
+                    scr_printf("\033[4;5m_\033[m");
                 } else {
-                    printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
+                    scr_printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
                 }
 
                 break;
 
             default:
-                printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
-                printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
-                printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
-                printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
+                scr_printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
+                scr_printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
+                scr_printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
+                scr_printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
         }
     }
     if (state->debug.neighbours) {
@@ -1139,66 +1137,66 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
         if (state->current_state == EDIT_ROOMDETAILS) {
             GOTO(0, bottom); bottom ++;
-            printf("\033[1;4mLEFT\033[m: ");PRINTF_DATA(room.room_west);
+            scr_printf("\033[1;4mLEFT\033[m: ");PRINTF_DATA(room.room_west);
             READ_NEIGHBOUR(room.room_west);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
             GOTO(0, bottom); bottom ++;
-            printf("\033[1;4mDOWN\033[m: ");PRINTF_DATA(room.room_south);
+            scr_printf("\033[1;4mDOWN\033[m: ");PRINTF_DATA(room.room_south);
             READ_NEIGHBOUR(room.room_south);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
             GOTO(0, bottom); bottom ++;
-            printf("\033[1;4mUP\033[m: ");PRINTF_DATA(room.room_north);
+            scr_printf("\033[1;4mUP\033[m: ");PRINTF_DATA(room.room_north);
             READ_NEIGHBOUR(room.room_north);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
             GOTO(0, bottom); bottom ++;
-            printf("\033[1;4mRIGHT\033[m: ");PRINTF_DATA(room.room_east);
+            scr_printf("\033[1;4mRIGHT\033[m: ");PRINTF_DATA(room.room_east);
             READ_NEIGHBOUR(room.room_east);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
         } else {
             GOTO(0, bottom); bottom ++;
-            printf("left: ");PRINTF_DATA(room.room_west);
+            scr_printf("left: ");PRINTF_DATA(room.room_west);
             READ_NEIGHBOUR(room.room_west);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
             GOTO(0, bottom); bottom ++;
-            printf("down: ");PRINTF_DATA(room.room_south);
+            scr_printf("down: ");PRINTF_DATA(room.room_south);
             READ_NEIGHBOUR(room.room_south);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
             GOTO(0, bottom); bottom ++;
-            printf("up: ");PRINTF_DATA(room.room_north);
+            scr_printf("up: ");PRINTF_DATA(room.room_north);
             READ_NEIGHBOUR(room.room_north);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
             GOTO(0, bottom); bottom ++;
-            printf("right: ");PRINTF_DATA(room.room_east);
+            scr_printf("right: ");PRINTF_DATA(room.room_east);
             READ_NEIGHBOUR(room.room_east);
-            printf(" - \"%s\"", neighbour_name);
+            scr_printf(" - \"%s\"", neighbour_name);
         }
     }
 
     if (state->current_state == EDIT_ROOMNAME) {
         GOTO(0, bottom); bottom +=2;
-        printf("\nEnter new room name in space highlighted at top of screen");
+        scr_printf("\nEnter new room name in space highlighted at top of screen");
         goto show_help_if_needed;
     }
 
     if (state->current_state == GOTO_SWITCH) {
         GOTO(0, bottom);
-        printf("\nEnter switch id (in hex) or q to go to main view");
+        scr_printf("\nEnter switch id (in hex) or q to go to main view");
     }
 
     if (state->current_state == GOTO_OBJECT) {
         GOTO(0, bottom);
-        printf("\nEnter object id (in hex) or q to go to main view");
+        scr_printf("\nEnter object id (in hex) or q to go to main view");
     }
 
     if (state->current_state == TOGGLE_DISPLAY) {
         GOTO(0, bottom); bottom +=2;
-        printf("\nEnter type to toggle, a for all, Ctrl-? for help");
+        scr_printf("\nEnter type to toggle, a for all, Ctrl-? for help");
         goto show_help_if_needed;
     }
 
     if (state->current_state == EDIT_ROOMDETAILS) {
         GOTO(0, bottom); bottom +=2;
-        printf("\nEnter element to edit, Ctrl-? for help");
+        scr_printf("\nEnter element to edit, Ctrl-? for help");
         goto show_help_if_needed;
     }
 
@@ -1213,53 +1211,53 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             }
             switch (object_underneath->type) {
                 case BLOCK:
-                    printf("block: (x,y)=");
+                    scr_printf("block: (x,y)=");
                     PRINTF_DATA(object_underneath->x);
-                    printf(",");
+                    scr_printf(",");
                     PRINTF_DATA(object_underneath->y);
-                    printf(" (w,h)=");
+                    scr_printf(" (w,h)=");
                     PRINTF_DATA(object_underneath->block.width);
-                    printf(",");
+                    scr_printf(",");
                     PRINTF_DATA(object_underneath->block.height);
                     break;
 
                 case SPRITE:
-                    printf("sprite: ");
+                    scr_printf("sprite: ");
                     switch(object_underneath->sprite.type) {
                         case SHARK: 
                             switch (object_underneath->sprite.damage) {
                                 case 1:
                                 case 2:
-                                    printf("Shark");
+                                    scr_printf("Shark");
                                     break;
 
-                                case 3: printf("Mysterio"); break;
-                                case 4: printf("Mary Jane"); break;
+                                case 3: scr_printf("Mysterio"); break;
+                                case 4: scr_printf("Mary Jane"); break;
 
                                 default: UNREACHABLE();
                             }
                             break;
 
-                        case MUMMY: printf("Mummy"); break;
-                        case BLUE_MAN: printf("Blue man"); break;
-                        case WOLF: printf("Wolf"); break;
-                        case R2D2: printf("R2D2"); break;
-                        case DINOSAUR: printf("Dinosaur"); break;
-                        case RAT: printf("Rat"); break;
-                        case SHOTGUN_LADY: printf("Shotgun_lady"); break;
+                        case MUMMY: scr_printf("Mummy"); break;
+                        case BLUE_MAN: scr_printf("Blue man"); break;
+                        case WOLF: scr_printf("Wolf"); break;
+                        case R2D2: scr_printf("R2D2"); break;
+                        case DINOSAUR: scr_printf("Dinosaur"); break;
+                        case RAT: scr_printf("Rat"); break;
+                        case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
 
                         default: UNREACHABLE();
                     }
-                    printf(" (x,y)=");
+                    scr_printf(" (x,y)=");
                     PRINTF_DATA(object_underneath->x);
-                    printf(",");
+                    scr_printf(",");
                     PRINTF_DATA(object_underneath->y);
-                    printf(" (dmg)=");
+                    scr_printf(" (dmg)=");
                     PRINTF_DATA(object_underneath->sprite.damage);
                     break;
             }
         } else if (state->current_state == TILE_EDIT) {
-            printf("No object here, TODO create new?");
+            scr_printf("No object here, TODO create new?");
         }
     }
 
@@ -1283,20 +1281,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             assert(switcz->chunks.length >= 1);
             struct SwitchChunk *preamble = switcz->chunks.data;
             if (state->current_state == EDIT_SWITCHDETAILS) {
-                printf("switch ");
-                if (switcz == switch_underneath) printf("\033[4;1m");
+                scr_printf("switch ");
+                if (switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
-                if (switcz == switch_underneath) printf("\033[m");
-                printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
+                if (switcz == switch_underneath) scr_printf("\033[m");
+                scr_printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
                         preamble->x, preamble->y,
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
             } else {
-                printf("switch ");
-                if (state->current_state == TILE_EDIT && switcz == switch_underneath) printf("\033[4;1m");
+                scr_printf("switch ");
+                if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
-                if (state->current_state == TILE_EDIT && switcz == switch_underneath) printf("\033[m");
-                printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[m");
+                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
                         preamble->x, preamble->y,
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
@@ -1304,27 +1302,27 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             bottom +=2;
             if (switcz->chunks.length > 1) {
                 if (state->current_state == EDIT_SWITCHDETAILS) {
-                    printf("  \033[1;4mc\033[mhunks:\n");
+                    scr_printf("  \033[1;4mc\033[mhunks:\n");
                 } else {
-                    printf("  chunks:\n");
+                    scr_printf("  chunks:\n");
                 }
                 bottom ++;
                 for (size_t i = 1; i < switcz->chunks.length; i ++) {
-                    printf("    ");
+                    scr_printf("    ");
                     if ((state->current_state != EDIT_SWITCHDETAILS_SELECT_CHUNK && switcz == chunk_switch_underneath && (size_t)(chunk_underneath - switcz->chunks.data) == i) ||
                             (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK || state->current_chunk == i)) {
-                        printf("\033[1;4m(");
+                        scr_printf("\033[1;4m(");
                         PRINTF_DATA((uint16_t)i);
-                        printf(")\033[m ");
+                        scr_printf(")\033[m ");
                     } else {
-                        printf("(");
+                        scr_printf("(");
                         PRINTF_DATA((uint16_t)i);
-                        printf(") ");
+                        scr_printf(") ");
                     }
                     if (state->current_chunk == i) {
-                        printf("\033[1;4mt\033[mype ");
+                        scr_printf("\033[1;4mt\033[mype ");
                     } else {
-                        printf("type ");
+                        scr_printf("type ");
                     }
                     struct SwitchChunk *chunk = switcz->chunks.data + i;
                     switch (chunk->type) {
@@ -1333,7 +1331,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             size_t overflow = WIDTH_TILES * HEIGHT_TILES;
                             size_t point = chunk->y * WIDTH_TILES + chunk->x;
                             if (point >= overflow) {
-                                printf("memory:");
+                                scr_printf("memory:");
                                 size_t offset = point - overflow;
                                 size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
                                 if (offset >= end) {
@@ -1341,20 +1339,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     /* assert(false); */
                                 }
                                 switch (offset) {
-                                    case 0: printf(" tile_offset"); break;
-                                    case 1: printf(" background"); break;
-                                    case 2: printf(" room_north"); break;
-                                    case 3: printf(" room_east"); break;
-                                    case 4: printf(" room_south"); break;
-                                    case 5: printf(" room_west"); break;
-                                    case 6: printf(" room_damage"); break;
-                                    case 7: printf(" gravity_vertical"); break;
-                                    case 8: printf(" gravity_horizontal"); break;
-                                    case 9: printf(" UNKNOWN_b"); break;
-                                    case 10: printf(" UNKNOWN_c"); break;
-                                    case 11: printf(" num_objects"); break;
-                                    case 12: printf(" _num_switches"); break;
-                                    case 13: printf(" UNKNOWN_f"); break;
+                                    case 0: scr_printf(" tile_offset"); break;
+                                    case 1: scr_printf(" background"); break;
+                                    case 2: scr_printf(" room_north"); break;
+                                    case 3: scr_printf(" room_east"); break;
+                                    case 4: scr_printf(" room_south"); break;
+                                    case 5: scr_printf(" room_west"); break;
+                                    case 6: scr_printf(" room_damage"); break;
+                                    case 7: scr_printf(" gravity_vertical"); break;
+                                    case 8: scr_printf(" gravity_horizontal"); break;
+                                    case 9: scr_printf(" UNKNOWN_b"); break;
+                                    case 10: scr_printf(" UNKNOWN_c"); break;
+                                    case 11: scr_printf(" num_objects"); break;
+                                    case 12: scr_printf(" _num_switches"); break;
+                                    case 13: scr_printf(" UNKNOWN_f"); break;
 
                                     case 14:
                                     case 15:
@@ -1380,95 +1378,95 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     case 35:
                                     case 36:
                                     case 37:
-                                             printf(" name[%lu]", offset-14);
+                                             scr_printf(" name[%lu]", offset-14);
                                              break;
 
-                                    default: printf(" out_of_bounds[%lu]", offset-end);
+                                    default: scr_printf(" out_of_bounds[%lu]", offset-end);
                                 }
                                 if (state->current_chunk == i) {
-                                    printf(" (\033[4;1mo\033[mn/\033[4;1mo\033[mff)=");
+                                    scr_printf(" (\033[4;1mo\033[mn/\033[4;1mo\033[mff)=");
                                     if (state->switch_on) {
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", state->partial_byte & 0xFF);
+                                                scr_printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", state->partial_byte & 0xFF);
+                                                scr_printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
-                                            printf("\033[4;5m%x\033[m", chunk->on / (state->debug.hex ? 16 : 10));
+                                            scr_printf("\033[4;5m%x\033[m", chunk->on / (state->debug.hex ? 16 : 10));
                                         }
-                                        printf("\033[4;5m%x\033[m", chunk->on % (state->debug.hex ? 16 : 10));
+                                        scr_printf("\033[4;5m%x\033[m", chunk->on % (state->debug.hex ? 16 : 10));
                                     } else {
                                         PRINTF_DATA(chunk->on);
                                     }
-                                    printf("/");
+                                    scr_printf("/");
                                     if (state->switch_on) {
                                         PRINTF_DATA(chunk->off);
                                     } else {
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", state->partial_byte & 0xFF);
+                                                scr_printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", state->partial_byte & 0xFF);
+                                                scr_printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
-                                            printf("\033[4;5m%x\033[m", chunk->off / (state->debug.hex ? 16 : 10));
+                                            scr_printf("\033[4;5m%x\033[m", chunk->off / (state->debug.hex ? 16 : 10));
                                         }
-                                        printf("\033[4;5m%x\033[m", chunk->off % (state->debug.hex ? 16 : 10));
+                                        scr_printf("\033[4;5m%x\033[m", chunk->off % (state->debug.hex ? 16 : 10));
                                     }
-                                    printf(" (size)=%d (di\033[4;1mr\033[m)=%s", chunk->size, chunk->dir == HORIZONTAL ? "horiz" : "vert");
+                                    scr_printf(" (size)=%d (di\033[4;1mr\033[m)=%s", chunk->size, chunk->dir == HORIZONTAL ? "horiz" : "vert");
                                 } else {
-                                    printf(" (on/off)=");
+                                    scr_printf(" (on/off)=");
                                     PRINTF_DATA(chunk->on);
-                                    printf("/");
+                                    scr_printf("/");
                                     PRINTF_DATA(chunk->off);
-                                    printf(" (size)=%d (dir)=%s", chunk->size, chunk->dir == HORIZONTAL ? "horiz" : "vert");
+                                    scr_printf(" (size)=%d (dir)=%s", chunk->size, chunk->dir == HORIZONTAL ? "horiz" : "vert");
                                 }
                             } else {
-                                printf("block: ");
+                                scr_printf("block: ");
                                 if (state->current_chunk == i) {
-                                    printf("\033[3%ld;40m", (i % 7));
+                                    scr_printf("\033[3%ld;40m", (i % 7));
                                 }
-                                printf("(x,y)=");
+                                scr_printf("(x,y)=");
                                 PRINTF_DATA(chunk->x);
-                                printf(",");
+                                scr_printf(",");
                                 PRINTF_DATA(chunk->y);
-                                if (state->current_chunk == i) printf("\033[m");
+                                if (state->current_chunk == i) scr_printf("\033[m");
                                 if (state->current_chunk == i) {
-                                    printf(" (%s)=%d (\033[4;1mo\033[mn/\033[4;1mo\033[mff)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
+                                    scr_printf(" (%s)=%d (\033[4;1mo\033[mn/\033[4;1mo\033[mff)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
                                     if (state->switch_on) {
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", state->partial_byte & 0xFF);
+                                                scr_printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", state->partial_byte & 0xFF);
+                                                scr_printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
-                                            printf("\033[4;5m%x\033[m", chunk->on / (state->debug.hex ? 16 : 10));
+                                            scr_printf("\033[4;5m%x\033[m", chunk->on / (state->debug.hex ? 16 : 10));
                                         }
-                                        printf("\033[4;5m%x\033[m", chunk->on % (state->debug.hex ? 16 : 10));
+                                        scr_printf("\033[4;5m%x\033[m", chunk->on % (state->debug.hex ? 16 : 10));
                                     } else {
                                         PRINTF_DATA(chunk->on);
                                     }
-                                    printf("/");
+                                    scr_printf("/");
                                     if (state->switch_on) {
                                         PRINTF_DATA(chunk->off);
                                     } else {
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", state->partial_byte & 0xFF);
+                                                scr_printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", state->partial_byte & 0xFF);
+                                                scr_printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
-                                            printf("\033[4;5m%x\033[m", chunk->off / (state->debug.hex ? 16 : 10));
+                                            scr_printf("\033[4;5m%x\033[m", chunk->off / (state->debug.hex ? 16 : 10));
                                         }
-                                        printf("\033[4;5m%x\033[m", chunk->off % (state->debug.hex ? 16 : 10));
+                                        scr_printf("\033[4;5m%x\033[m", chunk->off % (state->debug.hex ? 16 : 10));
                                     }
                                 } else {
-                                    printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
+                                    scr_printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
                                     PRINTF_DATA(chunk->on);
-                                    printf("/");
+                                    scr_printf("/");
                                     PRINTF_DATA(chunk->off);
                                 }
                                 if (state->current_chunk == i) {
@@ -1479,18 +1477,18 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                             GOTO(2 * chunk->x, chunk->y + offset + 1);
                                         }
                                         assert(state->current_switch);
-                                        printf("\033[3%ld;40m", (i % 7));
+                                        scr_printf("\033[3%ld;40m", (i % 7));
                                         if (state->partial_byte) {
                                             if (state->debug.hex) {
-                                                printf("%x", state->partial_byte & 0xFF);
+                                                scr_printf("%x", state->partial_byte & 0xFF);
                                             } else {
-                                                printf("%u", state->partial_byte & 0xFF);
+                                                scr_printf("%u", state->partial_byte & 0xFF);
                                             }
                                         } else {
-                                            printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) / (state->debug.hex ? 16 : 10));
+                                            scr_printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) / (state->debug.hex ? 16 : 10));
                                         }
-                                        printf("\033[3%ld;40m", (i % 7));
-                                        printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) % (state->debug.hex ? 16 : 10));
+                                        scr_printf("\033[3%ld;40m", (i % 7));
+                                        scr_printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) % (state->debug.hex ? 16 : 10));
                                     }
                                     GOTO(0, bottom - 1);
                                 }
@@ -1511,20 +1509,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                 }
                             }
                             if (state->current_chunk == i) {
-                                printf("toggle: (\033[4;1mr\033[moom) %s (switch) ", target_name);
+                                scr_printf("toggle: (\033[4;1mr\033[moom) %s (switch) ", target_name);
                                 if (state->partial_byte) {
                                     if (state->debug.hex) {
-                                        printf("%x", state->partial_byte & 0xFF);
+                                        scr_printf("%x", state->partial_byte & 0xFF);
                                     } else {
-                                        printf("%u", state->partial_byte & 0xFF);
+                                        scr_printf("%u", state->partial_byte & 0xFF);
                                     }
                                 } else {
-                                    printf("\033[4;5m%x\033[m", chunk->switch_idx / (state->debug.hex ? 16 : 10));
+                                    scr_printf("\033[4;5m%x\033[m", chunk->switch_idx / (state->debug.hex ? 16 : 10));
                                 }
-                                printf("\033[4;5m%x\033[m", chunk->switch_idx % (state->debug.hex ? 16 : 10));
-                                printf(" (o\033[4;1mn\033[m/\033[4;1mo\033[mff)=%x/%x", chunk->on, chunk->off);
+                                scr_printf("\033[4;5m%x\033[m", chunk->switch_idx % (state->debug.hex ? 16 : 10));
+                                scr_printf(" (o\033[4;1mn\033[m/\033[4;1mo\033[mff)=%x/%x", chunk->on, chunk->off);
                             } else {
-                                printf("toggle: (room) %s (switch) %u (on/off)=%d/%d",
+                                scr_printf("toggle: (room) %s (switch) %u (on/off)=%d/%d",
                                         target_name, chunk->switch_idx, chunk->on, chunk->off);
                             }
                         }; break;
@@ -1532,51 +1530,51 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         case TOGGLE_OBJECT:
                         {
                             if (state->current_chunk == i) {
-                                printf("object: (\033[4;1mi\033[mdx)=%d (te\033[4;1ms\033[mt)=%d", chunk->index, chunk->test >> 4);
+                                scr_printf("object: (\033[4;1mi\033[mdx)=%d (te\033[4;1ms\033[mt)=%d", chunk->index, chunk->test >> 4);
                             } else {
-                                printf("object: (idx)=%d (test)=%d", chunk->index, chunk->test >> 4);
+                                scr_printf("object: (idx)=%d (test)=%d", chunk->index, chunk->test >> 4);
                             }
-                            printf(" (value)=");
+                            scr_printf(" (value)=");
                             switch (chunk->value & MOVE_LEFT) {
                                 case MOVE_LEFT:
                                     switch (chunk->value & MOVE_UP) {
-                                        case MOVE_UP: printf("up+left"); break;
-                                        case MOVE_DOWN: printf("down+left"); break;
-                                        case '\0': printf("left"); break;
+                                        case MOVE_UP: scr_printf("up+left"); break;
+                                        case MOVE_DOWN: scr_printf("down+left"); break;
+                                        case '\0': scr_printf("left"); break;
                                     }
                                     break;
 
                                 case MOVE_RIGHT:
                                     switch (chunk->value & MOVE_UP) {
-                                        case MOVE_UP: printf("up+right"); break;
-                                        case MOVE_DOWN: printf("down+right"); break;
-                                        case '\0': printf("right"); break;
+                                        case MOVE_UP: scr_printf("up+right"); break;
+                                        case MOVE_DOWN: scr_printf("down+right"); break;
+                                        case '\0': scr_printf("right"); break;
                                     }
                                     break;
 
                                 case '\0':
                                     switch (chunk->value & MOVE_UP) {
-                                        case MOVE_UP: printf("up"); break;
-                                        case MOVE_DOWN: printf("down"); break;
-                                        case '\0': printf("stop"); break;
+                                        case MOVE_UP: scr_printf("up"); break;
+                                        case MOVE_DOWN: scr_printf("down"); break;
+                                        case '\0': scr_printf("stop"); break;
                                     }
                                     break;
                             }
 
-                            printf(" (value_without_direction)=");
+                            scr_printf(" (value_without_direction)=");
                             PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
-                            printf(" (value_raw)=");
+                            scr_printf(" (value_raw)=");
                             if (state->current_chunk == i) {
                                 if (state->partial_byte) {
                                     if (state->debug.hex) {
-                                        printf("%x", state->partial_byte & 0xFF);
+                                        scr_printf("%x", state->partial_byte & 0xFF);
                                     } else {
-                                        printf("%u", state->partial_byte & 0xFF);
+                                        scr_printf("%u", state->partial_byte & 0xFF);
                                     }
                                 } else {
-                                    printf("\033[4;5m%x\033[m", chunk->value / (state->debug.hex ? 16 : 10));
+                                    scr_printf("\033[4;5m%x\033[m", chunk->value / (state->debug.hex ? 16 : 10));
                                 }
-                                printf("\033[4;5m%x\033[m", chunk->value % (state->debug.hex ? 16 : 10));
+                                scr_printf("\033[4;5m%x\033[m", chunk->value % (state->debug.hex ? 16 : 10));
                             } else {
                                 PRINTF_DATA(chunk->value);
                             }
@@ -1585,13 +1583,13 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         default: UNREACHABLE();
                     }
                     if (i < switcz->chunks.length - 1) {
-                        printf("\n");
+                        scr_printf("\n");
                         bottom ++;
                     }
                 }
             }
         } else if (state->current_state == TILE_EDIT) {
-            /* printf("No switch here, Ctrl-s to a create new one"); */
+            /* scr_printf("No switch here, Ctrl-s to a create new one"); */
         }
 
         uint8_t found = 0;
@@ -1606,7 +1604,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
         if (found) {
             GOTO(0, bottom);
-            printf("\n\nOut of bounds switches:\n");
+            scr_printf("\n\nOut of bounds switches:\n");
             bottom +=3;
         }
         for (size_t s = 0; s < room.num_switches; s ++) {
@@ -1617,30 +1615,30 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 GOTO(0, bottom); bottom ++;
 #define BOOL_S(b) ((b) ? "true" : "false")
                 if (state->current_state == EDIT_SWITCHDETAILS && state->current_switch == s) {
-                    printf("\033[1;4mswitch id ");
+                    scr_printf("\033[1;4mswitch id ");
                     PRINTF_DATA((uint16_t)s);
-                    printf("\033[m: (x,y)=");
+                    scr_printf("\033[m: (x,y)=");
                     PRINTF_DATA(sw->chunks.data[0].x);
-                    printf(",");
+                    scr_printf(",");
                     PRINTF_DATA(sw->chunks.data[0].y);
-                    printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
+                    scr_printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
                             BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
                             SWITCH_SIDE(sw->chunks.data[0].side));
 
                 } else {
-                    printf("switch id ");
+                    scr_printf("switch id ");
                     if (state->current_state == GOTO_SWITCH) {
-                        printf("\033[4%ld;30;1m", (s % 4) + 4);
+                        scr_printf("\033[4%ld;30;1m", (s % 4) + 4);
                         PRINTF_DATA((uint16_t)s);
-                        printf("\033[m");
+                        scr_printf("\033[m");
                     } else {
                         PRINTF_DATA((uint16_t)s);
                     }
-                    printf(": (x,y)=");
+                    scr_printf(": (x,y)=");
                     PRINTF_DATA(sw->chunks.data[0].x);
-                    printf(",");
+                    scr_printf(",");
                     PRINTF_DATA(sw->chunks.data[0].y);
-                    printf(" (entry)=%s (once)=%s (side)=%s\n",
+                    scr_printf(" (entry)=%s (once)=%s (side)=%s\n",
                             BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
                             SWITCH_SIDE(sw->chunks.data[0].side));
                 }
@@ -1648,9 +1646,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 bottom ++;
                 if (sw->chunks.length > 1) {
                     if (state->current_state == EDIT_SWITCHDETAILS) {
-                        printf("  \033[1;4mc\033[mhunks:\n");
+                        scr_printf("  \033[1;4mc\033[mhunks:\n");
                     } else {
-                        printf("  chunks:\n");
+                        scr_printf("  chunks:\n");
                     }
                     bottom ++;
                     for (size_t i = 1; i < sw->chunks.length; i ++) {
@@ -1658,15 +1656,15 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
                             UNREACHABLE();
                         }
-                        printf("    ");
+                        scr_printf("    ");
                         if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK) {
-                            printf("\033[1;4m(");
+                            scr_printf("\033[1;4m(");
                             PRINTF_DATA((uint16_t)i);
-                            printf(")\033[m ");
+                            scr_printf(")\033[m ");
                         } else {
-                            printf("(");
+                            scr_printf("(");
                             PRINTF_DATA((uint16_t)i);
-                            printf(") ");
+                            scr_printf(") ");
                         }
                         struct SwitchChunk *chunk = sw->chunks.data + i;
                         switch (chunk->type) {
@@ -1675,7 +1673,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                 size_t overflow = WIDTH_TILES * HEIGHT_TILES;
                                 size_t point = chunk->y * WIDTH_TILES + chunk->x;
                                 if (point >= overflow) {
-                                    printf("memory:");
+                                    scr_printf("memory:");
                                     size_t offset = point - overflow;
                                     size_t end = offsetof(struct DecompresssedRoom, end_marker) - overflow;
                                     if (offset >= end) {
@@ -1683,20 +1681,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                         /* assert(false); */
                                     }
                                     switch (offset) {
-                                        case 0: printf(" tile_offset"); break;
-                                        case 1: printf(" background"); break;
-                                        case 2: printf(" room_north"); break;
-                                        case 3: printf(" room_east"); break;
-                                        case 4: printf(" room_south"); break;
-                                        case 5: printf(" room_west"); break;
-                                        case 6: printf(" room_damage"); break;
-                                        case 7: printf(" gravity_vertical"); break;
-                                        case 8: printf(" gravity_horizontal"); break;
-                                        case 9: printf(" UNKNOWN_b"); break;
-                                        case 10: printf(" UNKNOWN_c"); break;
-                                        case 11: printf(" num_objects"); break;
-                                        case 12: printf(" _num_switches"); break;
-                                        case 13: printf(" UNKNOWN_f"); break;
+                                        case 0: scr_printf(" tile_offset"); break;
+                                        case 1: scr_printf(" background"); break;
+                                        case 2: scr_printf(" room_north"); break;
+                                        case 3: scr_printf(" room_east"); break;
+                                        case 4: scr_printf(" room_south"); break;
+                                        case 5: scr_printf(" room_west"); break;
+                                        case 6: scr_printf(" room_damage"); break;
+                                        case 7: scr_printf(" gravity_vertical"); break;
+                                        case 8: scr_printf(" gravity_horizontal"); break;
+                                        case 9: scr_printf(" UNKNOWN_b"); break;
+                                        case 10: scr_printf(" UNKNOWN_c"); break;
+                                        case 11: scr_printf(" num_objects"); break;
+                                        case 12: scr_printf(" _num_switches"); break;
+                                        case 13: scr_printf(" UNKNOWN_f"); break;
 
                                         case 14:
                                         case 15:
@@ -1722,71 +1720,71 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                         case 35:
                                         case 36:
                                         case 37:
-                                                 printf(" name[%lu]", offset-14);
+                                                 scr_printf(" name[%lu]", offset-14);
                                                  break;
 
-                                    default: printf(" out_of_bounds[%lu]", offset-end);
+                                    default: scr_printf(" out_of_bounds[%lu]", offset-end);
                                     }
-                                    printf(" (on/off)=%02x/%02x (size)=%d", chunk->on, chunk->off, chunk->size);
+                                    scr_printf(" (on/off)=%02x/%02x (size)=%d", chunk->on, chunk->off, chunk->size);
                                 } else {
-                                    printf("block - (x,y)=");
+                                    scr_printf("block - (x,y)=");
                                     PRINTF_DATA(chunk->x);
-                                    printf(",");
+                                    scr_printf(",");
                                     PRINTF_DATA(chunk->y);
-                                    printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
+                                    scr_printf(" (%s)=%d (on/off)=", (chunk->dir == VERTICAL ? "height" : "width"), chunk->size);
                                     PRINTF_DATA(chunk->on);
-                                    printf("/");
+                                    scr_printf("/");
                                     PRINTF_DATA(chunk->off);
                                 }
                             }; break;
 
                             case TOGGLE_BIT:
                             {
-                                printf("bit - (idx)=%d (on/off)=%d/%d (mask)=", chunk->index, chunk->on, chunk->off);
+                                scr_printf("bit - (idx)=%d (on/off)=%d/%d (mask)=", chunk->index, chunk->on, chunk->off);
                                 PRINTF_DATA(chunk->bitmask);
                             }; break;
 
                             case TOGGLE_OBJECT:
                             {
-                                printf("object - (idx)=%d (test)=", chunk->index >> 4);
+                                scr_printf("object - (idx)=%d (test)=", chunk->index >> 4);
                                 PRINTF_DATA(chunk->test);
-                                printf(" (value)=");
+                                scr_printf(" (value)=");
                                 switch (chunk->value & MOVE_LEFT) {
                                     case MOVE_LEFT:
                                         switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: printf("up+left"); break;
-                                            case MOVE_DOWN: printf("down+left"); break;
-                                            case '\0': printf("left"); break;
+                                            case MOVE_UP: scr_printf("up+left"); break;
+                                            case MOVE_DOWN: scr_printf("down+left"); break;
+                                            case '\0': scr_printf("left"); break;
                                         }
                                         break;
 
                                     case MOVE_RIGHT:
                                         switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: printf("up+right"); break;
-                                            case MOVE_DOWN: printf("down+right"); break;
-                                            case '\0': printf("right"); break;
+                                            case MOVE_UP: scr_printf("up+right"); break;
+                                            case MOVE_DOWN: scr_printf("down+right"); break;
+                                            case '\0': scr_printf("right"); break;
                                         }
                                         break;
 
                                     case '\0':
                                         switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: printf("up"); break;
-                                            case MOVE_DOWN: printf("down"); break;
-                                            case '\0': printf("stop"); break;
+                                            case MOVE_UP: scr_printf("up"); break;
+                                            case MOVE_DOWN: scr_printf("down"); break;
+                                            case '\0': scr_printf("stop"); break;
                                         }
                                         break;
                                 }
 
-                                printf(" (value_without_direction)=");
+                                scr_printf(" (value_without_direction)=");
                                 PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
-                                printf(" (value_raw)=");
+                                scr_printf(" (value_raw)=");
                                 PRINTF_DATA(chunk->value);
                             }; break;
 
                             default: UNREACHABLE();
                         }
                         if (i < sw->chunks.length - 1) {
-                            printf("\n");
+                            scr_printf("\n");
                             bottom ++;
                         }
                     }
@@ -1798,18 +1796,18 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
     /* GOTO(0, bottom); bottom ++; */
     /* uint8_array rest = state->rooms.rooms[level].rest; */
-    /* int pre = printf("Rest (length=%zu):", rest.length); */
+    /* int pre = scr_printf("Rest (length=%zu):", rest.length); */
     /* for (size_t i = 0; i < rest.length; i ++) { */
     /*     if (pre + 3 * (i + 2) > (size_t)state->screen_dimensions.x) { */
-    /*         printf("..."); */
+    /*         scr_printf("..."); */
     /*         break; */
     /*     } */
-    /*     printf(" "); */
+    /*     scr_printf(" "); */
     /*     PRINTF_DATA(rest.data[i]); */
     /* } */
 
 show_help_if_needed:
     if (state->help) show_help();
 
-    fflush(stdout);
+    screen_flush();
 }

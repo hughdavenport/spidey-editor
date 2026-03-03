@@ -14,9 +14,9 @@
 #define TIME_NEWER(t1, t2) (((t1).tv_sec > (t2).tv_sec) || (((t1).tv_sec == (t2).tv_sec) && (t1).tv_nsec > (t2).tv_nsec))
 
 #ifdef __TINYC__
-#define LIBRARY_BUILD_CMD "tcc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c editor_actions.c editor_draw.c editor_input.c -o"
+#define LIBRARY_BUILD_CMD "tcc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c editor_actions.c editor_draw.c editor_input.c editor_screen.c -o"
 #else
-#define LIBRARY_BUILD_CMD "cc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c editor_actions.c editor_draw.c editor_input.c -o"
+#define LIBRARY_BUILD_CMD "cc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c editor_actions.c editor_draw.c editor_input.c editor_screen.c -o"
 #endif
 
 #include "editor_types.h"
@@ -32,6 +32,7 @@ bool any_source_newer(struct timespec test_time) {
         "editor_actions.c",
         "editor_draw.c",
         "editor_input.c",
+        "editor_screen.c",
     };
     for (size_t i = 0; i < C_ARRAY_LEN(files); i ++) {
         if (stat(files[i], &file_stat) == 0) {

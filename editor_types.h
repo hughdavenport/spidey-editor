@@ -90,6 +90,21 @@
 
 #define ESCAPE '\033'
 
+/* Screen buffer */
+#define SCREEN_MAX_WIDTH  256
+#define SCREEN_MAX_HEIGHT  64
+
+#define ATTR_BOLD  1
+#define ATTR_UNDER 2
+#define ATTR_BLINK 4
+
+typedef struct {
+    char    ch;    /* character ('\0' = unset/space) */
+    uint8_t fg;    /* 0 = default; 1–8 = ANSI colors 30–37 */
+    uint8_t bg;    /* 0 = default; 1–8 = ANSI colors 40–47 */
+    uint8_t attr;  /* bitmask of ATTR_* above */
+} Cell;
+
 /* Types */
 typedef struct {
     int x;
@@ -157,15 +172,22 @@ typedef struct {
     size_t current_switch;
     size_t current_chunk;
     bool switch_on;
+
+    Cell screen_prev[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
+    Cell screen_curr[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
 } game_state;
 
 extern game_state *state;
+
+/* Forward declarations for screen buffer functions (defined in editor_screen.c) */
+int __attribute__((format(printf, 1, 2))) scr_printf(const char *fmt, ...);
+void screen_flush(void);
 
 /* GOTO must come after game_state definition since it references state */
 #define GOTO(_x, _y)     do { \
     assert((_x) < state->screen_dimensions.x && "width out of bounds"); \
     assert((_y) < state->screen_dimensions.y && "height out of bounds"); \
-    printf("\033[%d;%dH", (_y) + 1, (_x) + 1); \
+    scr_printf("\033[%d;%dH", (_y) + 1, (_x) + 1); \
 } while (false)
 
 #define UNREACHABLE() do { \
