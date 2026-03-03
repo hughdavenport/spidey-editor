@@ -38,6 +38,10 @@ static void usage_patch(const char *program) {
     fprintf(stderr, "Usage: %s patch ROOM_ID ADDR VALUE [ADDR VALUE]... [FILENAME]\n", program);
 }
 
+static void usage_delete(const char *program) {
+    fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+}
+
 bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchInstructionArray *patches) {
     char *end = NULL;
     char *last = NULL;
@@ -659,18 +663,18 @@ bool main_patch(int *argc, char ***argv, char *program, RoomFile *file, PatchIns
 bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchInstructionArray *patches) {
     char *end = NULL;
     if (*argc <= 2) {
-        fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+        usage_delete(program);
         return false;
     }
     long room_id = strtol((*argv)[1], &end, 0);
     if (errno == EINVAL || end == NULL || *end != '\0') {
         fprintf(stderr, "Invalid number: %s\n", (*argv)[1]);
-        fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+        usage_delete(program);
         return false;
     }
     if (room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file->rooms)) {
         fprintf(stderr, "Room ID out of range 0..%lu\n", C_ARRAY_LEN(file->rooms) - 1);
-        fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+        usage_delete(program);
         return false;
     }
     *argv += 2;
@@ -682,13 +686,13 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
             long idx = strtol(str, &end, 0);
             if (errno == EINVAL || *end != ']') {
                 fprintf(stderr, "Invalid object id: %s\n", (*argv)[0]);
-                fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                usage_delete(program);
                 return false;
             }
             if (end == str) {
                 if (file->rooms[room_id].data.num_objects == 0) {
                     fprintf(stderr, "No objects left to match object[]\n");
-                    fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                    usage_delete(program);
                     return false;
                 }
                 idx = file->rooms[room_id].data.num_objects - 1;
@@ -701,13 +705,13 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
             long idx = strtol(str, &end, 0);
             if (errno == EINVAL || *end != ']') {
                 fprintf(stderr, "Invalid switch id: %s\n", (*argv)[0]);
-                fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                usage_delete(program);
                 return false;
             }
             if (end == str) {
                 if (file->rooms[room_id].data.num_switches == 0) {
                     fprintf(stderr, "No switches left to match switch[]\n");
-                    fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                    usage_delete(program);
                     return false;
                 }
                 idx = file->rooms[room_id].data.num_switches - 1;
@@ -719,13 +723,13 @@ bool main_delete(int *argc, char ***argv, char *program, RoomFile *file, PatchIn
                 long chunk_idx = strtol(str, &end, 0);
                 if (errno == EINVAL || *end != ']') {
                     fprintf(stderr, "Invalid chunk index: %s\n", (*argv)[0]);
-                    fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                    usage_delete(program);
                     return false;
                 }
                 if (end == str) {
                     if (file->rooms[room_id].data.switches[idx].chunks.length == 0) {
                         fprintf(stderr, "No chunks left to match chunk[]\n");
-                        fprintf(stderr, "Usage: %s delete ROOM_ID (switch[i]|switch[x].chunk[i]|object[i])... [FILENAME]\n", program);
+                        usage_delete(program);
                         return false;
                     }
                     chunk_idx = file->rooms[room_id].data.switches[idx].chunks.length - 1;
