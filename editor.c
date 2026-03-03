@@ -219,6 +219,12 @@ int editor_main() {
     while (true) {
         void *module = dlopen(library, RTLD_NOW);
         if (module == NULL) {
+            struct stat src_stat;
+            if (stat(__FILE__, &src_stat) != 0) {
+                fprintf(stderr, "Editor library %s not found and source not available to build it\n", library);
+                free(library);
+                return 1;
+            }
             char *build_cmd = NULL;
             assert(asprintf(&build_cmd, "%s %s %s", LIBRARY_BUILD_CMD, library, __FILE__) > 0);
             fprintf(stderr, "Building editor library: %s\n", build_cmd);
