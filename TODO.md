@@ -17,10 +17,9 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 [x] - Virtual screen buffer with cell-level diffing (no full-screen flicker)
 [x] - Force full redraw on startup and resize
 
-[ ] - Fix `shrink()` object case is UNIMPLEMENTED (aborts)
-      [ ] - See comment at editor_actions.c for the intended algorithm
-      [ ] - Block shrink: remove tiles from trailing edge, shrink w/h
-      [ ] - Sprite shrink: no-op or remove
+[x] - Fix `shrink()` object case is UNIMPLEMENTED (aborts)
+      [x] - Block shrink: remove tiles from trailing edge, shrink w/h
+      [ ] - Sprite shrink: no-op or remove (currently unreachable: detection skips SPRITE type)
 
 [ ] - Object/switch IDs above 15 hit UNREACHABLE (single hex digit display limit)
       [ ] - editor_draw.c: the 2-digit display case is FIXME'd out
@@ -149,6 +148,15 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 
 [ ] - Understand global_switches[] size and layout
       [ ] - How many global switches exist? Where are they in memory?
+
+[ ] - Re-do MOVERTAB.DAT / UNKNOWN field research via DOS file-open tracing
+      [ ] - Approach that worked previously: search for DOS INT 21h AH=3Dh (open file)
+            in r2, find the call that opens "MOVERTAB.DAT", then follow the read
+            buffer forward to see how the game indexes into it
+      [ ] - This produced the "UNKNOWN_b = base offset / 3 into movertab.dat" comment
+      [ ] - Same approach for other UNKNOWN fields: find where room data is parsed,
+            cross-ref each field offset against game logic
+      [ ] - Notes from the original pass are lost; this is a redo
 
 ---
 
