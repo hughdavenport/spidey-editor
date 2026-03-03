@@ -23,7 +23,27 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 
 [ ] - Object/switch IDs above 15 hit UNREACHABLE (single hex digit display limit)
       [ ] - editor_draw.c: the 2-digit display case is FIXME'd out
-      [ ] - Need to handle printing 2-digit hex room IDs in the goto-room grid
+      [x] - goto-room grid already handles 2-digit (partial_byte); object/switch goto do not
+      [ ] - editor_input.c handle_edit_switchdetails_select_chunk: same issue for chunk index > 15
+
+[ ] - Move object at room edge doesn't carry through to neighbour room
+      [ ] - editor_input.c:3350: FIXME Currently doesn't move objects through to neighbours
+
+[ ] - Chunk split when editing middle of a chunk
+      [ ] - editor_input.c:3623: FIXME split up chunks, need one for this byte + up to 2 for either end
+
+[ ] - Multiple objects/switches at same tile not handled in status panel
+      [ ] - editor_draw.c:1218: UNIMPLEMENTED: multiple objects underneath
+      [ ] - editor_draw.c:1283: UNIMPLEMENTED: multiple switches underneath
+
+[ ] - Selected chunk UNIMPLEMENTED in switch detail panel
+      [ ] - editor_draw.c:1666
+
+[ ] - Object/switch patch bounds not validated before write in main.c
+      [ ] - Lines 150, 154: FIXME It'll probably blow the assert when writing
+
+[ ] - room.c writeRoom: first byte of some chunk types may need 0x80 set
+      [ ] - room.c:930: FIXME depending on type, first byte should have 0x80
 
 ---
 
