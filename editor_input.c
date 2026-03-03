@@ -2751,8 +2751,9 @@ static bool handle_tile_edit(Key key) {
                     room->objects[idx].y = y;
                     room->objects[idx].block.width = 1;
                     room->objects[idx].block.height = 1;
-                    room->objects[idx].tiles = calloc(1, 1);
+                    room->objects[idx].tiles = malloc(1);
                     assert(room->objects[idx].tiles != NULL);
+                    room->objects[idx].tiles[0] = room->tiles[TILE_IDX(x, y)];
                     room->num_objects++;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
