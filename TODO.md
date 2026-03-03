@@ -126,10 +126,9 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 
 ## Tests
 
-[ ] - Roundtrip test: read ROOMS.SPL → write to temp file → binary diff original
-      [ ] - Should be identical for all 64 rooms
-      [ ] - Run as: `./a.out recompress && diff ROOMS.SPL ROOMS.SPL.bak`
-      [ ] - Automate with a shell script that fails on any diff
+[x] - Roundtrip test: read ROOMS.SPL → recompress → binary diff original
+      [x] - test-roundtrip.sh: backs up, recompresses, diffs, always restores
+      [x] - PASSES: compression is bit-for-bit identical to original game data
 
 [ ] - Field read test: for known rooms, assert specific field values
       [ ] - Room 1 "Midnight": tileset=3, background=2, damage=3
