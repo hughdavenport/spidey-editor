@@ -147,8 +147,8 @@ void move(int dx, int dy) {
                         chunk->x += dx;
                         chunk->y += dy;
                     }
-                    state->cursors[state->current_level].x = chunk->x;
-                    state->cursors[state->current_level].y = chunk->y;
+                    state->cursors[state->current_level].x += dx;
+                    state->cursors[state->current_level].y += dy;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
                     moved = true;
