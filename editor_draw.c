@@ -438,6 +438,7 @@ void redraw() {
                 }
             }
         }
+        if (ch) break;
     }
     if (state->debug.switches) {
         if (switch_underneath != NULL) {
@@ -1600,7 +1601,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         } else if (state->current_state == TILE_EDIT) {
             /* scr_printf("No switch here, Ctrl-s to a create new one"); */
         }
-        /* Display any additional switches at the same cursor tile */
+        /* Display any additional switches whose preamble is at the same cursor tile */
         if (switch_underneath != NULL && state->current_state != GOTO_SWITCH) {
             for (size_t sw_i = switch_underneath - room.switches + 1; sw_i < room.num_switches; sw_i++) {
                 struct SwitchObject *extra = room.switches + sw_i;
@@ -1619,6 +1620,27 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     scr_printf("  chunks: %zu\n", extra->chunks.length - 1);
                     bottom++;
                 }
+            }
+        }
+        /* Display switch whose TOGGLE_BLOCK chunk covers cursor but preamble is elsewhere */
+        if (state->current_state != GOTO_SWITCH
+                && chunk_switch_underneath != NULL
+                && chunk_switch_underneath != switch_underneath
+                && (chunk_switch_underneath->chunks.length == 0
+                    || chunk_switch_underneath->chunks.data[0].x != x
+                    || chunk_switch_underneath->chunks.data[0].y != y)) {
+            struct SwitchChunk *pr = chunk_switch_underneath->chunks.data;
+            GOTO(0, bottom); bottom++;
+            scr_printf("switch ");
+            PRINTF_DATA((uint16_t)(chunk_switch_underneath - room.switches));
+            scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s [chunk at cursor]\n",
+                    pr->x, pr->y,
+                    BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
+                    SWITCH_SIDE(pr->side));
+            bottom++;
+            if (chunk_switch_underneath->chunks.length > 1) {
+                scr_printf("  chunks: %zu\n", chunk_switch_underneath->chunks.length - 1);
+                bottom++;
             }
         }
 
