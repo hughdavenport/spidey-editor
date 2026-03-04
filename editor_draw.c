@@ -42,6 +42,7 @@ help_keys help[][100] = {
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble; delete thing; or clear tile"},
+        {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"y", "copy thing under cursor (object/switch/block)"},
         {"p", "paste copied thing at cursor"},
         {"+", "increase id of thing under cursor"},
@@ -173,12 +174,11 @@ help_keys help[][100] = {
         {"+", "increase switch id (shuffles up)"},
         {"-", "decrease switch id (shuffles down)"},
         {"y", "copy switch to clipboard"},
+        {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"p", "paste clipboard chunk into this switch"},
         {"c[n]", "select chunk"},
         {"C", "create new chunk"},
         {"ESC/q/Ctrl-s", "go back to main view"},
-        {"DEL", "delete switch"},
-        {"BACKSPACE", "delete switch"},
         {"Ctrl-p", "play (runs play.sh)"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -197,9 +197,8 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "delete chunk"},
-        {"BACKSPACE", "delete chunk"},
         {"y", "copy chunk to clipboard"},
+        {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change switch number"},
@@ -226,9 +225,8 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "remove partial entry or delete chunk"},
-        {"BACKSPACE", "remove partial entry or delete chunk"},
         {"y", "copy chunk to clipboard"},
+        {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
@@ -249,9 +247,8 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "remove partial entry or delete chunk"},
-        {"BACKSPACE", "remove partial entry or delete chunk"},
         {"y", "copy chunk to clipboard"},
+        {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"0-9a-fA-F", "change selected block tile"},
@@ -260,6 +257,8 @@ help_keys help[][100] = {
         {"^", "increase block size (advanced)"},
         {"v", "decrease block size (advanced)"},
         {"r", "toggle direction (advanced)"},
+        {"Left/Up/h/k", "move memory pointer back"},
+        {"Down/Right/j/l", "move memory pointer forward"},
         {"ESC/q/Ctrl-s", "go back to main view"},
         {"Ctrl-p", "play (runs play.sh)"},
         {"Ctrl-?", "toggle help"},
@@ -269,14 +268,12 @@ help_keys help[][100] = {
 
     [EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS]={
         {"t", "change chunk type"},
-        {"DEL", "remove partial entry or delete chunk"},
-        {"BACKSPACE", "remove partial entry or delete chunk"},
         {"y", "copy chunk to clipboard"},
+        {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
         {"i", "cycle through possible index values"},
         {"s", "cycle through possible test values"},
-        {" TODO dir keys ?", "change value"},
         {"0-9a-fA-F", "change raw value (advanced)"},
         {"ESC/q/Ctrl-s", "go back to main view"},
         {"Ctrl-p", "play (runs play.sh)"},
@@ -367,7 +364,6 @@ void redraw() {
             break;
         }
     }
-    struct RoomObject *object_underneath = NULL;
     struct SwitchObject *switch_underneath = NULL;
     struct SwitchChunk *chunk_underneath = NULL;
     struct SwitchObject *chunk_switch_underneath = NULL;
@@ -392,13 +388,11 @@ void redraw() {
                 y >= object->y && y < object->y + object->block.height) {
             obj = true;
             tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-            object_underneath = object;
             break;
         } else if (object->type == SPRITE && x == object->x && y == object->y) {
             obj = true;
             sprite = true;
             tile = (object->sprite.type << 4) | object->sprite.damage;
-            object_underneath = object;
             break;
         }
     }
@@ -488,6 +482,7 @@ void redraw() {
         case CLIP_OBJECT: scr_printf(" \033[1m[Y:obj]\033[m"); break;
         case CLIP_SWITCH: scr_printf(" \033[1m[Y:sw]\033[m"); break;
         case CLIP_CHUNK:  scr_printf(" \033[1m[Y:chk]\033[m"); break;
+        case CLIP_TILE:   scr_printf(" \033[1m[Y:tile]\033[m"); break;
         case CLIP_NONE: break;
     }
 
@@ -857,6 +852,19 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
     }
 
+    /* Phase 3: Re-overlay switch preambles so they appear above objects */
+    if (state->debug.switches && state->current_state != GOTO_OBJECT) {
+        for (size_t s = 0; s < (size_t)room.num_switches; s++) {
+            struct SwitchObject *sw = room.switches + s;
+            if (sw->chunks.length == 0) continue;
+            int sx = sw->chunks.data[0].x;
+            int sy = sw->chunks.data[0].y;
+            uint8_t tile = room.tiles[TILE_IDX(sx, sy)];
+            GOTO(2 * sx, sy + 1);
+            scr_printf("\033[4%d;30m%02X\033[m", (int)(s % 3) + 4, tile);
+        }
+    }
+
     if (state->current_state == TILE_EDIT || (state->current_state != NORMAL)) {
         GOTO(2 * x, y + 1);
         size_t ch_i = i;
@@ -1216,43 +1224,40 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     if (state->debug.objects) {
-        GOTO(0, bottom); bottom ++;
-        if (object_underneath != NULL) {
-            for (size_t i = object_underneath - room.objects + 1; i < room.num_objects; i ++) {
-                if (room.objects[i].x == x && room.objects[i].y == y) {
-                    fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: multiple objects underneath\n", __FILE__, __LINE__, __func__);
-                    break;
-                }
-            }
-            switch (object_underneath->type) {
+        bool obj_first = true;
+        for (size_t i = 0; i < room.num_objects; i++) {
+            struct RoomObject *obj = room.objects + i;
+            bool hit = (obj->type == BLOCK
+                        && x >= obj->x && x < obj->x + obj->block.width
+                        && y >= obj->y && y < obj->y + obj->block.height)
+                    || (obj->type == SPRITE && obj->x == x && obj->y == y);
+            if (!hit) continue;
+            if (obj_first) { GOTO(0, bottom); bottom++; obj_first = false; }
+            else scr_printf(" | ");
+            switch (obj->type) {
                 case BLOCK:
                     scr_printf("block: (x,y)=");
-                    PRINTF_DATA(object_underneath->x);
+                    PRINTF_DATA(obj->x);
                     scr_printf(",");
-                    PRINTF_DATA(object_underneath->y);
+                    PRINTF_DATA(obj->y);
                     scr_printf(" (w,h)=");
-                    PRINTF_DATA(object_underneath->block.width);
+                    PRINTF_DATA(obj->block.width);
                     scr_printf(",");
-                    PRINTF_DATA(object_underneath->block.height);
+                    PRINTF_DATA(obj->block.height);
                     break;
 
                 case SPRITE:
                     scr_printf("sprite: ");
-                    switch(object_underneath->sprite.type) {
-                        case SHARK: 
-                            switch (object_underneath->sprite.damage) {
+                    switch(obj->sprite.type) {
+                        case SHARK:
+                            switch (obj->sprite.damage) {
                                 case 1:
-                                case 2:
-                                    scr_printf("Shark");
-                                    break;
-
+                                case 2: scr_printf("Shark"); break;
                                 case 3: scr_printf("Mysterio"); break;
                                 case 4: scr_printf("Mary Jane"); break;
-
                                 default: UNREACHABLE();
                             }
                             break;
-
                         case MUMMY: scr_printf("Mummy"); break;
                         case BLUE_MAN: scr_printf("Blue man"); break;
                         case WOLF: scr_printf("Wolf"); break;
@@ -1260,15 +1265,14 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         case DINOSAUR: scr_printf("Dinosaur"); break;
                         case RAT: scr_printf("Rat"); break;
                         case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
-
                         default: UNREACHABLE();
                     }
                     scr_printf(" (x,y)=");
-                    PRINTF_DATA(object_underneath->x);
+                    PRINTF_DATA(obj->x);
                     scr_printf(",");
-                    PRINTF_DATA(object_underneath->y);
+                    PRINTF_DATA(obj->y);
                     scr_printf(" (dmg)=");
-                    PRINTF_DATA(object_underneath->sprite.damage);
+                    PRINTF_DATA(obj->sprite.damage);
                     break;
             }
         }
@@ -1280,14 +1284,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     (void)chunk_switch_underneath;
     (void)chunk_underneath;
         struct SwitchObject *switcz = switch_underneath;
-        if (switcz) {
-            for (size_t i = switcz - room.switches + 1; i < room.num_switches; i ++) {
-                if (room.switches[i].chunks.data[0].x == x && room.switches[i].chunks.data[0].y == y) {
-                    fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: multiple switches underneath\n", __FILE__, __LINE__, __func__);
-                    break;
-                }
-            }
-        }
         if (!switcz && chunk_underneath) switcz = chunk_switch_underneath;
         if (state->current_state != GOTO_SWITCH && switcz != NULL) {
 #define BOOL_S(b) ((b) ? "true" : "false")
@@ -1603,6 +1599,27 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             }
         } else if (state->current_state == TILE_EDIT) {
             /* scr_printf("No switch here, Ctrl-s to a create new one"); */
+        }
+        /* Display any additional switches at the same cursor tile */
+        if (switch_underneath != NULL && state->current_state != GOTO_SWITCH) {
+            for (size_t sw_i = switch_underneath - room.switches + 1; sw_i < room.num_switches; sw_i++) {
+                struct SwitchObject *extra = room.switches + sw_i;
+                if (extra->chunks.length < 1) continue;
+                if (extra->chunks.data[0].x != x || extra->chunks.data[0].y != y) continue;
+                struct SwitchChunk *pr = extra->chunks.data;
+                GOTO(0, bottom); bottom++;
+                scr_printf("switch ");
+                PRINTF_DATA((uint16_t)sw_i);
+                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                        pr->x, pr->y,
+                        BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
+                        SWITCH_SIDE(pr->side));
+                bottom++;
+                if (extra->chunks.length > 1) {
+                    scr_printf("  chunks: %zu\n", extra->chunks.length - 1);
+                    bottom++;
+                }
+            }
         }
 
         uint8_t found = 0;

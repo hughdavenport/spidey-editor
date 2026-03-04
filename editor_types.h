@@ -132,6 +132,7 @@ typedef enum {
     CLIP_OBJECT,
     CLIP_SWITCH,
     CLIP_CHUNK,
+    CLIP_TILE,
 } ClipType;
 
 typedef struct {

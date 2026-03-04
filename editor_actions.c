@@ -1,22 +1,92 @@
 #include "editor_types.h"
 #include <string.h>
 
+/* Helper: given dx/dy and object position/size, compute neighbour room index and
+   landing position. Returns false if no edge crossing (normal in-bounds move). */
+static bool object_crosses_edge(int obj_x, int obj_y, int obj_w, int obj_h,
+                                 int dx, int dy,
+                                 struct DecompressedRoom *room,
+                                 size_t *nbr_idx_out, int *new_x_out, int *new_y_out) {
+    if (dx == -1 && obj_x == 0)
+        { *nbr_idx_out = room->room_west;  *new_x_out = WIDTH_TILES - obj_w; *new_y_out = obj_y; return true; }
+    if (dx ==  1 && obj_x + obj_w == WIDTH_TILES)
+        { *nbr_idx_out = room->room_east;  *new_x_out = 0;                   *new_y_out = obj_y; return true; }
+    if (dy == -1 && obj_y == 0)
+        { *nbr_idx_out = room->room_north; *new_x_out = obj_x; *new_y_out = HEIGHT_TILES - obj_h; return true; }
+    if (dy ==  1 && obj_y + obj_h == HEIGHT_TILES)
+        { *nbr_idx_out = room->room_south; *new_x_out = obj_x; *new_y_out = 0; return true; }
+    return false;
+}
+
+static void transfer_object(struct RoomObject *object, size_t nbr_idx, int new_x, int new_y) {
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    struct DecompressedRoom *nbr  = &state->rooms.rooms[nbr_idx].data;
+    nbr->objects = realloc(nbr->objects, (nbr->num_objects + 1) * sizeof(*nbr->objects));
+    nbr->objects[nbr->num_objects] = *object;
+    nbr->objects[nbr->num_objects].x = new_x;
+    nbr->objects[nbr->num_objects].y = new_y;
+    if (object->type == BLOCK && object->tiles) {
+        size_t n = object->block.width * object->block.height;
+        nbr->objects[nbr->num_objects].tiles = malloc(n);
+        memcpy(nbr->objects[nbr->num_objects].tiles, object->tiles, n);
+    } else {
+        nbr->objects[nbr->num_objects].tiles = NULL;
+    }
+    nbr->num_objects++;
+    ARRAY_FREE(state->rooms.rooms[nbr_idx].compressed);
+    if (object->type == BLOCK) free(object->tiles);
+    size_t obj_i = object - room->objects;
+    memmove(object, object + 1, (room->num_objects - obj_i - 1) * sizeof(*object));
+    room->num_objects--;
+    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+    state->current_level = nbr_idx;
+    state->cursors[nbr_idx].x = new_x;
+    state->cursors[nbr_idx].y = new_y;
+    assert(writeRooms(&state->rooms));
+}
+
+static void transfer_switch(struct SwitchObject *switcch, size_t nbr_idx, int new_x, int new_y) {
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    struct DecompressedRoom *nbr  = &state->rooms.rooms[nbr_idx].data;
+    int x = switcch->chunks.data[0].x;
+    int y = switcch->chunks.data[0].y;
+    size_t chunk_n = switcch->chunks.length;
+    nbr->switches = realloc(nbr->switches, (nbr->num_switches + 1) * sizeof(struct SwitchObject));
+    size_t new_sw_i = nbr->num_switches;
+    nbr->switches[new_sw_i].chunks.length   = chunk_n;
+    nbr->switches[new_sw_i].chunks.capacity = chunk_n;
+    nbr->switches[new_sw_i].chunks.data = malloc(chunk_n * sizeof(struct SwitchChunk));
+    memcpy(nbr->switches[new_sw_i].chunks.data, switcch->chunks.data, chunk_n * sizeof(struct SwitchChunk));
+    nbr->switches[new_sw_i].chunks.data[0].x = new_x;
+    nbr->switches[new_sw_i].chunks.data[0].y = new_y;
+    nbr->tiles[TILE_IDX(new_x, new_y)] = room->tiles[TILE_IDX(x, y)];
+    room->tiles[TILE_IDX(x, y)] = 0;
+    nbr->num_switches++;
+    ARRAY_FREE(state->rooms.rooms[nbr_idx].compressed);
+    size_t sw_i = switcch - room->switches;
+    free(switcch->chunks.data);
+    memmove(switcch, switcch + 1, (room->num_switches - sw_i - 1) * sizeof(struct SwitchObject));
+    room->num_switches--;
+    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+    state->current_level = nbr_idx;
+    state->cursors[nbr_idx].x = new_x;
+    state->cursors[nbr_idx].y = new_y;
+    assert(writeRooms(&state->rooms));
+}
+
 void move(int dx, int dy) {
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;
-    if (x + dx < 0 || x + dx >= WIDTH_TILES || y + dy < 0 || y + dy >= HEIGHT_TILES) return;
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     bool moved = false;
     if (state->debug.objects) {
         struct RoomObject *object = NULL;
         bool obj = false;
-        for (size_t i = 0; i < room->num_objects; i ++) {
+        for (size_t i = 0; i < room->num_objects; i++) {
             object = room->objects + i;
             if (object->type == BLOCK &&
                     x >= object->x && x < object->x + object->block.width &&
-                    y >= object->y && y < object->y + object->block.height &&
-                    (int)object->x + dx >= 0 && (int)object->x + object->block.width + dx <= WIDTH_TILES &&
-                    (int)object->y + dy >= 0 && (int)object->y + object->block.height + dy <= HEIGHT_TILES) {
+                    y >= object->y && y < object->y + object->block.height) {
                 obj = true;
                 break;
             } else if (object->type == SPRITE && x == object->x && y == object->y) {
@@ -25,19 +95,44 @@ void move(int dx, int dy) {
             }
         }
         if (obj) {
-            object->x += dx;
-            object->y += dy;
-            state->cursors[state->current_level].x += dx;
-            state->cursors[state->current_level].y += dy;
-            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            int obj_w = (object->type == BLOCK) ? object->block.width  : 1;
+            int obj_h = (object->type == BLOCK) ? object->block.height : 1;
+            size_t nbr_idx; int new_x, new_y;
+            if (object_crosses_edge(object->x, object->y, obj_w, obj_h, dx, dy, room,
+                                    &nbr_idx, &new_x, &new_y)) {
+                if (nbr_idx != state->current_level) {
+                    transfer_object(object, nbr_idx, new_x, new_y);
+                } else {
+                    /* Self-loop: wrap to opposite edge within same room */
+                    object->x = new_x;
+                    object->y = new_y;
+                    state->cursors[state->current_level].x = new_x;
+                    state->cursors[state->current_level].y = new_y;
+                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                    assert(writeRooms(&state->rooms));
+                }
+            } else {
+                /* Normal in-bounds move */
+                bool in_bounds = (int)object->x + dx >= 0 &&
+                                 (int)object->x + obj_w + dx <= WIDTH_TILES &&
+                                 (int)object->y + dy >= 0 &&
+                                 (int)object->y + obj_h + dy <= HEIGHT_TILES;
+                if (in_bounds) {
+                    object->x += dx;
+                    object->y += dy;
+                    state->cursors[state->current_level].x += dx;
+                    state->cursors[state->current_level].y += dy;
+                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                    assert(writeRooms(&state->rooms));
+                }
+            }
             moved = true;
         }
     }
     if (!moved && state->debug.switches) {
         struct SwitchObject *switcch = NULL;
         bool sw = false;
-        for (size_t i = 0; i < room->num_switches; i ++) {
+        for (size_t i = 0; i < room->num_switches; i++) {
             switcch = room->switches + i;
             if (switcch->chunks.length > 0 && switcch->chunks.data[0].type == PREAMBLE &&
                     x == switcch->chunks.data[0].x && y == switcch->chunks.data[0].y) {
@@ -46,39 +141,64 @@ void move(int dx, int dy) {
             }
         }
         if (sw) {
-            room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
-            room->tiles[TILE_IDX(x, y)] = 0;
-            switcch->chunks.data[0].x += dx;
-            switcch->chunks.data[0].y += dy;
-            state->cursors[state->current_level].x += dx;
-            state->cursors[state->current_level].y += dy;
-            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            size_t nbr_idx; int new_x, new_y;
+            if (object_crosses_edge(x, y, 1, 1, dx, dy, room, &nbr_idx, &new_x, &new_y)) {
+                if (nbr_idx != state->current_level) {
+                    transfer_switch(switcch, nbr_idx, new_x, new_y);
+                } else {
+                    /* Self-loop: wrap to opposite edge within same room */
+                    room->tiles[TILE_IDX(new_x, new_y)] = room->tiles[TILE_IDX(x, y)];
+                    room->tiles[TILE_IDX(x, y)] = 0;
+                    switcch->chunks.data[0].x = new_x;
+                    switcch->chunks.data[0].y = new_y;
+                    state->cursors[state->current_level].x = new_x;
+                    state->cursors[state->current_level].y = new_y;
+                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                    assert(writeRooms(&state->rooms));
+                }
+            } else {
+                room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
+                room->tiles[TILE_IDX(x, y)] = 0;
+                switcch->chunks.data[0].x += dx;
+                switcch->chunks.data[0].y += dy;
+                state->cursors[state->current_level].x += dx;
+                state->cursors[state->current_level].y += dy;
+                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                assert(writeRooms(&state->rooms));
+            }
             moved = true;
         } else {
             struct SwitchChunk *chunk = NULL;
             bool ch = false;
-            for (size_t i = 0; i < room->num_switches; i ++) {
+            for (size_t i = 0; i < room->num_switches; i++) {
                 switcch = room->switches + i;
-                for (size_t c = 1; c < switcch->chunks.length; c ++) {
+                for (size_t c = 1; c < switcch->chunks.length; c++) {
                     chunk = switcch->chunks.data + c;
                     if (chunk->type == TOGGLE_BLOCK &&
                             (chunk->dir == HORIZONTAL ?
                                  y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size :
-                                 x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) &&
-                             chunk->x + dx >= 0 && chunk->y + dy >= 0 &&
-                            (chunk->dir == HORIZONTAL ?
-                                 chunk->x + chunk->size + dx <= WIDTH_TILES && chunk->y + dy <= HEIGHT_TILES :
-                                 chunk->y + chunk->size + dy <= HEIGHT_TILES && chunk->x + dx <= WIDTH_TILES)) {
+                                 x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size)) {
                         ch = true;
                         break;
                     }
                 }
                 if (ch) {
-                    chunk->x += dx;
-                    chunk->y += dy;
-                    state->cursors[state->current_level].x += dx;
-                    state->cursors[state->current_level].y += dy;
+                    int chunk_w = chunk->dir == HORIZONTAL ? (int)chunk->size : 1;
+                    int chunk_h = chunk->dir == VERTICAL   ? (int)chunk->size : 1;
+                    if (dx == -1 && chunk->x == 0)
+                        chunk->x = WIDTH_TILES - chunk_w;
+                    else if (dx ==  1 && chunk->x + chunk_w == WIDTH_TILES)
+                        chunk->x = 0;
+                    else if (dy == -1 && chunk->y == 0)
+                        chunk->y = HEIGHT_TILES - chunk_h;
+                    else if (dy ==  1 && chunk->y + chunk_h == HEIGHT_TILES)
+                        chunk->y = 0;
+                    else {
+                        chunk->x += dx;
+                        chunk->y += dy;
+                    }
+                    state->cursors[state->current_level].x = chunk->x;
+                    state->cursors[state->current_level].y = chunk->y;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
                     moved = true;
@@ -87,13 +207,37 @@ void move(int dx, int dy) {
             }
         }
     }
-    if (!moved && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
-        room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
-        room->tiles[TILE_IDX(x, y)] = 0;
-        state->cursors[state->current_level].x += dx;
-        state->cursors[state->current_level].y += dy;
-        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-        assert(writeRooms(&state->rooms));
+    if (!moved) {
+        /* Plain tile: cross-room or in-bounds */
+        size_t nbr_idx; int new_x, new_y;
+        if (object_crosses_edge(x, y, 1, 1, dx, dy, room, &nbr_idx, &new_x, &new_y)) {
+            if (nbr_idx != state->current_level) {
+                struct DecompressedRoom *nbr = &state->rooms.rooms[nbr_idx].data;
+                nbr->tiles[TILE_IDX(new_x, new_y)] = room->tiles[TILE_IDX(x, y)];
+                room->tiles[TILE_IDX(x, y)] = 0;
+                ARRAY_FREE(state->rooms.rooms[nbr_idx].compressed);
+                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                state->current_level = nbr_idx;
+                state->cursors[nbr_idx].x = new_x;
+                state->cursors[nbr_idx].y = new_y;
+                assert(writeRooms(&state->rooms));
+            } else {
+                /* Self-loop: wrap to opposite edge within same room */
+                room->tiles[TILE_IDX(new_x, new_y)] = room->tiles[TILE_IDX(x, y)];
+                room->tiles[TILE_IDX(x, y)] = 0;
+                state->cursors[state->current_level].x = new_x;
+                state->cursors[state->current_level].y = new_y;
+                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                assert(writeRooms(&state->rooms));
+            }
+        } else if (x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
+            room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
+            room->tiles[TILE_IDX(x, y)] = 0;
+            state->cursors[state->current_level].x += dx;
+            state->cursors[state->current_level].y += dy;
+            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+            assert(writeRooms(&state->rooms));
+        }
     }
 }
 
