@@ -753,8 +753,13 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             scr_printf("%s", room_name);
         }
         scr_printf("\"");
-        if (state->status_message[0])
-            scr_printf(" \033[1m%s\033[m", state->status_message);
+    }
+    if (state->status_message[0]) {
+        int title_right = MIN_WIDTH / 2 + (room_name_len + 7 + 1) / 2 + 1;
+        if (title_right + 1 < state->screen_dimensions.x) {
+            GOTO(title_right, 0);
+            scr_printf("\033[1m%s\033[m", state->status_message);
+        }
     }
 
 

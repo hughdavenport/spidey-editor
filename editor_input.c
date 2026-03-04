@@ -1563,8 +1563,11 @@ static void yank_at_cursor(void) {
         }
     }
     if (state->clipboard.type == CLIP_NONE) {
-        state->clipboard.type = CLIP_TILE;
-        state->clipboard.tile = room->tiles[TILE_IDX(x, y)];
+        uint8_t tile = room->tiles[TILE_IDX(x, y)];
+        if (tile != BLANK_TILE) {
+            state->clipboard.type = CLIP_TILE;
+            state->clipboard.tile = tile;
+        }
     }
 }
 
@@ -3304,6 +3307,17 @@ static bool handle_tile_edit(Key key) {
                         "Shark", "Mummy", "Blue man", "Wolf",
                         "R2D2", "Dinosaur", "Rat", "Shotgun lady",
                     };
+                    if (found_obj->type == BLOCK) {
+                        for (size_t k = 0; k < room->num_objects; k++) {
+                            struct RoomObject *other = room->objects + k;
+                            if (other != found_obj && other->type == SPRITE &&
+                                    other->x == found_obj->x && other->y == found_obj->y) {
+                                snprintf(state->status_message, sizeof(state->status_message),
+                                         "Sprite would overlap");
+                                goto done_cycle;
+                            }
+                        }
+                    }
                     push_undo((uint8_t)state->current_level, false);
                     if (found_obj->type == BLOCK) {
                         free(found_obj->tiles);
@@ -3329,6 +3343,7 @@ static bool handle_tile_edit(Key key) {
                 }
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
+                done_cycle:
                 return true;
             }
         }
