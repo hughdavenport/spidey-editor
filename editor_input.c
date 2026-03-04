@@ -2838,7 +2838,7 @@ static bool handle_tile_edit(Key key) {
     size_t *cursorlevel = &state->current_level;
     switch (key.code) {
     case KEY_CHAR:
-        if (!state->partial_byte && key.ch >= '1' && key.ch <= '3') {
+        if (!state->partial_byte && key.ch >= '1' && key.ch <= '4') {
             struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
             int x = state->cursors[*cursorlevel].x;
             int y = state->cursors[*cursorlevel].y;
