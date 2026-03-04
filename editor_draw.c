@@ -833,6 +833,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             assert(object->y < HEIGHT_TILES);
             switch (object->type) {
                 case BLOCK:
+                    if (state->current_state == GOTO_SWITCH) break;
                     assert(object->x + object->block.width <= WIDTH_TILES);
                     assert(object->y + object->block.height <= HEIGHT_TILES);
                     {
@@ -1267,69 +1268,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         GOTO(0, bottom); bottom +=2;
         scr_printf("\nEnter element to edit, Ctrl-? for help");
         goto show_help_if_needed;
-    }
-
-    if (state->debug.objects) {
-        bool obj_first = true;
-        for (size_t i = 0; i < room.num_objects; i++) {
-            struct RoomObject *obj = room.objects + i;
-            bool hit = (obj->type == BLOCK
-                        && x >= obj->x && x < obj->x + obj->block.width
-                        && y >= obj->y && y < obj->y + obj->block.height)
-                    || (obj->type == SPRITE && obj->x == x && obj->y == y);
-            if (!hit) continue;
-            if (obj_first) { GOTO(0, bottom); bottom++; obj_first = false; }
-            else scr_printf(" | ");
-            switch (obj->type) {
-                case BLOCK:
-                    scr_printf("block ");
-                    if (state->current_state == TILE_EDIT) scr_printf("\033[4;1m");
-                    PRINTF_DATA((uint16_t)i);
-                    if (state->current_state == TILE_EDIT) scr_printf("\033[m");
-                    scr_printf(": (x,y)=");
-                    PRINTF_DATA(obj->x);
-                    scr_printf(",");
-                    PRINTF_DATA(obj->y);
-                    scr_printf(" (w,h)=");
-                    PRINTF_DATA(obj->block.width);
-                    scr_printf(",");
-                    PRINTF_DATA(obj->block.height);
-                    break;
-
-                case SPRITE:
-                    scr_printf("sprite ");
-                    if (state->current_state == TILE_EDIT) scr_printf("\033[4;1m");
-                    PRINTF_DATA((uint16_t)i);
-                    if (state->current_state == TILE_EDIT) scr_printf("\033[m");
-                    scr_printf(": ");
-                    switch(obj->sprite.type) {
-                        case SHARK:
-                            switch (obj->sprite.damage) {
-                                case 1:
-                                case 2: scr_printf("Shark"); break;
-                                case 3: scr_printf("Mysterio"); break;
-                                case 4: scr_printf("Mary Jane"); break;
-                                default: UNREACHABLE();
-                            }
-                            break;
-                        case MUMMY: scr_printf("Mummy"); break;
-                        case BLUE_MAN: scr_printf("Blue man"); break;
-                        case WOLF: scr_printf("Wolf"); break;
-                        case R2D2: scr_printf("R2D2"); break;
-                        case DINOSAUR: scr_printf("Dinosaur"); break;
-                        case RAT: scr_printf("Rat"); break;
-                        case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
-                        default: UNREACHABLE();
-                    }
-                    scr_printf(" (x,y)=");
-                    PRINTF_DATA(obj->x);
-                    scr_printf(",");
-                    PRINTF_DATA(obj->y);
-                    scr_printf(" (dmg)=");
-                    PRINTF_DATA(obj->sprite.damage);
-                    break;
-            }
-        }
     }
 
     if (state->debug.switches) {
@@ -1895,6 +1833,70 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     }
                 }
 #undef BOOL_S
+            }
+        }
+    }
+
+    if (state->debug.objects) {
+        bool obj_first = true;
+        bool obj_selected = switch_underneath == NULL && chunk_switch_underneath == NULL;
+        for (size_t i = 0; i < room.num_objects; i++) {
+            struct RoomObject *obj = room.objects + i;
+            bool hit = (obj->type == BLOCK
+                        && x >= obj->x && x < obj->x + obj->block.width
+                        && y >= obj->y && y < obj->y + obj->block.height)
+                    || (obj->type == SPRITE && obj->x == x && obj->y == y);
+            if (!hit) continue;
+            if (obj_first) { GOTO(0, bottom); bottom++; obj_first = false; }
+            else scr_printf(" | ");
+            switch (obj->type) {
+                case BLOCK:
+                    scr_printf("block ");
+                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[4;1m");
+                    PRINTF_DATA((uint16_t)i);
+                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[m");
+                    scr_printf(": (x,y)=");
+                    PRINTF_DATA(obj->x);
+                    scr_printf(",");
+                    PRINTF_DATA(obj->y);
+                    scr_printf(" (w,h)=");
+                    PRINTF_DATA(obj->block.width);
+                    scr_printf(",");
+                    PRINTF_DATA(obj->block.height);
+                    break;
+
+                case SPRITE:
+                    scr_printf("sprite ");
+                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[4;1m");
+                    PRINTF_DATA((uint16_t)i);
+                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[m");
+                    scr_printf(": ");
+                    switch(obj->sprite.type) {
+                        case SHARK:
+                            switch (obj->sprite.damage) {
+                                case 1:
+                                case 2: scr_printf("Shark"); break;
+                                case 3: scr_printf("Mysterio"); break;
+                                case 4: scr_printf("Mary Jane"); break;
+                                default: UNREACHABLE();
+                            }
+                            break;
+                        case MUMMY: scr_printf("Mummy"); break;
+                        case BLUE_MAN: scr_printf("Blue man"); break;
+                        case WOLF: scr_printf("Wolf"); break;
+                        case R2D2: scr_printf("R2D2"); break;
+                        case DINOSAUR: scr_printf("Dinosaur"); break;
+                        case RAT: scr_printf("Rat"); break;
+                        case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
+                        default: UNREACHABLE();
+                    }
+                    scr_printf(" (x,y)=");
+                    PRINTF_DATA(obj->x);
+                    scr_printf(",");
+                    PRINTF_DATA(obj->y);
+                    scr_printf(" (dmg)=");
+                    PRINTF_DATA(obj->sprite.damage);
+                    break;
             }
         }
     }
