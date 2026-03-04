@@ -1668,7 +1668,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
                         SWITCH_SIDE(pr->side),
                         has_chunk_at_cur ? " [chunk at cursor]" : "");
-                bottom++;
                 draw_switch_chunks_brief(extra, x, y, &bottom);
             }
         }
@@ -1687,7 +1686,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     pr->x, pr->y,
                     BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
                     SWITCH_SIDE(pr->side));
-            bottom++;
             draw_switch_chunks_brief(chunk_switch_underneath, x, y, &bottom);
         }
 
