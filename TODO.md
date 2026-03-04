@@ -26,9 +26,10 @@ Priority order: bugs → editor features → room/main quality → tests/researc
             IDs > 15 can never occur, UNREACHABLEs are genuinely unreachable
       [x] - goto-room grid already handles 2-digit (partial_byte); object/switch goto do not
 
-[ ] - Move object at room edge doesn't carry through to neighbour room
-      [ ] - move() rejects moves that would go off-edge; should transfer object/switch to neighbour room
-      [ ] - Add x as cut (yank + delete) to enable cut-paste between rooms
+[x] - Move object at room edge doesn't carry through to neighbour room
+      [x] - move() transfers object/switch to neighbour room
+      [x] - x as cut (yank + delete) for cross-room cut-paste
+      [x] - Undo/redo cross-room moves navigate to the correct room (first_room not last_room)
 
 [ ] - Chunk split when editing middle of a chunk (advanced / deferred)
       [ ] - Editing a byte in the middle of a TOGGLE_BLOCK should split into [start..n-1], [n], [n+1..end]
@@ -42,6 +43,14 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 [ ] - Object/switch patch bounds not validated before write in main.c
       [ ] - main.c:154, 158: FIXME It'll probably blow the assert when writing
 
+[x] - Overlapping block objects corrupt tile data on writeRooms→reload cycle
+      [x] - writeRoom now uses local ser_tiles (copy of room->data.tiles), overlays
+            objects in reverse order, never modifies room->data.tiles
+
+[x] - Mouse support: left click moves cursor, right click / Ctrl+click moves active item
+      [x] - TOGGLE_BLOCK chunk move now clears room->data.tiles at old chunk position
+      [x] - Ctrl+click added as alias for right-click move
+
 [ ] - room.c writeRoom: first byte of some chunk types may need 0x80 set
       [ ] - room.c:930: FIXME depending on type, first byte should have 0x80
 
@@ -49,11 +58,34 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 
 ## Backlog
 
-[ ] - Macro record/replay
-      [ ] - `m` starts recording; subsequent keys are buffered; `m` stops recording
-      [ ] - `,` replays the recorded key sequence as if each key were typed live
-      [ ] - Replaying should trigger all the same mutations/state changes as real input
-      [ ] - Consider: replay inside a recording should play previous macro, not recurse
+[ ] - Undo history depth cap and optional persistence
+      [ ] - Cap stack at N entries (e.g. 200), dropping oldest on overflow
+      [ ] - Optional: serialise undo stack to disk on exit, reload on startup
+            (main value: crash recovery; each snapshot ~1-3 KB, 200 entries ~300 KB)
+
+[x] - Macro record/replay (named slots a-z)
+      [ ] - State: macro_meta, macro_replay_pending, macro_recording, macro_slot,
+            macro_last_saved, macro_last_replayed, macro_buf, macro_slots[26], macro_replay
+      [ ] - Bindings (intercepted in handle_normal, active in all states):
+            m (idle)       → macro_meta=true; show slot overlay ("m> a c f m p z")
+            m + a-z        → start recording to slot (mm = slot 'm')
+            m (recording)  → stop; save macro_buf → macro_slots[slot]; macro_last_saved=slot
+            , (idle)       → replay_pending=true; show slot overlay (",=m .=f  a c f m p z")
+            , + a-z        → replay slot X; macro_last_replayed=X
+            , + ,          → replay macro_last_replayed slot
+            , + .          → replay macro_last_saved slot
+            , + anything   → cancel
+      [ ] - Slot overlay: drawn at bottom (status line) while waiting for slot key
+            m mode: "m> a c f m p z"  (occupied slots only)
+            , mode: ",=m .=f  a c f m p z"  (,=last-replayed .=last-saved, then occupied)
+            '\0' last-replayed/saved shown as '-': ",=- .=-" until used
+      [ ] - Replay: macro_replay ARRAY(Key) queue in game_state; drained one key per
+            process_input() call before poll() — same dispatch path as live input
+      [ ] - Guard: m and , keys ignored (not recorded, not dispatched) during replay;
+            no replay-within-replay
+      [ ] - m is never recorded into a macro (it is the delimiter)
+      [ ] - Header shows [Mm] while recording to slot m, nothing when idle
+      [ ] - Cleanup: free macro_slots[i], macro_buf, macro_replay in end()
 
 [ ] - Jump to arbitrary position (cursor and/or object/chunk/switch)
       [ ] - Move cursor directly to a typed (x,y) coordinate in the current room
@@ -79,8 +111,13 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 [x] - Implement copy/yank for chunks (y in chunk edit states x4)
 
 [x] - Dir keys in EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS move the memory pointer (h/j/k/l + arrows)
-      [ ] - Help text missing: arrow/hjkl entries absent from CHUNK_MEMORY_DETAILS help panel
-      [ ] - EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS still has " TODO dir keys ?" placeholder
+      [x] - Help text updated: all states audited and corrected
+            - NORMAL/TILE_EDIT: added u/U undo/redo, mouse bindings, o[n] goto object
+            - GOTO_ROOM: fixed swapped UP/Alt+k and DOWN/Alt+j directions
+            - EDIT_ROOMNAME: fixed DEL/BS descriptions; added Home/End
+            - EDIT_ROOMDETAILS: added h/j/k/l aliases for room link navigation
+            - CHUNK_MEMORY: fixed Space description; fixed 0-9a-fA-F label
+            - CHUNK_BLOCK: fixed 0-9a-fA-F label
 
 [ ] - Create new object from TILE_EDIT when no object is under cursor
       [ ] - Currently shows "No object here, TODO create new?" in status

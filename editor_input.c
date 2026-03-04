@@ -60,8 +60,23 @@ Key parse_key(const char *buf, int *i, int n) {
     if (b1 == '[') {
         if (*i + 2 >= n) { (*i)++; k.code = KEY_ESC; return k; }
         *i += 2;
-        /* Mouse events: ESC [ ? button ; col ; row M/m */
-        if (*i < n && buf[*i] == '?') {
+        /* X10 mouse: ESC [ M <btn+32> <col+33> <row+33> (6 raw bytes) */
+        if (*i < n && (uint8_t)buf[*i] == 'M' && *i + 3 < n) {
+            (*i)++;
+            uint8_t btn = (uint8_t)buf[(*i)++] - 32;
+            int16_t cx  = (int16_t)((uint8_t)buf[(*i)++] - 33);
+            int16_t cy  = (int16_t)((uint8_t)buf[(*i)++] - 33);
+            k.code          = KEY_MOUSE;
+            k.mouse.release = (btn == 3);
+            k.mouse.button  = k.mouse.release ? 0 : btn;
+            k.mouse.x       = cx;
+            k.mouse.y       = cy;
+            if (btn & 0x08) k.mod |= MOD_ALT;
+            if (btn & 0x10) k.mod |= MOD_CTRL;
+            return k;
+        }
+        /* SGR mouse: ESC [ ? <btn> ; <col> ; <row> M/m  (some terminals use < instead of ?) */
+        if (*i < n && (buf[*i] == '?' || buf[*i] == '<')) {
             (*i)++;
             int p[3] = {0, 0, 0}; int pi = 0;
             while (*i < n && pi < 3) {
@@ -72,11 +87,11 @@ Key parse_key(const char *buf, int *i, int n) {
             }
             if (*i < n && (buf[*i] == 'M' || buf[*i] == 'm')) {
                 char f = buf[(*i)++];
-                k.code         = KEY_MOUSE;
-                k.mouse.button = (uint8_t)p[0];
-                k.mouse.x      = (int16_t)(p[1] - 1);
-                k.mouse.y      = (int16_t)(p[2] - 1);
+                k.code          = KEY_MOUSE;
                 k.mouse.release = (f == 'm');
+                k.mouse.button  = (uint8_t)p[0];
+                k.mouse.x       = (int16_t)(p[1] - 1);
+                k.mouse.y       = (int16_t)(p[2] - 1);
                 if (MOUSE_MOD_ALT(p[0]))  k.mod |= MOD_ALT;
                 if (MOUSE_MOD_CTRL(p[0])) k.mod |= MOD_CTRL;
             } else {
@@ -2712,6 +2727,27 @@ static bool handle_normal(Key key) {
                     state->current_chunk = 0;
                     state->partial_byte = 0;
                     break;
+                case 'm':
+                    if (state->macro_recording) {
+                        /* Stop recording: transfer buf ownership to slot */
+                        KeyArray *slot = &state->macro_slots[state->macro_slot - 'a'];
+                        ARRAY_FREE(*slot);
+                        *slot = state->macro_buf;
+                        state->macro_buf = (KeyArray){0};
+                        state->macro_last_saved = state->macro_slot;
+                        state->macro_recording = false;
+                        snprintf(state->status_message, sizeof(state->status_message),
+                                 "Macro '%c' saved (%zu keys)", state->macro_slot,
+                                 slot->length);
+                    } else if (state->macro_replay.length == 0) {
+                        state->macro_meta = true;
+                    }
+                    break;
+                case ',':
+                    if (!state->macro_recording && state->macro_replay.length == 0) {
+                        state->macro_replay_pending = true;
+                    }
+                    break;
                 default: break;
             }
             break;
@@ -2859,6 +2895,36 @@ static bool handle_normal(Key key) {
     }
 
     return true;
+}
+
+/* Returns true if there is an object/switch/chunk at (x,y) that move() would act on. */
+static bool has_draggable_at(int x, int y) {
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    if (state->debug.switches) {
+        for (size_t i = 0; i < room->num_switches; i++) {
+            struct SwitchObject *sw = room->switches + i;
+            if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE &&
+                    sw->chunks.data[0].x == (uint8_t)x && sw->chunks.data[0].y == (uint8_t)y)
+                return true;
+            for (size_t c = 1; c < sw->chunks.length; c++) {
+                struct SwitchChunk *chunk = sw->chunks.data + c;
+                if (chunk->type != TOGGLE_BLOCK) continue;
+                if (chunk->dir == HORIZONTAL && y == chunk->y &&
+                        x >= chunk->x && x < chunk->x + (int)chunk->size) return true;
+                if (chunk->dir == VERTICAL   && x == chunk->x &&
+                        y >= chunk->y && y < chunk->y + (int)chunk->size) return true;
+            }
+        }
+    }
+    if (state->debug.objects) {
+        for (size_t i = 0; i < room->num_objects; i++) {
+            struct RoomObject *o = room->objects + i;
+            if (o->type == SPRITE && o->x == (uint8_t)x && o->y == (uint8_t)y) return true;
+            if (o->type == BLOCK && x >= o->x && x < o->x + o->block.width &&
+                    y >= o->y && y < o->y + o->block.height) return true;
+        }
+    }
+    return false;
 }
 
 static bool handle_tile_edit(Key key) {
@@ -3373,14 +3439,48 @@ static bool handle_tile_edit(Key key) {
         }
         break;
     case KEY_MOUSE: {
-        if (key.mouse.release) break;
-        if (MOUSE_IS_SCROLL(key.mouse.button)) break;
-        if (MOUSE_BTN(key.mouse.button) != 0) break;  /* left click only */
         int tx = key.mouse.x / 2;
-        int ty = key.mouse.y - 1;  /* row 0 = header; tiles start at row 1 */
-        if (tx >= 0 && tx < WIDTH_TILES && ty >= 0 && ty < HEIGHT_TILES) {
-            state->cursors[state->current_level].x = tx;
-            state->cursors[state->current_level].y = ty;
+        int ty = key.mouse.y - 1;
+        if (MOUSE_IS_SCROLL(key.mouse.button)) break;
+        bool in_bounds = (tx >= 0 && tx < WIDTH_TILES && ty >= 0 && ty < HEIGHT_TILES);
+        uint8_t btn = MOUSE_BTN(key.mouse.button);
+        bool ctrl = (key.mod & MOD_CTRL) != 0;
+
+        if (btn == 0 && !ctrl) {
+            if (!key.mouse.release) {
+                /* Press: move cursor to tile, start drag tracking */
+                if (!in_bounds) break;
+                state->cursors[state->current_level].x = tx;
+                state->cursors[state->current_level].y = ty;
+                state->mouse_dragging = true;
+                state->mouse_drag_tile_x = (int16_t)tx;
+                state->mouse_drag_tile_y = (int16_t)ty;
+                state->mouse_drag_has_obj = has_draggable_at(tx, ty);
+            } else {
+                /* Release */
+                if (!state->mouse_dragging) break;
+                state->mouse_dragging = false;
+                if (!in_bounds) break;
+                int sx = state->mouse_drag_tile_x;
+                int sy = state->mouse_drag_tile_y;
+                if (tx == sx && ty == sy) {
+                    /* Same tile: cursor already there, nothing more to do */
+                } else if (state->mouse_drag_has_obj) {
+                    /* Dragged onto new tile with object at origin: move it */
+                    move(tx - sx, ty - sy);
+                } else {
+                    /* No object at origin: treat as cursor jump to release tile */
+                    state->cursors[state->current_level].x = tx;
+                    state->cursors[state->current_level].y = ty;
+                }
+            }
+        } else if (btn == 2 || (btn == 0 && ctrl)) {
+            /* Right click or Ctrl+click: move active item to clicked tile (on press) */
+            if (key.mouse.release || !in_bounds) break;
+            int cx = state->cursors[state->current_level].x;
+            int cy = state->cursors[state->current_level].y;
+            int dx = tx - cx, dy = ty - cy;
+            if (dx != 0 || dy != 0) move(dx, dy);
         }
         break;
     }
@@ -3411,6 +3511,19 @@ static state_handler_fn state_handlers[NUM_STATES] = {
 };
 
 bool process_input(void) {
+    /* Drain one queued replay key before blocking on stdin */
+    if (state->macro_replay.length > 0) {
+        Key k = state->macro_replay.data[0];
+        memmove(state->macro_replay.data,
+                state->macro_replay.data + 1,
+                (state->macro_replay.length - 1) * sizeof(Key));
+        state->macro_replay.length--;
+        assert(state->current_state < NUM_STATES);
+        assert(state_handlers[state->current_state] != NULL);
+        state_handlers[state->current_state](k);
+        return true;
+    }
+
     state->status_message[0] = '\0';  /* clear previous status on each keypress */
     struct pollfd fd = { .fd = STDIN_FILENO, .events = POLLIN };
     int ret = poll(&fd, 1, 1000);
@@ -3420,9 +3533,65 @@ bool process_input(void) {
     ssize_t n = read(fd.fd, buf, sizeof(buf));
     assert(n >= 0);
     if (n == 0) return false;
+
+    /* If buffer ends with a bare ESC (or ESC+[), the terminal has split the
+     * sequence across two writes.  Wait up to 50 ms for the rest to arrive. */
+    while (n < (ssize_t)sizeof(buf)) {
+        uint8_t last = (uint8_t)buf[n - 1];
+        bool incomplete = (last == 0x1b) ||
+                          (n >= 2 && (uint8_t)buf[n - 2] == 0x1b && last == '[');
+        if (!incomplete) break;
+        struct pollfd fd2 = { .fd = STDIN_FILENO, .events = POLLIN };
+        if (poll(&fd2, 1, 50) <= 0 || !(fd2.revents & POLLIN)) break;
+        ssize_t extra = read(STDIN_FILENO, buf + n, (ssize_t)sizeof(buf) - n);
+        if (extra <= 0) break;
+        n += extra;
+    }
     int i = 0;
     while (i < n) {
         Key key = parse_key(buf, &i, (int)n);
+
+        /* Macro meta: awaiting slot key after 'm' — consume key, start or cancel */
+        if (state->macro_meta) {
+            state->macro_meta = false;
+            if (key.code == KEY_CHAR && key.mod == MOD_NONE &&
+                    key.ch >= 'a' && key.ch <= 'z') {
+                state->macro_recording = true;
+                state->macro_slot = key.ch;
+                state->macro_buf.length = 0;
+            }
+            /* ESC or any other key: cancel, key consumed */
+            continue;
+        }
+
+        /* Replay pending: awaiting slot key after ',' — consume key, queue or cancel */
+        if (state->macro_replay_pending) {
+            state->macro_replay_pending = false;
+            if (key.code == KEY_CHAR && key.mod == MOD_NONE) {
+                char ch = key.ch;
+                char slot = '\0';
+                if      (ch >= 'a' && ch <= 'z') slot = ch;
+                else if (ch == ',')              slot = state->macro_last_replayed;
+                else if (ch == '.')              slot = state->macro_last_saved;
+                if (slot >= 'a' && slot <= 'z') {
+                    KeyArray *m = &state->macro_slots[slot - 'a'];
+                    if (m->length > 0) {
+                        for (size_t mi = 0; mi < m->length; mi++)
+                            ARRAY_ADD(state->macro_replay, m->data[mi]);
+                        state->macro_last_replayed = slot;
+                    }
+                }
+            }
+            /* any other key or empty slot: cancel, key consumed */
+            continue;
+        }
+
+        /* Record key into macro buf (skip plain 'm' — it is the stop delimiter) */
+        if (state->macro_recording &&
+                !(key.code == KEY_CHAR && key.mod == MOD_NONE && key.ch == 'm')) {
+            ARRAY_ADD(state->macro_buf, key);
+        }
+
         assert(state->current_state < NUM_STATES);
         assert(state_handlers[state->current_state] != NULL);
         state_handlers[state->current_state](key);

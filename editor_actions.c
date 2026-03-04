@@ -83,8 +83,10 @@ void push_undo(uint8_t room_idx, bool grouped) {
 uint8_t do_undo(void) {
     if (state->undo_stack.length == 0) return 255;
 
+    /* Return the top entry's room — that's where the undone action originated,
+     * so after undo the object is back there and the cursor should follow. */
+    uint8_t first_room = state->undo_stack.data[state->undo_stack.length - 1].room_idx;
     size_t redo_start = state->redo_stack.length;
-    uint8_t last_room = 255;
 
     do {
         UndoEntry *e = &state->undo_stack.data[state->undo_stack.length - 1];
@@ -102,7 +104,6 @@ uint8_t do_undo(void) {
         e->snapshot.objects = NULL;
         e->snapshot.switches = NULL;
 
-        last_room = e->room_idx;
         state->undo_stack.length--;
 
         if (!keep_going) break;
@@ -114,14 +115,16 @@ uint8_t do_undo(void) {
         state->redo_stack.data[state->redo_stack.length - 1].grouped = true;
 
     assert(writeRooms(&state->rooms));
-    return last_room;
+    return first_room;
 }
 
 uint8_t do_redo(void) {
     if (state->redo_stack.length == 0) return 255;
 
+    /* Return the top entry's room — that's where the redone action lands,
+     * so after redo the object is there and the cursor should follow. */
+    uint8_t first_room = state->redo_stack.data[state->redo_stack.length - 1].room_idx;
     size_t undo_start = state->undo_stack.length;
-    uint8_t last_room = 255;
 
     do {
         UndoEntry *e = &state->redo_stack.data[state->redo_stack.length - 1];
@@ -137,7 +140,6 @@ uint8_t do_redo(void) {
         e->snapshot.objects = NULL;
         e->snapshot.switches = NULL;
 
-        last_room = e->room_idx;
         state->redo_stack.length--;
 
         if (!keep_going) break;
@@ -148,7 +150,7 @@ uint8_t do_redo(void) {
         state->undo_stack.data[state->undo_stack.length - 1].grouped = true;
 
     assert(writeRooms(&state->rooms));
-    return last_room;
+    return first_room;
 }
 
 
@@ -310,6 +312,10 @@ void move(int dx, int dy) {
                     int chunk_w = chunk->dir == HORIZONTAL ? (int)chunk->size : 1;
                     int chunk_h = chunk->dir == VERTICAL   ? (int)chunk->size : 1;
                     push_undo((uint8_t)state->current_level, false);
+                    /* Clear tiles at old chunk position */
+                    for (int iy = chunk->y; iy < chunk->y + chunk_h; iy++)
+                        for (int ix = chunk->x; ix < chunk->x + chunk_w; ix++)
+                            room->tiles[TILE_IDX(ix, iy)] = 0;
                     if (dx == -1 && chunk->x == 0)
                         chunk->x = WIDTH_TILES - chunk_w;
                     else if (dx ==  1 && chunk->x + chunk_w == WIDTH_TILES)

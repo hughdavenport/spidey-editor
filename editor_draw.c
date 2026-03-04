@@ -15,6 +15,10 @@ help_keys help[][100] = {
         {"Right/l", "Move cursor right"},
         {"r[nn]", "goto room"},
         {"s[n]", "goto switch"},
+        {"o[n]", "goto object"},
+        {"u/U", "undo/redo"},
+        {"mX", "record macro to slot X (a-z); m again to stop"},
+        {",X", "replay macro in slot X; ,, = last replayed; ,. = last saved"},
         {"Ctrl-p", "play (runs play.sh)"},
         {"q", "quit"},
         {"Ctrl-?", "toggle help"},
@@ -34,10 +38,15 @@ help_keys help[][100] = {
         {"Down/j", "Move cursor down"},
         {"Up/k", "Move cursor up"},
         {"Right/l", "Move cursor right"},
+        {"Left click", "move cursor (on object: drag to move it)"},
+        {"Right click/Ctrl+click", "move active item to tile"},
+        {"u/U", "undo/redo"},
+        {"mX", "record macro to slot X (a-z); m again to stop"},
+        {",X", "replay macro in slot X; ,, = last replayed; ,. = last saved"},
         {"R", "edit room name"},
         {"r[nn]", "goto room"},
-        {"Ctrl-r[ktdbcef|-]", "edit room detail"},
-        {"Ctrl-s[eorcs]", "create/edit switch"},
+        {"Ctrl-r[gtdbcef|-]", "edit room detail (hjkl/arrows = room links)"},
+        {"Ctrl-s", "create/edit switch"},
         {"Ctrl-o", "create object (1x1 block at cursor)"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
@@ -77,13 +86,13 @@ help_keys help[][100] = {
 
     [GOTO_ROOM]={
         {"0-9a-fA-F", "room number"},
-        {"any printable char", "change character under cursor"},
-        {"UP/Alt+j", "Goto room above current room"},
-        {"DOWN/Alt+k", "Goto room below current room"},
-        {"LEFT/Alt+h", "Goto room to the left current room"},
-        {"RIGHT/Alt+l", "Goto room to the right current room"},
-        {"DEL", "delete character under cursor"},
-        {"BACKSPACE", "delete character under cursor"},
+        {"any printable char", "navigate by room name"},
+        {"UP/Alt+k", "Goto room above current room"},
+        {"DOWN/Alt+j", "Goto room below current room"},
+        {"LEFT/Alt+h", "Goto room to the left of current room"},
+        {"RIGHT/Alt+l", "Goto room to the right of current room"},
+        {"DEL", "delete character from room name"},
+        {"BACKSPACE", "delete character from room name"},
         {"ESC", "go back to main view"},
         {"Ctrl+q", "go back to main view"},
         {"Ctrl-?", "toggle help"},
@@ -92,12 +101,13 @@ help_keys help[][100] = {
     },
 
     [EDIT_ROOMNAME]={
-        {"any printable char", "change character under cursor"},
-        {"DEL", "delete character under cursor"},
-        {"BACKSPACE", "delete character under cursor"},
+        {"any printable char", "insert character"},
+        {"DEL", "delete character after cursor"},
+        {"BACKSPACE", "delete character before cursor"},
         {"ENTER", "save room name"},
         {"LEFT", "move cursor left"},
         {"RIGHT", "move cursor right"},
+        {"Home/End", "move cursor to start/end"},
         {"ESC", "go back to main view"},
         {"Ctrl-?", "toggle help"},
         {"Ctrl-h", "toggle hex in debug info"},
@@ -131,10 +141,10 @@ help_keys help[][100] = {
         {"e", "Edit room UNKNOWN_e (only bottom two bits)"},
         {"f", "Edit room UNKNOWN_f"},
 
-        {"LEFT", "Edit room to left"},
-        {"RIGHT", "Edit room to right"},
-        {"UP", "Edit room above"},
-        {"DOWN", "Edit room below"},
+        {"LEFT/h", "Edit room to left"},
+        {"RIGHT/l", "Edit room to right"},
+        {"UP/k", "Edit room above"},
+        {"DOWN/j", "Edit room below"},
 
         {"ESC/q/Ctrl-r", "go back to main view"},
         {"Ctrl-p", "play (runs play.sh)"},
@@ -229,7 +239,7 @@ help_keys help[][100] = {
         {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
-        {"0-9a-fA-F", "change selected block tile"},
+        {"0-9a-fA-F", "change on/off tile value"},
         {"Left/h", "Move block left"},
         {"Down/j", "Move block down"},
         {"Up/k", "Move block up"},
@@ -251,14 +261,13 @@ help_keys help[][100] = {
         {"x/DEL/BS", "cut (copy to clipboard and delete)"},
         {"+", "increase chunk id (shuffles up)"},
         {"-", "decrease chunk id (shuffles down)"},
-        {"0-9a-fA-F", "change selected block tile"},
-        {"Space", "cycle through memory fields"},
+        {"0-9a-fA-F", "change on/off memory value"},
         {"o", "toggle between editing on and off value"},
-        {"^", "increase block size (advanced)"},
-        {"v", "decrease block size (advanced)"},
+        {"^", "increase size (advanced)"},
+        {"v", "decrease size (advanced)"},
         {"r", "toggle direction (advanced)"},
         {"Left/Up/h/k", "move memory pointer back"},
-        {"Down/Right/j/l", "move memory pointer forward"},
+        {"Down/Right/j/l/Space", "move memory pointer forward"},
         {"ESC/q/Ctrl-s", "go back to main view"},
         {"Ctrl-p", "play (runs play.sh)"},
         {"Ctrl-?", "toggle help"},
@@ -542,6 +551,9 @@ void redraw() {
         case CLIP_CHUNK:  scr_printf(" \033[1m[Y:chk]\033[m"); break;
         case CLIP_TILE:   scr_printf(" \033[1m[Y:tile]\033[m"); break;
         case CLIP_NONE: break;
+    }
+    if (state->macro_recording) {
+        scr_printf(" \033[1;31m[M:%c]\033[m", state->macro_slot);
     }
 
     GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
@@ -1950,6 +1962,28 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
 show_help_if_needed:
     if (state->help) show_help();
+
+    /* Macro slot overlay: drawn at bottom row while awaiting a slot key */
+    if (state->macro_meta || state->macro_replay_pending) {
+        GOTO(0, state->screen_dimensions.y - 1);
+        scr_printf("\033[7m");
+        if (state->macro_replay_pending) {
+            char lr = state->macro_last_replayed;
+            char ls = state->macro_last_saved;
+            scr_printf(",=%c .=%c  ", lr ? lr : '-', ls ? ls : '-');
+        } else {
+            scr_printf("m>  ");
+        }
+        bool any = false;
+        for (int si = 0; si < 26; si++) {
+            if (state->macro_slots[si].length > 0) {
+                scr_printf("%c ", 'a' + si);
+                any = true;
+            }
+        }
+        if (!any) scr_printf("(empty)");
+        scr_printf("\033[m");
+    }
 
     screen_flush();
 }

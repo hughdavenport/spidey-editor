@@ -883,25 +883,31 @@ bool writeRoom(Room *room, FILE *fp) {
     size_t d_len = 0;
     size_t c_len = 0;
 
-    // Copy the object tile data back
-    for (size_t i = 0; i < room->data.num_objects; i ++) {
-        if (room->data.objects[i].type == SPRITE) continue; // No tile data
-        if (room->data.objects[i].tiles == NULL) continue;
-        /* if(room->data.objects[i].y < HEIGHT_TILES && room->data.objects[i].y + room->data.objects[i].block.height >= HEIGHT_TILES) continue; */
-        assert(room->data.objects[i].y + room->data.objects[i].block.height <= HEIGHT_TILES);
-        for (size_t y = room->data.objects[i].y; y < room->data.objects[i].y + room->data.objects[i].block.height; y ++) {
-            memcpy(
-                    room->data.tiles + TILE_IDX(room->data.objects[i].x, y),
-                    room->data.objects[i].tiles + (y - room->data.objects[i].y) * room->data.objects[i].block.width,
-                    room->data.objects[i].block.width
-                  );
+    /* Build a serialisation tile array without modifying room->data.tiles.
+     * Overlay objects in reverse order so lower-indexed objects take priority
+     * on any overlapping regions — matching readRoom's forward-read-then-zero
+     * behaviour, which prevents tile corruption when two block objects overlap. */
+    uint8_t ser_tiles[WIDTH_TILES * HEIGHT_TILES];
+    memcpy(ser_tiles, room->data.tiles, sizeof(ser_tiles));
+    if (room->data.num_objects > 0) {
+        for (size_t ii = room->data.num_objects; ii-- > 0; ) {
+            struct RoomObject *obj = room->data.objects + ii;
+            if (obj->type == SPRITE || obj->tiles == NULL) continue;
+            assert(obj->y + obj->block.height <= HEIGHT_TILES);
+            for (size_t y = obj->y; y < obj->y + obj->block.height; y++) {
+                memcpy(
+                        ser_tiles + TILE_IDX(obj->x, y),
+                        obj->tiles + (y - obj->y) * obj->block.width,
+                        obj->block.width
+                      );
+            }
         }
     }
 
     room->data._num_switches = (room->data.num_switches << 2) | (room->data._num_switches & 0x3);
 
     for (size_t i = 0; i < C_ARRAY_LEN(room->data.tiles); i ++) {
-        decompressed[d_len++] = room->data.tiles[i];
+        decompressed[d_len++] = ser_tiles[i];
     }
     decompressed[d_len++] = room->data.tile_offset;
     decompressed[d_len++] = room->data.background;

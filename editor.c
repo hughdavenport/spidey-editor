@@ -47,7 +47,7 @@ bool any_source_newer(struct timespec test_time) {
 game_state *state = NULL;
 
 void end() {
-    printf("\033[?1000l" RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
+    printf("\033[?1000l\033[?1006l" RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
     if (state != NULL) {
         assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
         if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
@@ -56,6 +56,10 @@ void end() {
             ARRAY_FREE(state->clipboard.sw.chunks);
         }
         free_undo_stacks();
+        ARRAY_FREE(state->macro_buf);
+        for (size_t mi = 0; mi < 26; mi++)
+            ARRAY_FREE(state->macro_slots[mi]);
+        ARRAY_FREE(state->macro_replay);
         freeRoomFile(&state->rooms);
         free(state);
     }
@@ -157,7 +161,7 @@ void *loop_main(char *library, void *call_state) {
     if (state == NULL) setup();
     else get_screen_dimensions();
 
-    printf("\033[?1000h");  /* enable mouse — also re-enables on hot-reload */
+    printf("\033[?1000h\033[?1006h");  /* enable mouse (X10 + SGR) — also re-enables on hot-reload */
     fflush(stdout);
 
     signal(SIGWINCH, sigwinch_handler);

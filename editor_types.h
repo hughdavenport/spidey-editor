@@ -85,6 +85,8 @@ typedef struct {
     } mouse;
 } Key;
 
+typedef ARRAY(Key) KeyArray;
+
 /* Screen buffer */
 #define SCREEN_MAX_WIDTH  256
 #define SCREEN_MAX_HEIGHT  64
@@ -197,6 +199,23 @@ typedef struct {
     ARRAY(UndoEntry) undo_stack;
     ARRAY(UndoEntry) redo_stack;
     char status_message[80];
+
+    /* Mouse drag state */
+    bool    mouse_dragging;     /* left button currently held */
+    int16_t mouse_drag_tile_x;  /* tile where press occurred */
+    int16_t mouse_drag_tile_y;
+    bool    mouse_drag_has_obj; /* draggable (object/switch/chunk) was at press tile */
+
+    /* Macro record/replay */
+    bool       macro_meta;           /* 'm' pressed, awaiting slot key */
+    bool       macro_replay_pending; /* ',' pressed, awaiting slot key */
+    bool       macro_recording;      /* currently recording */
+    char       macro_slot;           /* slot being recorded to ('a'–'z') */
+    char       macro_last_saved;     /* '\0' = none */
+    char       macro_last_replayed;  /* '\0' = none */
+    KeyArray   macro_buf;            /* keys being recorded */
+    KeyArray   macro_slots[26];      /* named slots a-z */
+    KeyArray   macro_replay;         /* injection queue */
 
     Cell screen_prev[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
     Cell screen_curr[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
