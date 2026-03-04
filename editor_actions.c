@@ -234,6 +234,16 @@ static void transfer_switch(struct SwitchObject *switcch, size_t nbr_idx, int ne
     assert(writeRooms(&state->rooms));
 }
 
+static bool sprite_at(struct DecompressedRoom *room, struct RoomObject *exclude, int x, int y) {
+    for (size_t k = 0; k < room->num_objects; k++) {
+        if (room->objects + k != exclude &&
+                room->objects[k].type == SPRITE &&
+                room->objects[k].x == x && room->objects[k].y == y)
+            return true;
+    }
+    return false;
+}
+
 void move(int dx, int dy) {
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;
@@ -353,18 +363,29 @@ void move(int dx, int dy) {
             if (object_crosses_edge(object->x, object->y, obj_w, obj_h, dx, dy, room,
                                     &nbr_idx, &new_x, &new_y)) {
                 if (nbr_idx != state->current_level) {
-                    push_undo((uint8_t)nbr_idx, false);
-                    push_undo((uint8_t)state->current_level, true);
-                    transfer_object(object, nbr_idx, new_x, new_y);
+                    if (object->type == SPRITE &&
+                            sprite_at(&state->rooms.rooms[nbr_idx].data, NULL, new_x, new_y)) {
+                        snprintf(state->status_message, sizeof(state->status_message),
+                                 "Sprite would overlap");
+                    } else {
+                        push_undo((uint8_t)nbr_idx, false);
+                        push_undo((uint8_t)state->current_level, true);
+                        transfer_object(object, nbr_idx, new_x, new_y);
+                    }
                 } else {
                     /* Self-loop: wrap to opposite edge within same room */
-                    push_undo((uint8_t)state->current_level, false);
-                    object->x = new_x;
-                    object->y = new_y;
-                    state->cursors[state->current_level].x = new_x;
-                    state->cursors[state->current_level].y = new_y;
-                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    if (object->type == SPRITE && sprite_at(room, object, new_x, new_y)) {
+                        snprintf(state->status_message, sizeof(state->status_message),
+                                 "Sprite would overlap");
+                    } else {
+                        push_undo((uint8_t)state->current_level, false);
+                        object->x = new_x;
+                        object->y = new_y;
+                        state->cursors[state->current_level].x = new_x;
+                        state->cursors[state->current_level].y = new_y;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    }
                 }
             } else {
                 /* Normal in-bounds move */
@@ -373,13 +394,19 @@ void move(int dx, int dy) {
                                  (int)object->y + dy >= 0 &&
                                  (int)object->y + obj_h + dy <= HEIGHT_TILES;
                 if (in_bounds) {
-                    push_undo((uint8_t)state->current_level, false);
-                    object->x += dx;
-                    object->y += dy;
-                    state->cursors[state->current_level].x += dx;
-                    state->cursors[state->current_level].y += dy;
-                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    if (object->type == SPRITE &&
+                            sprite_at(room, object, object->x + dx, object->y + dy)) {
+                        snprintf(state->status_message, sizeof(state->status_message),
+                                 "Sprite would overlap");
+                    } else {
+                        push_undo((uint8_t)state->current_level, false);
+                        object->x += dx;
+                        object->y += dy;
+                        state->cursors[state->current_level].x += dx;
+                        state->cursors[state->current_level].y += dy;
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        assert(writeRooms(&state->rooms));
+                    }
                 }
             }
             moved = true;
