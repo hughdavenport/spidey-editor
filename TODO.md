@@ -21,10 +21,10 @@ Priority order: bugs → editor features → room/main quality → tests/researc
       [x] - Block shrink: remove tiles from trailing edge, shrink w/h
       [x] - Sprite shrink: no-op or remove (shrink() checks object->type == BLOCK; SPRITE silently skipped)
 
-[ ] - Object/switch IDs above 15 hit UNREACHABLE (single hex digit display limit)
-      [ ] - editor_draw.c: the 2-digit display case is FIXME'd out
+[x] - Object/switch IDs above 15 hit UNREACHABLE (single hex digit display limit)
+      [x] - Non-issue: hard limits of 7 objects and 15 switches are now enforced in the editor;
+            IDs > 15 can never occur, UNREACHABLEs are genuinely unreachable
       [x] - goto-room grid already handles 2-digit (partial_byte); object/switch goto do not
-      [ ] - editor_input.c handle_edit_switchdetails_select_chunk: same issue for chunk index > 15
 
 [ ] - Move object at room edge doesn't carry through to neighbour room
       [ ] - move() rejects moves that would go off-edge; should transfer object/switch to neighbour room
@@ -33,9 +33,8 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 [ ] - Chunk split when editing middle of a chunk (advanced / deferred)
       [ ] - Editing a byte in the middle of a TOGGLE_BLOCK should split into [start..n-1], [n], [n+1..end]
 
-[ ] - Multiple objects/switches at same tile not handled in status panel
-      [ ] - editor_draw.c:1223: UNIMPLEMENTED: multiple objects underneath
-      [ ] - editor_draw.c:1286: UNIMPLEMENTED: multiple switches underneath
+[x] - Multiple objects/switches at same tile not handled in status panel
+      [x] - Overlapping objects shown one-per-line; first hit highlighted as active
 
 [ ] - Selected chunk UNIMPLEMENTED in switch detail panel
       [ ] - editor_draw.c:1669
