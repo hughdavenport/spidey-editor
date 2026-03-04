@@ -19,7 +19,7 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 
 [x] - Fix `shrink()` object case is UNIMPLEMENTED (aborts)
       [x] - Block shrink: remove tiles from trailing edge, shrink w/h
-      [ ] - Sprite shrink: no-op or remove (currently unreachable: detection skips SPRITE type)
+      [x] - Sprite shrink: no-op or remove (shrink() checks object->type == BLOCK; SPRITE silently skipped)
 
 [ ] - Object/switch IDs above 15 hit UNREACHABLE (single hex digit display limit)
       [ ] - editor_draw.c: the 2-digit display case is FIXME'd out
@@ -27,43 +27,61 @@ Priority order: bugs → editor features → room/main quality → tests/researc
       [ ] - editor_input.c handle_edit_switchdetails_select_chunk: same issue for chunk index > 15
 
 [ ] - Move object at room edge doesn't carry through to neighbour room
-      [ ] - editor_input.c:3350: FIXME Currently doesn't move objects through to neighbours
+      [ ] - move() rejects moves that would go off-edge; should transfer object/switch to neighbour room
+      [ ] - Add x as cut (yank + delete) to enable cut-paste between rooms
 
-[ ] - Chunk split when editing middle of a chunk
-      [ ] - editor_input.c:3623: FIXME split up chunks, need one for this byte + up to 2 for either end
+[ ] - Chunk split when editing middle of a chunk (advanced / deferred)
+      [ ] - Editing a byte in the middle of a TOGGLE_BLOCK should split into [start..n-1], [n], [n+1..end]
 
 [ ] - Multiple objects/switches at same tile not handled in status panel
-      [ ] - editor_draw.c:1218: UNIMPLEMENTED: multiple objects underneath
-      [ ] - editor_draw.c:1283: UNIMPLEMENTED: multiple switches underneath
+      [ ] - editor_draw.c:1223: UNIMPLEMENTED: multiple objects underneath
+      [ ] - editor_draw.c:1286: UNIMPLEMENTED: multiple switches underneath
 
 [ ] - Selected chunk UNIMPLEMENTED in switch detail panel
-      [ ] - editor_draw.c:1666
+      [ ] - editor_draw.c:1669
 
 [ ] - Object/switch patch bounds not validated before write in main.c
-      [ ] - Lines 150, 154: FIXME It'll probably blow the assert when writing
+      [ ] - main.c:154, 158: FIXME It'll probably blow the assert when writing
 
 [ ] - room.c writeRoom: first byte of some chunk types may need 0x80 set
       [ ] - room.c:930: FIXME depending on type, first byte should have 0x80
 
 ---
 
+## Backlog
+
+[ ] - Macro record/replay
+      [ ] - `m` starts recording; subsequent keys are buffered; `m` stops recording
+      [ ] - `,` replays the recorded key sequence as if each key were typed live
+      [ ] - Replaying should trigger all the same mutations/state changes as real input
+      [ ] - Consider: replay inside a recording should play previous macro, not recurse
+
+[ ] - Jump to arbitrary position (cursor and/or object/chunk/switch)
+      [ ] - Move cursor directly to a typed (x,y) coordinate in the current room
+      [ ] - Move the active object/chunk/switch to an arbitrary position in the current room
+            (alternative to nudging one step at a time with hjkl)
+      [ ] - Keybinding TBD (e.g. `g` for goto-coord, or a `G` prefix in move mode)
+
+---
+
 ## Editor features (from help text TODOs)
 
-[ ] - Implement object create/edit (Ctrl-o)
-      [ ] - Currently: "TODO create/edit object" in help
+[x] - Implement object create (Ctrl-o)
+      [x] - Creates 1x1 BLOCK at cursor if no object present
       [ ] - Show object creation dialog: type (BLOCK/SPRITE), position, dimensions
-      [ ] - Edit existing object fields inline
+      [ ] - Edit existing object fields inline (SPRITE fields not editable yet)
 
-[ ] - Implement copy/yank for tile-edit mode (y key)
-      [ ] - Copy the thing under cursor (object, switch, or tile region)
-      [ ] - Paste with a separate key
+[x] - Implement copy/yank for tile-edit mode (y key)
+      [x] - y: copy object or switch under cursor to clipboard
+      [x] - P: paste copied object/switch at cursor
 
-[ ] - Implement copy/yank for switch (y in EDIT_SWITCHDETAILS)
-[ ] - Implement copy/yank for chunks (y in chunk edit states x4)
+[x] - Implement copy/yank for switch (y in EDIT_SWITCHDETAILS)
+      [x] - P: paste clipboard chunk into current switch
+[x] - Implement copy/yank for chunks (y in chunk edit states x4)
 
-[ ] - Implement dir keys to change values in switch chunk detail editing
-      [ ] - " TODO dir keys ?" entry in EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS help
-      [ ] - Up/down should increment/decrement the field under cursor
+[x] - Dir keys in EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS move the memory pointer (h/j/k/l + arrows)
+      [ ] - Help text missing: arrow/hjkl entries absent from CHUNK_MEMORY_DETAILS help panel
+      [ ] - EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS still has " TODO dir keys ?" placeholder
 
 [ ] - Create new object from TILE_EDIT when no object is under cursor
       [ ] - Currently shows "No object here, TODO create new?" in status
@@ -76,10 +94,9 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 [x] - Extract `editor_actions.c`, `editor_draw.c`, `editor_input.c`
 [x] - Slim down `editor.c` to lifecycle only
 [x] - Virtual screen buffer (editor_screen.c)
+[x] - Key input: replace strncmp KEY_MATCHES macro with parse_key() CSI state machine → Key struct dispatch
 
-[ ] - Cursor position not per-room (FIXME in editor_types.h)
-      [ ] - cursors[] array is indexed but only current_level is used meaningfully
-      [ ] - Should remember position when switching rooms
+[x] - Cursor position remembered per-room (cursors[] array is indexed by level)
 
 ---
 
@@ -94,8 +111,9 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 
 [ ] - Make dumpRoom take a FILE* parameter instead of hardcoding stdout
 
-[ ] - Replace assert() with proper error returns in object bounds checks in readRoom
-      [ ] - Lines ~600-612: the warn-then-assert pattern is contradictory
+[ ] - Remove redundant assert() after warn+continue in readRoom
+      [ ] - room.c:606: assert(y < HEIGHT_TILES) is unreachable (line 604 continues if y is bad)
+      [ ] - The assert gives false confidence; should just be removed
 
 ---
 
@@ -103,8 +121,7 @@ Priority order: bugs → editor features → room/main quality → tests/researc
 
 [x] - Extract usage_patch() helper (was duplicated 30+ times)
 [x] - Fix `last` memory leaks (Invalid object id / Invalid switch id paths)
-
-[ ] - Extract usage_delete() helper (similar duplication)
+[x] - Extract usage_delete() helper (similar duplication)
 
 [ ] - Clarify `addr` encoding in PatchInstruction
       [ ] - Object patches encode `(object_idx << 8) | field_offset`
