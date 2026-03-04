@@ -825,50 +825,40 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
     uint8_t dirty[MIN_HEIGHT * MIN_WIDTH] = {0};
     if (state->debug.objects) {
-        for (size_t i = 0; i < room.num_objects; i ++) {
+        /* Pass 1: blocks */
+        for (size_t i = 0; i < room.num_objects; i++) {
             struct RoomObject *object = room.objects + i;
-            assert(object->x >= 0);
-            assert(object->y >= 0);
-            assert(object->x < WIDTH_TILES);
-            assert(object->y < HEIGHT_TILES);
-            switch (object->type) {
-                case BLOCK:
-                    if (state->current_state == GOTO_SWITCH) break;
-                    assert(object->x + object->block.width <= WIDTH_TILES);
-                    assert(object->y + object->block.height <= HEIGHT_TILES);
-                    {
-                        size_t tile_n = object->block.width * object->block.height;
-                        bool all_blank = true;
-                        for (size_t t = 0; t < tile_n; t++) {
-                            if (object->tiles[t] != BLANK_TILE) { all_blank = false; break; }
-                        }
-                        scr_printf("\033[3%ldm", (i % 3) + 1);
-                        for (int y = object->y; y < object->y + object->block.height; y ++) {
-                            GOTO(2 * object->x, y + 1);
-                            for (int x = object->x; x < object->x + object->block.width; x ++) {
-                                if (dirty[y * MIN_WIDTH + x] == 1) continue;
-                                dirty[y * MIN_WIDTH + x] = 1;
-                                uint8_t tile = object->tiles[(y - object->y) * object->block.width + (x - object->x)];
-                                if (tile == BLANK_TILE && !all_blank) {
-                                    scr_printf("  ");
-                                } else {
-                                    scr_printf("%02X", tile);
-                                }
-                            }
-                        }
-                    }
-                    break;
-
-                case SPRITE:
-                    if (state->current_state == GOTO_SWITCH) break;
-                    GOTO(2 * object->x, object->y + 1);
-                    assert((unsigned)(object->y * MIN_WIDTH + object->x) < sizeof(dirty));
-                    if (dirty[object->y * MIN_WIDTH + object->x] == 1) continue;
-                    dirty[object->y * MIN_WIDTH + object->x] = 1;
-                    scr_printf("\033[4%ld;30m%d%d", (i % 3) + 1, object->sprite.type, object->sprite.damage);
-                    break;
+            if (object->type != BLOCK) continue;
+            if (state->current_state == GOTO_SWITCH) continue;
+            assert(object->x >= 0 && object->y >= 0);
+            assert(object->x < WIDTH_TILES && object->y < HEIGHT_TILES);
+            assert(object->x + object->block.width <= WIDTH_TILES);
+            assert(object->y + object->block.height <= HEIGHT_TILES);
+            size_t tile_n = object->block.width * object->block.height;
+            bool all_blank = true;
+            for (size_t t = 0; t < tile_n; t++)
+                if (object->tiles[t] != BLANK_TILE) { all_blank = false; break; }
+            scr_printf("\033[3%ldm", (i % 3) + 1);
+            for (int oy = object->y; oy < object->y + (int)object->block.height; oy++) {
+                GOTO(2 * object->x, oy + 1);
+                for (int ox = object->x; ox < object->x + (int)object->block.width; ox++) {
+                    if (dirty[oy * MIN_WIDTH + ox]) continue;
+                    dirty[oy * MIN_WIDTH + ox] = 1;
+                    uint8_t tile = object->tiles[(oy - object->y) * object->block.width + (ox - object->x)];
+                    scr_printf(tile == BLANK_TILE && !all_blank ? "  " : "%02X", tile);
+                }
             }
             scr_printf("\033[m");
+        }
+        /* Pass 2: sprites — always on top of blocks */
+        for (size_t i = 0; i < room.num_objects; i++) {
+            struct RoomObject *object = room.objects + i;
+            if (object->type != SPRITE) continue;
+            if (state->current_state == GOTO_SWITCH) continue;
+            assert(object->x >= 0 && object->y >= 0);
+            assert(object->x < WIDTH_TILES && object->y < HEIGHT_TILES);
+            GOTO(2 * object->x, object->y + 1);
+            scr_printf("\033[4%ld;30m%d%d\033[m", (i % 3) + 1, object->sprite.type, object->sprite.damage);
         }
         if (state->current_state == GOTO_OBJECT) {
             for (int y = 0; y < HEIGHT_TILES; y ++) {
@@ -898,17 +888,12 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
     }
 
-    /* Phase 3: Re-overlay switch preambles and TOGGLE_BLOCK chunks above objects */
+    /* Phase 3: Re-overlay TOGGLE_BLOCK chunks, then preambles on top */
     if (state->debug.switches && state->current_state != GOTO_OBJECT
             && state->current_state != GOTO_SWITCH) {
+        /* 3a: chunk tiles */
         for (size_t s = 0; s < (size_t)room.num_switches; s++) {
             struct SwitchObject *sw = room.switches + s;
-            if (sw->chunks.length == 0) continue;
-            int sx = sw->chunks.data[0].x;
-            int sy = sw->chunks.data[0].y;
-            uint8_t tile = room.tiles[TILE_IDX(sx, sy)];
-            GOTO(2 * sx, sy + 1);
-            scr_printf("\033[4%d;30m%02X\033[m", (int)(s % 3) + 4, tile);
             for (size_t c = 1; c < sw->chunks.length; c++) {
                 struct SwitchChunk *chunk = sw->chunks.data + c;
                 if (chunk->type != TOGGLE_BLOCK) continue;
@@ -929,6 +914,16 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 }
                 scr_printf("\033[m");
             }
+        }
+        /* 3b: preambles on top of chunks */
+        for (size_t s = 0; s < (size_t)room.num_switches; s++) {
+            struct SwitchObject *sw = room.switches + s;
+            if (sw->chunks.length == 0) continue;
+            int sx = sw->chunks.data[0].x;
+            int sy = sw->chunks.data[0].y;
+            uint8_t tile = room.tiles[TILE_IDX(sx, sy)];
+            GOTO(2 * sx, sy + 1);
+            scr_printf("\033[4%d;30m%02X\033[m", (int)(s % 3) + 4, tile);
         }
     }
 
@@ -1860,65 +1855,65 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     if (state->debug.objects) {
         bool obj_selected = switch_underneath == NULL && chunk_switch_underneath == NULL;
         bool first_hit = true;
+        /* Pass 1: sprites first (on top) */
         for (size_t i = 0; i < room.num_objects; i++) {
             struct RoomObject *obj = room.objects + i;
-            bool hit = (obj->type == BLOCK
-                        && x >= obj->x && x < obj->x + obj->block.width
-                        && y >= obj->y && y < obj->y + obj->block.height)
-                    || (obj->type == SPRITE && obj->x == x && obj->y == y);
-            if (!hit) continue;
+            if (obj->type != SPRITE || obj->x != x || obj->y != y) continue;
             bool is_active = first_hit && obj_selected;
             first_hit = false;
             GOTO(0, bottom); bottom++;
-            switch (obj->type) {
-                case BLOCK:
-                    scr_printf("block ");
-                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
-                    PRINTF_DATA((uint16_t)i);
-                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
-                    scr_printf(": (x,y)=");
-                    PRINTF_DATA(obj->x);
-                    scr_printf(",");
-                    PRINTF_DATA(obj->y);
-                    scr_printf(" (w,h)=");
-                    PRINTF_DATA(obj->block.width);
-                    scr_printf(",");
-                    PRINTF_DATA(obj->block.height);
-                    break;
-
-                case SPRITE:
-                    scr_printf("sprite ");
-                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
-                    PRINTF_DATA((uint16_t)i);
-                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
-                    scr_printf(": ");
-                    switch(obj->sprite.type) {
-                        case SHARK:
-                            switch (obj->sprite.damage) {
-                                case 1:
-                                case 2: scr_printf("Shark"); break;
-                                case 3: scr_printf("Mysterio"); break;
-                                case 4: scr_printf("Mary Jane"); break;
-                                default: UNREACHABLE();
-                            }
-                            break;
-                        case MUMMY: scr_printf("Mummy"); break;
-                        case BLUE_MAN: scr_printf("Blue man"); break;
-                        case WOLF: scr_printf("Wolf"); break;
-                        case R2D2: scr_printf("R2D2"); break;
-                        case DINOSAUR: scr_printf("Dinosaur"); break;
-                        case RAT: scr_printf("Rat"); break;
-                        case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
+            scr_printf("sprite ");
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
+            PRINTF_DATA((uint16_t)i);
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
+            scr_printf(": ");
+            switch(obj->sprite.type) {
+                case SHARK:
+                    switch (obj->sprite.damage) {
+                        case 1:
+                        case 2: scr_printf("Shark"); break;
+                        case 3: scr_printf("Mysterio"); break;
+                        case 4: scr_printf("Mary Jane"); break;
                         default: UNREACHABLE();
                     }
-                    scr_printf(" (x,y)=");
-                    PRINTF_DATA(obj->x);
-                    scr_printf(",");
-                    PRINTF_DATA(obj->y);
-                    scr_printf(" (dmg)=");
-                    PRINTF_DATA(obj->sprite.damage);
                     break;
+                case MUMMY: scr_printf("Mummy"); break;
+                case BLUE_MAN: scr_printf("Blue man"); break;
+                case WOLF: scr_printf("Wolf"); break;
+                case R2D2: scr_printf("R2D2"); break;
+                case DINOSAUR: scr_printf("Dinosaur"); break;
+                case RAT: scr_printf("Rat"); break;
+                case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
+                default: UNREACHABLE();
             }
+            scr_printf(" (x,y)=");
+            PRINTF_DATA(obj->x);
+            scr_printf(",");
+            PRINTF_DATA(obj->y);
+            scr_printf(" (dmg)=");
+            PRINTF_DATA(obj->sprite.damage);
+        }
+        /* Pass 2: blocks underneath */
+        for (size_t i = 0; i < room.num_objects; i++) {
+            struct RoomObject *obj = room.objects + i;
+            if (obj->type != BLOCK) continue;
+            if (x < obj->x || x >= obj->x + (int)obj->block.width) continue;
+            if (y < obj->y || y >= obj->y + (int)obj->block.height) continue;
+            bool is_active = first_hit && obj_selected;
+            first_hit = false;
+            GOTO(0, bottom); bottom++;
+            scr_printf("block ");
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
+            PRINTF_DATA((uint16_t)i);
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
+            scr_printf(": (x,y)=");
+            PRINTF_DATA(obj->x);
+            scr_printf(",");
+            PRINTF_DATA(obj->y);
+            scr_printf(" (w,h)=");
+            PRINTF_DATA(obj->block.width);
+            scr_printf(",");
+            PRINTF_DATA(obj->block.height);
         }
     }
 

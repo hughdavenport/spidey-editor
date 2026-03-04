@@ -166,16 +166,19 @@ void move(int dx, int dy) {
     if (!moved && state->debug.objects) {
         struct RoomObject *object = NULL;
         bool obj = false;
+        /* Prefer sprite at cursor over block */
         for (size_t i = 0; i < room->num_objects; i++) {
-            object = room->objects + i;
-            if (object->type == BLOCK &&
-                    x >= object->x && x < object->x + object->block.width &&
-                    y >= object->y && y < object->y + object->block.height) {
-                obj = true;
-                break;
-            } else if (object->type == SPRITE && x == object->x && y == object->y) {
-                obj = true;
-                break;
+            struct RoomObject *o = room->objects + i;
+            if (o->type == SPRITE && x == o->x && y == o->y) {
+                object = o; obj = true; break;
+            }
+        }
+        if (!obj) for (size_t i = 0; i < room->num_objects; i++) {
+            struct RoomObject *o = room->objects + i;
+            if (o->type == BLOCK &&
+                    x >= o->x && x < o->x + o->block.width &&
+                    y >= o->y && y < o->y + o->block.height) {
+                object = o; obj = true; break;
             }
         }
         if (obj) {
