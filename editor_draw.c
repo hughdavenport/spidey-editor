@@ -543,8 +543,6 @@ void redraw() {
         case CLIP_TILE:   scr_printf(" \033[1m[Y:tile]\033[m"); break;
         case CLIP_NONE: break;
     }
-    if (state->status_message[0])
-        scr_printf(" \033[1m%s\033[m", state->status_message);
 
     GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
     if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM || state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM) {
@@ -755,6 +753,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             scr_printf("%s", room_name);
         }
         scr_printf("\"");
+        if (state->status_message[0])
+            scr_printf(" \033[1m%s\033[m", state->status_message);
     }
 
 
@@ -775,11 +775,34 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 GOTO(2 * x, y + 1);
                 if (found_switch) {
                     scr_printf("\033[4%d;30;1m", (s % 3) + 4);
-                    if (s > 15) {
-                        // FIXME support 2 digit nums
-                        UNREACHABLE();
-                    }
                     scr_printf(" %x", s);
+                    scr_printf("\033[m");
+                } else {
+                    if (tile == BLANK_TILE) {
+                        scr_printf("  ");
+                    } else {
+                        scr_printf("%02X", tile);
+                    }
+                }
+            }
+        }
+    } else if (state->current_state == GOTO_OBJECT) {
+        for (int y = 0; y < HEIGHT_TILES; y ++) {
+            for (int x = 0; x < WIDTH_TILES; x ++) {
+                uint8_t tile = room.tiles[TILE_IDX(x, y)];
+                struct RoomObject *found_object = NULL;
+                int o;
+                for (o = 0; o < room.num_objects; o ++) {
+                    struct RoomObject *obj = room.objects + o;
+                    if (x == obj->x && y == obj->y) {
+                        found_object = obj;
+                        break;
+                    }
+                }
+                GOTO(2 * x, y + 1);
+                if (found_object) {
+                    scr_printf("\033[4%d;30;1m", (o % 3) + 1);
+                    scr_printf(" %x", o);
                     scr_printf("\033[m");
                 } else {
                     if (tile == BLANK_TILE) {
@@ -795,7 +818,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             for (int x = 0; x < WIDTH_TILES; x ++) {
                 uint8_t tile = room.tiles[TILE_IDX(x, y)];
                 bool colored = false;
-                if (state->debug.switches && state->current_state != GOTO_OBJECT)
+                if (state->debug.switches)
                 for (int s = 0; s < room.num_switches; s ++) {
                     struct SwitchObject *sw = room.switches + s;
                     assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
@@ -839,7 +862,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     uint8_t dirty[MIN_HEIGHT * MIN_WIDTH] = {0};
-    if (state->debug.objects) {
+    if (state->debug.objects && state->current_state != GOTO_OBJECT) {
         /* Pass 1: blocks */
         for (size_t i = 0; i < room.num_objects; i++) {
             struct RoomObject *object = room.objects + i;
@@ -874,32 +897,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             assert(object->x < WIDTH_TILES && object->y < HEIGHT_TILES);
             GOTO(2 * object->x, object->y + 1);
             scr_printf("\033[4%ld;30m%d%d\033[m", (i % 3) + 1, object->sprite.type, object->sprite.damage);
-        }
-        if (state->current_state == GOTO_OBJECT) {
-            for (int y = 0; y < HEIGHT_TILES; y ++) {
-                for (int x = 0; x < WIDTH_TILES; x ++) {
-                    struct RoomObject *found_object = NULL;
-                    int o;
-                    for (o = 0; o < room.num_objects; o ++) {
-                        struct RoomObject *obj = room.objects + o;
-                        if (x == obj->x && y == obj->y) {
-                            found_object = obj;
-                            break;
-                        }
-                    }
-                    GOTO(2 * x, y + 1);
-                    if (found_object) {
-                        scr_printf("\033[4%d;30;1m", (o % 3) + 1);
-
-                        if (o > 15) {
-                            // FIXME support 2 digit nums
-                            UNREACHABLE();
-                        }
-                        scr_printf(" %x", o);
-                        scr_printf("\033[m");
-                    }
-                }
-            }
         }
     }
 
@@ -959,7 +956,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             scr_printf("\033[4%ld;30;1m", (ch_i % 3) + 4);
         }
         if (obj || sw || ch) {
-            if (state->current_state == GOTO_SWITCH) {
+            if (state->current_state == GOTO_SWITCH || state->current_state == GOTO_OBJECT) {
                 scr_printf("@");
             } else {
                 scr_printf("%02X", tile);
@@ -1330,8 +1327,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                         SWITCH_SIDE(preamble->side));
             }
-            bottom +=2;
             if (switcz->chunks.length > 1) {
+                bottom +=2;
                 if (state->current_state == EDIT_SWITCHDETAILS) {
                     scr_printf("  \033[1;4mc\033[mhunks:\n");
                 } else {
@@ -1618,6 +1615,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         bottom ++;
                     }
                 }
+            } else {
+                bottom +=1;
             }
         } else if (state->current_state == TILE_EDIT) {
             /* scr_printf("No switch here, Ctrl-s to a create new one"); */

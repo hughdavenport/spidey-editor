@@ -317,10 +317,10 @@ static bool handle_goto_object(Key key) {
                     if (obj->x < WIDTH_TILES && obj->y < HEIGHT_TILES) {
                         cursor->x = obj->x;
                         cursor->y = obj->y;
-                        state->current_state = state->previous_state;
-                        state->previous_state = NORMAL;
                     }
                 }
+                state->current_state = state->previous_state;
+                state->previous_state = NORMAL;
             } else switch (key.ch) {
                 case 'q':
                     if (state->help) {
@@ -338,7 +338,10 @@ static bool handle_goto_object(Key key) {
                     }
                     break;
                 case '?': state->help = !state->help; break;
-                default: break;
+                default:
+                    state->current_state = state->previous_state;
+                    state->previous_state = NORMAL;
+                    break;
             }
             break;
         case KEY_ESC:
@@ -390,6 +393,9 @@ static bool handle_goto_switch(Key key) {
                     } else {
                         state->current_state = EDIT_SWITCHDETAILS;
                     }
+                } else {
+                    state->current_state = state->previous_state;
+                    state->previous_state = NORMAL;
                 }
             } else switch (key.ch) {
                 case 'q':
@@ -408,7 +414,10 @@ static bool handle_goto_switch(Key key) {
                     }
                     break;
                 case '?': state->help = !state->help; break;
-                default: break;
+                default:
+                    state->current_state = state->previous_state;
+                    state->previous_state = NORMAL;
+                    break;
             }
             break;
         case KEY_ESC:
@@ -1421,6 +1430,8 @@ static bool handle_edit_switchdetails_select_chunk(Key key) {
                             break;
                         default: UNREACHABLE();
                     }
+                } else {
+                    state->current_state = EDIT_SWITCHDETAILS;
                 }
             } else switch (key.ch) {
                 case 'q':
@@ -1445,7 +1456,9 @@ static bool handle_edit_switchdetails_select_chunk(Key key) {
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
                 }; break;
-                default: break;
+                default:
+                    state->current_state = EDIT_SWITCHDETAILS;
+                    break;
             }
             break;
         case KEY_BS:
@@ -2825,6 +2838,21 @@ static bool handle_tile_edit(Key key) {
     size_t *cursorlevel = &state->current_level;
     switch (key.code) {
     case KEY_CHAR:
+        if (!state->partial_byte && key.ch >= '1' && key.ch <= '3') {
+            struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
+            int x = state->cursors[*cursorlevel].x;
+            int y = state->cursors[*cursorlevel].y;
+            for (size_t j = 0; j < room->num_objects; j++) {
+                struct RoomObject *obj = room->objects + j;
+                if (obj->type == SPRITE && x == obj->x && y == obj->y) {
+                    push_undo((uint8_t)*cursorlevel, false);
+                    obj->sprite.damage = (uint8_t)(key.ch - '0');
+                    ARRAY_FREE(state->rooms.rooms[*cursorlevel].compressed);
+                    assert(writeRooms(&state->rooms));
+                    return true;
+                }
+            }
+        }
         if (isxdigit(key.ch)) {
             uint8_t b = 0;
             if (isdigit(key.ch)) {
@@ -3087,6 +3115,10 @@ static bool handle_tile_edit(Key key) {
             size_t x = state->cursors[state->current_level].x;
             size_t y = state->cursors[state->current_level].y;
             if (state->clipboard.type == CLIP_OBJECT) {
+                if (room->num_objects >= 7) {
+                    snprintf(state->status_message, sizeof(state->status_message), "Max 7 objects");
+                    return true;
+                }
                 push_undo((uint8_t)state->current_level, false);
                 room->objects = realloc(room->objects, (room->num_objects + 1) * sizeof(struct RoomObject));
                 assert(room->objects != NULL);
@@ -3106,6 +3138,10 @@ static bool handle_tile_edit(Key key) {
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
             } else if (state->clipboard.type == CLIP_SWITCH) {
+                if (room->num_switches >= 15) {
+                    snprintf(state->status_message, sizeof(state->status_message), "Max 15 switches");
+                    return true;
+                }
                 push_undo((uint8_t)state->current_level, false);
                 room->switches = realloc(room->switches, (room->num_switches + 1) * sizeof(struct SwitchObject));
                 assert(room->switches != NULL);
@@ -3149,6 +3185,8 @@ static bool handle_tile_edit(Key key) {
                 room->tiles[TILE_IDX(x, y)] = state->clipboard.tile;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
+            } else {
+                snprintf(state->status_message, sizeof(state->status_message), "Nothing to paste");
             }
         }; break;
         default:
@@ -3207,6 +3245,10 @@ static bool handle_tile_edit(Key key) {
                         }
                     }
                 }
+                if (sw_idx == room->num_switches && room->num_switches >= 15) {
+                    snprintf(state->status_message, sizeof(state->status_message), "Max 15 switches");
+                    return true;
+                }
                 push_undo((uint8_t)state->current_level, false);
                 if (sw_idx == room->num_switches) {
                     room->switches = realloc(room->switches, (sw_idx + 1) * sizeof(struct SwitchObject));
@@ -3228,17 +3270,21 @@ static bool handle_tile_edit(Key key) {
                 struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 size_t x = state->cursors[state->current_level].x;
                 size_t y = state->cursors[state->current_level].y;
-                bool found = false;
+                struct RoomObject *found_obj = NULL;
                 for (size_t obj_j = 0; obj_j < room->num_objects; obj_j++) {
                     struct RoomObject *obj = room->objects + obj_j;
                     if ((obj->type == BLOCK && (int)x >= obj->x && (int)x < obj->x + obj->block.width &&
                             (int)y >= obj->y && (int)y < obj->y + obj->block.height) ||
                         (obj->type == SPRITE && (int)x == obj->x && (int)y == obj->y)) {
-                        found = true;
+                        found_obj = obj;
                         break;
                     }
                 }
-                if (!found) {
+                if (found_obj == NULL) {
+                    if (room->num_objects >= 7) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Max 7 objects");
+                        return true;
+                    }
                     push_undo((uint8_t)state->current_level, false);
                     room->objects = realloc(room->objects, (room->num_objects + 1) * sizeof(struct RoomObject));
                     assert(room->objects != NULL);
@@ -3253,9 +3299,36 @@ static bool handle_tile_edit(Key key) {
                     assert(room->objects[idx].tiles != NULL);
                     room->objects[idx].tiles[0] = room->tiles[TILE_IDX(x, y)];
                     room->num_objects++;
-                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                } else {
+                    static const char *sprite_names[] = {
+                        "Shark", "Mummy", "Blue man", "Wolf",
+                        "R2D2", "Dinosaur", "Rat", "Shotgun lady",
+                    };
+                    push_undo((uint8_t)state->current_level, false);
+                    if (found_obj->type == BLOCK) {
+                        free(found_obj->tiles);
+                        found_obj->tiles = NULL;
+                        found_obj->type = SPRITE;
+                        found_obj->sprite.type = SHARK;
+                        found_obj->sprite.damage = 1;
+                        snprintf(state->status_message, sizeof(state->status_message),
+                                 "Sprite: %s", sprite_names[SHARK]);
+                    } else if ((int)found_obj->sprite.type + 1 >= NUM_SPRITE_TYPES) {
+                        found_obj->type = BLOCK;
+                        found_obj->block.width = 1;
+                        found_obj->block.height = 1;
+                        found_obj->tiles = malloc(1);
+                        assert(found_obj->tiles != NULL);
+                        found_obj->tiles[0] = room->tiles[TILE_IDX(found_obj->x, found_obj->y)];
+                        snprintf(state->status_message, sizeof(state->status_message), "Block");
+                    } else {
+                        found_obj->sprite.type = (SpriteType)(found_obj->sprite.type + 1);
+                        snprintf(state->status_message, sizeof(state->status_message),
+                                 "Sprite: %s", sprite_names[found_obj->sprite.type]);
+                    }
                 }
+                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                assert(writeRooms(&state->rooms));
                 return true;
             }
         }
