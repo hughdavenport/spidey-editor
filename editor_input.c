@@ -3151,7 +3151,9 @@ static bool handle_tile_edit(Key key) {
                 assert(writeRooms(&state->rooms));
             }
         }; break;
-        default: break;
+        default:
+            state->partial_byte = 0;
+            break;
         }
         break;
     case KEY_BS: case KEY_DELETE:
