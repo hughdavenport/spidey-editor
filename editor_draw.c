@@ -1674,7 +1674,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         /* Display switch whose TOGGLE_BLOCK chunk covers cursor but preamble is elsewhere */
         if (state->current_state != GOTO_SWITCH
                 && chunk_switch_underneath != NULL
-                && chunk_switch_underneath != switch_underneath
+                && chunk_switch_underneath != switcz
                 && (chunk_switch_underneath->chunks.length == 0
                     || chunk_switch_underneath->chunks.data[0].x != x
                     || chunk_switch_underneath->chunks.data[0].y != y)) {
