@@ -142,7 +142,7 @@ void setup() {
     state->cursors[state->current_level].y = HEIGHT_TILES - 2;
 
 
-    state->help = false;
+    state->help = true;
     state->debug.hex = true;
 }
 
