@@ -1858,8 +1858,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     if (state->debug.objects) {
-        bool obj_first = true;
         bool obj_selected = switch_underneath == NULL && chunk_switch_underneath == NULL;
+        bool first_hit = true;
         for (size_t i = 0; i < room.num_objects; i++) {
             struct RoomObject *obj = room.objects + i;
             bool hit = (obj->type == BLOCK
@@ -1867,14 +1867,15 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         && y >= obj->y && y < obj->y + obj->block.height)
                     || (obj->type == SPRITE && obj->x == x && obj->y == y);
             if (!hit) continue;
-            if (obj_first) { GOTO(0, bottom); bottom++; obj_first = false; }
-            else scr_printf(" | ");
+            bool is_active = first_hit && obj_selected;
+            first_hit = false;
+            GOTO(0, bottom); bottom++;
             switch (obj->type) {
                 case BLOCK:
                     scr_printf("block ");
-                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[4;1m");
+                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
                     PRINTF_DATA((uint16_t)i);
-                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[m");
+                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
                     scr_printf(": (x,y)=");
                     PRINTF_DATA(obj->x);
                     scr_printf(",");
@@ -1887,9 +1888,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                 case SPRITE:
                     scr_printf("sprite ");
-                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[4;1m");
+                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
                     PRINTF_DATA((uint16_t)i);
-                    if (state->current_state == TILE_EDIT && obj_selected) scr_printf("\033[m");
+                    if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
                     scr_printf(": ");
                     switch(obj->sprite.type) {
                         case SHARK:
