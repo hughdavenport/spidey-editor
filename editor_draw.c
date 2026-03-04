@@ -301,7 +301,19 @@ void show_help()
     x = x1 + x2 + 5;
     if (x % 2) x++;
     y += 3;
-    GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2);
+
+    /* Use sidebar (right of map) when there is room; otherwise centre-overlay */
+    int hx, hy;
+    if (MIN_WIDTH + 1 + x + 1 <= state->screen_dimensions.x &&
+            y <= state->screen_dimensions.y) {
+        hx = MIN_WIDTH + 1;
+        hy = 1;
+    } else {
+        hx = state->screen_dimensions.x / 2 - x / 2;
+        hy = state->screen_dimensions.y / 2 - y / 2;
+    }
+
+    GOTO(hx, hy);
     scr_printf("\033[47;30;1m");
     scr_printf("+");
     for (int i = 0; i < x / 2 - 3; i ++) scr_printf("-");
@@ -309,22 +321,22 @@ void show_help()
     for (int i = 0; i < x / 2 - 3; i ++) scr_printf("-");
     scr_printf("+\033[m ");
     for (int _y = 1; _y < y - 1; _y ++) {
-        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + _y);
+        GOTO(hx, hy + _y);
         scr_printf("\033[47;30;1;m|%*s|\033[40;37;1m ", x - 2, "");
     }
-    GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + (y - 2));
+    GOTO(hx, hy + (y - 2));
     scr_printf("\033[47;30;1m");
     scr_printf("+");
     for (int i = 0; i < x - 2; i ++) scr_printf("-");
     scr_printf("+\033[40;37;1m ");
-    GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + (y - 1));
+    GOTO(hx, hy + (y - 1));
     scr_printf("\033[m \033[40;37;1m%*s", x, "");
     scr_printf("\033[47;30;1m");
 
     int line = 1;
     for (size_t i = 0; i < C_ARRAY_LEN(help[state->current_state]); i ++) {
         if (help[state->current_state][i].key == NULL) break;
-        GOTO(state->screen_dimensions.x / 2 - x / 2, state->screen_dimensions.y / 2 - y / 2 + line); line ++;
+        GOTO(hx, hy + line); line ++;
         scr_printf("|%-*s - %-*s|", x1, help[state->current_state][i].key, x - x1 - 5, help[state->current_state][i].action);
     }
 }
