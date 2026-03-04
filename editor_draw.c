@@ -329,6 +329,50 @@ void show_help()
     }
 }
 
+static bool chunk_at_cursor(struct SwitchChunk *chunk, int cx, int cy) {
+    if (chunk->type != TOGGLE_BLOCK) return false;
+    return chunk->dir == HORIZONTAL
+        ? cy == chunk->y && cx >= chunk->x && cx < chunk->x + chunk->size
+        : cx == chunk->x && cy >= chunk->y && cy < chunk->y + chunk->size;
+}
+
+static void draw_switch_chunks_brief(struct SwitchObject *sw, int cx, int cy, int *bottom) {
+    if (sw->chunks.length <= 1) return;
+    GOTO(0, *bottom); (*bottom)++;
+    scr_printf("  chunks:");
+    for (size_t i = 1; i < sw->chunks.length; i++) {
+        GOTO(0, *bottom); (*bottom)++;
+        struct SwitchChunk *chunk = sw->chunks.data + i;
+        bool at_cur = chunk_at_cursor(chunk, cx, cy);
+        scr_printf("    (%zu) type ", i);
+        switch (chunk->type) {
+            case TOGGLE_BLOCK:
+                scr_printf("block: (x,y)=%d,%d (%s)=%d (on/off)=%02X/%02X%s",
+                    chunk->x, chunk->y,
+                    chunk->dir == VERTICAL ? "height" : "width", chunk->size,
+                    chunk->on, chunk->off,
+                    at_cur ? " *" : "");
+                break;
+            case TOGGLE_BIT: {
+                char name[25] = {0};
+                strncpy(name, state->rooms.rooms[chunk->room_idx].data.name,
+                        sizeof(name) - 1);
+                for (int j = (int)sizeof(name) - 1; j >= 0; j--)
+                    if (name[j] == '\0' || isspace((unsigned char)name[j])) name[j] = '\0';
+                    else break;
+                scr_printf("toggle: (room) %s (switch) %d (on/off)=%d/%d",
+                    name, chunk->switch_idx, chunk->on, chunk->off);
+                break;
+            }
+            case TOGGLE_OBJECT:
+                scr_printf("object: idx=%d on=%d", chunk->index, chunk->on);
+                break;
+            case PREAMBLE: break;
+            default: break;
+        }
+    }
+}
+
 void redraw() {
 #define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
 
@@ -854,7 +898,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     /* Phase 3: Re-overlay switch preambles so they appear above objects */
-    if (state->debug.switches && state->current_state != GOTO_OBJECT) {
+    if (state->debug.switches && state->current_state != GOTO_OBJECT
+            && state->current_state != GOTO_SWITCH) {
         for (size_t s = 0; s < (size_t)room.num_switches; s++) {
             struct SwitchObject *sw = room.switches + s;
             if (sw->chunks.length == 0) continue;
@@ -1608,18 +1653,23 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 if (extra->chunks.length < 1) continue;
                 if (extra->chunks.data[0].x != x || extra->chunks.data[0].y != y) continue;
                 struct SwitchChunk *pr = extra->chunks.data;
+                bool has_chunk_at_cur = false;
+                for (size_t c = 1; c < extra->chunks.length; c++) {
+                    if (chunk_at_cursor(extra->chunks.data + c, x, y)) {
+                        has_chunk_at_cur = true;
+                        break;
+                    }
+                }
                 GOTO(0, bottom); bottom++;
                 scr_printf("switch ");
                 PRINTF_DATA((uint16_t)sw_i);
-                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s%s\n",
                         pr->x, pr->y,
                         BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
-                        SWITCH_SIDE(pr->side));
+                        SWITCH_SIDE(pr->side),
+                        has_chunk_at_cur ? " [chunk at cursor]" : "");
                 bottom++;
-                if (extra->chunks.length > 1) {
-                    scr_printf("  chunks: %zu\n", extra->chunks.length - 1);
-                    bottom++;
-                }
+                draw_switch_chunks_brief(extra, x, y, &bottom);
             }
         }
         /* Display switch whose TOGGLE_BLOCK chunk covers cursor but preamble is elsewhere */
@@ -1638,10 +1688,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
                     SWITCH_SIDE(pr->side));
             bottom++;
-            if (chunk_switch_underneath->chunks.length > 1) {
-                scr_printf("  chunks: %zu\n", chunk_switch_underneath->chunks.length - 1);
-                bottom++;
-            }
+            draw_switch_chunks_brief(chunk_switch_underneath, x, y, &bottom);
         }
 
         uint8_t found = 0;

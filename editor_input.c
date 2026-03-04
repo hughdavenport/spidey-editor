@@ -3080,6 +3080,20 @@ static bool handle_tile_edit(Key key) {
                     sw_idx ++;
                 }
                 if (sw_idx == room->num_switches) {
+                    /* chunk fallback: find a TOGGLE_BLOCK chunk covering cursor */
+                    for (size_t i = 0; i < num_switches && sw_idx == room->num_switches; i++) {
+                        struct SwitchObject *sw = room->switches + i;
+                        for (size_t c = 1; c < sw->chunks.length; c++) {
+                            struct SwitchChunk *chunk = sw->chunks.data + c;
+                            if (chunk->type != TOGGLE_BLOCK) continue;
+                            bool hit = chunk->dir == HORIZONTAL
+                                ? y == (size_t)chunk->y && x >= (size_t)chunk->x && x < (size_t)(chunk->x + chunk->size)
+                                : x == (size_t)chunk->x && y >= (size_t)chunk->y && y < (size_t)(chunk->y + chunk->size);
+                            if (hit) { sw_idx = i; break; }
+                        }
+                    }
+                }
+                if (sw_idx == room->num_switches) {
                     room->switches = realloc(room->switches, (sw_idx + 1) * sizeof(struct SwitchObject));
                     assert(room->switches != NULL);
                     memset(room->switches + sw_idx, 0, sizeof(struct SwitchObject));
