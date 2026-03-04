@@ -142,12 +142,12 @@ void setup() {
     state->cursors[state->current_level].y = HEIGHT_TILES - 2;
 
 
-    state->help = true;
+    state->help = false;
     state->debug.hex = true;
 }
 
-typedef void *(*main_fn)(char *library, void *call_state);
-void *loop_main(char *library, void *call_state) {
+typedef game_state *(*main_fn)(char *library, game_state *call_state);
+game_state *loop_main(char *library, game_state *call_state) {
     struct stat library_stat;
     assert(stat(library, &library_stat) == 0);
     struct stat start_rooms_stat;
@@ -158,8 +158,15 @@ void *loop_main(char *library, void *call_state) {
         free(state);
         state = NULL;
     }
-    if (state == NULL) setup();
-    else get_screen_dimensions();
+    if (state == NULL) {
+        setup();
+    } else {
+        snprintf(state->status_message, sizeof(state->status_message), "Loaded new library");
+        redraw();
+        get_screen_dimensions();
+        process_input();   /* blocks up to 1 s */
+        redraw();
+    }
 
     printf("\033[?1000h\033[?1006h");  /* enable mouse (X10 + SGR) — also re-enables on hot-reload */
     fflush(stdout);
@@ -178,10 +185,12 @@ void *loop_main(char *library, void *call_state) {
             // rebuild
             char *build_cmd = NULL;
             assert(asprintf(&build_cmd, "%s %s %s", LIBRARY_BUILD_CMD, library, __FILE__) > 0);
-            fprintf(stderr, "Rebuilding editor library: %s\n", build_cmd);
+            snprintf(state->status_message, sizeof(state->status_message), "Rebuilding editor library");
+            redraw();
             int ret = system(build_cmd);
             if (ret == 0) {
-                fprintf(stderr, "Reloading library\n");
+                snprintf(state->status_message, sizeof(state->status_message), "Reloading library");
+                redraw();
                 free(build_cmd);
                 return state;
             }
@@ -196,7 +205,8 @@ void *loop_main(char *library, void *call_state) {
         struct stat rooms_stat;
         if (stat("ROOMS.SPL", &rooms_stat) == 0
                 && TIME_NEWER(rooms_stat.st_mtim, start_rooms_stat.st_mtim)) {
-            fprintf(stderr, "Reloading ROOMS.SPL\n");
+            snprintf(state->status_message, sizeof(state->status_message), "Reloading ROOMS.SPL");
+            redraw();
             freeRoomFile(&state->rooms);
             assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
             start_rooms_stat = rooms_stat;
@@ -228,7 +238,7 @@ int editor_main() {
     assert(asprintf(&library, "./%s.so", basename) > 0);
     free(basename);
     basename = NULL;
-    void *saved_state = NULL;
+    game_state *saved_state = NULL;
     while (true) {
         void *module = dlopen(library, RTLD_NOW);
         if (module == NULL) {

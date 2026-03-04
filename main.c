@@ -931,7 +931,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Could not open %s for reading.\n", fileName);
         defer_return(1);
     }
-    fprintf(stderr, "Reading file %s.\n", fileName);
+    /* fprintf(stderr, "Reading file %s.\n", fileName); */
     if (!readFile(&file, fp)) defer_return(1);
     fclose(fp);
     fp = NULL;

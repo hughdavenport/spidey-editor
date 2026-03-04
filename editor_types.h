@@ -88,8 +88,8 @@ typedef struct {
 typedef ARRAY(Key) KeyArray;
 
 /* Screen buffer */
-#define SCREEN_MAX_WIDTH  256
-#define SCREEN_MAX_HEIGHT  64
+#define SCREEN_MAX_WIDTH  512
+#define SCREEN_MAX_HEIGHT 512
 
 #define ATTR_BOLD  1
 #define ATTR_UNDER 2

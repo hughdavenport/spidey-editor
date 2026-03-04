@@ -3465,13 +3465,8 @@ static bool handle_tile_edit(Key key) {
                 int sy = state->mouse_drag_tile_y;
                 if (tx == sx && ty == sy) {
                     /* Same tile: cursor already there, nothing more to do */
-                } else if (state->mouse_drag_has_obj) {
-                    /* Dragged onto new tile with object at origin: move it */
-                    move(tx - sx, ty - sy);
                 } else {
-                    /* No object at origin: treat as cursor jump to release tile */
-                    state->cursors[state->current_level].x = tx;
-                    state->cursors[state->current_level].y = ty;
+                    move(tx - sx, ty - sy);
                 }
             }
         } else if (btn == 2 || (btn == 0 && ctrl)) {

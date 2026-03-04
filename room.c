@@ -873,7 +873,7 @@ bool writeRoom(Room *room, FILE *fp) {
 
     room->compressed.length = 0;
 
-    fprintf(stderr, "Compressing and writing Room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp));
+    /* fprintf(stderr, "Compressing and writing Room %d \"%s\" at %ld.\n", room->index, room->data.name, ftell(fp)); */
 
 /* #define log(...) printf(__VA_ARGS__) */
 #define log(...) do {} while (false)
