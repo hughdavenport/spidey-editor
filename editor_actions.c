@@ -147,8 +147,14 @@ void move(int dx, int dy) {
                         chunk->x += dx;
                         chunk->y += dy;
                     }
-                    state->cursors[state->current_level].x += dx;
-                    state->cursors[state->current_level].y += dy;
+                    /* Follow cursor's offset within chunk; clamp on wrap */
+                    int cx = x + dx, cy = y + dy;
+                    if (cx < chunk->x) cx = chunk->x;
+                    if (cx >= chunk->x + chunk_w) cx = chunk->x + chunk_w - 1;
+                    if (cy < chunk->y) cy = chunk->y;
+                    if (cy >= chunk->y + chunk_h) cy = chunk->y + chunk_h - 1;
+                    state->cursors[state->current_level].x = cx;
+                    state->cursors[state->current_level].y = cy;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
                     moved = true;
