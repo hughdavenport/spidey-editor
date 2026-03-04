@@ -107,7 +107,7 @@ void sigwinch_handler(int arg) {
 
 void setup() {
     assert(state == NULL && "Already setup");
-    printf(SAVE_CURSOR HIDE_CURSOR SAVE_SCREEN ENABLE_ALT_BUFFER "\033[?1000h");
+    printf(SAVE_CURSOR HIDE_CURSOR SAVE_SCREEN ENABLE_ALT_BUFFER);
 
     state = calloc(1, sizeof(game_state));
     assert(state != NULL && "Not enough memory");
@@ -156,6 +156,9 @@ void *loop_main(char *library, void *call_state) {
     }
     if (state == NULL) setup();
     else get_screen_dimensions();
+
+    printf("\033[?1000h");  /* enable mouse — also re-enables on hot-reload */
+    fflush(stdout);
 
     signal(SIGWINCH, sigwinch_handler);
     signal(SIGINT, sigint_handler);
