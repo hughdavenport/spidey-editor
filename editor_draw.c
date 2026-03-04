@@ -304,9 +304,10 @@ void show_help()
 
     /* Use sidebar (right of map) when there is room; otherwise centre-overlay */
     int hx, hy;
-    if (MIN_WIDTH + 1 + x + 1 <= state->screen_dimensions.x &&
+    if (MIN_WIDTH + x + 1 <= state->screen_dimensions.x &&
             y <= state->screen_dimensions.y) {
-        hx = MIN_WIDTH + 1;
+        /* Centre the box in the space to the right of the map */
+        hx = MIN_WIDTH + (state->screen_dimensions.x - MIN_WIDTH - x - 1) / 2;
         hy = 1;
     } else {
         hx = state->screen_dimensions.x / 2 - x / 2;
