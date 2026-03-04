@@ -59,14 +59,30 @@ typedef enum {
     KEY_INSERT, KEY_DELETE,
     KEY_F1, KEY_F2, KEY_F3, KEY_F4,  KEY_F5,  KEY_F6,
     KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+    KEY_MOUSE,
     KEY_UNKNOWN,
 } KeyCode;
+
+/* Mouse button codes (KEY_MOUSE): raw button byte from terminal.
+ * Base buttons: 0=left, 1=middle, 2=right.
+ * Scroll: 64=up, 65=down, 66=left, 67=right.
+ * Modifier bits in button byte: +8=Alt, +16=Ctrl. */
+#define MOUSE_BTN(b)      ((b) & 0x03)
+#define MOUSE_IS_SCROLL(b) ((b) >= 64)
+#define MOUSE_MOD_ALT(b)  ((b) & 0x08)
+#define MOUSE_MOD_CTRL(b) ((b) & 0x10)
 
 /* Decoded key */
 typedef struct {
     KeyCode  code;
     char     ch;    /* KEY_CHAR: the char; KEY_CTRL: 'A'–'_' */
     uint8_t  mod;   /* bitmask of KeyMod */
+    struct {
+        int16_t  x;       /* 0-indexed terminal column */
+        int16_t  y;       /* 0-indexed terminal row */
+        uint8_t  button;  /* raw button byte (use MOUSE_* macros) */
+        bool     release; /* true = button-up event */
+    } mouse;
 } Key;
 
 /* Screen buffer */

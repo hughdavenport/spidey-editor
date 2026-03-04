@@ -60,6 +60,30 @@ Key parse_key(const char *buf, int *i, int n) {
     if (b1 == '[') {
         if (*i + 2 >= n) { (*i)++; k.code = KEY_ESC; return k; }
         *i += 2;
+        /* Mouse events: ESC [ ? button ; col ; row M/m */
+        if (*i < n && buf[*i] == '?') {
+            (*i)++;
+            int p[3] = {0, 0, 0}; int pi = 0;
+            while (*i < n && pi < 3) {
+                if (isdigit((unsigned char)buf[*i])) { p[pi] = p[pi]*10 + buf[*i]-'0'; }
+                else if (buf[*i] == ';')             { pi++; }
+                else break;
+                (*i)++;
+            }
+            if (*i < n && (buf[*i] == 'M' || buf[*i] == 'm')) {
+                char f = buf[(*i)++];
+                k.code         = KEY_MOUSE;
+                k.mouse.button = (uint8_t)p[0];
+                k.mouse.x      = (int16_t)(p[1] - 1);
+                k.mouse.y      = (int16_t)(p[2] - 1);
+                k.mouse.release = (f == 'm');
+                if (MOUSE_MOD_ALT(p[0]))  k.mod |= MOD_ALT;
+                if (MOUSE_MOD_CTRL(p[0])) k.mod |= MOD_CTRL;
+            } else {
+                k.code = KEY_UNKNOWN;
+            }
+            return k;
+        }
         int p[2] = {0, 0}; int pi = 0;
         while (*i < n && pi < 2) {
             if (isdigit((unsigned char)buf[*i])) { p[pi] = p[pi]*10 + buf[*i]-'0'; }
@@ -3348,6 +3372,18 @@ static bool handle_tile_edit(Key key) {
             }
         }
         break;
+    case KEY_MOUSE: {
+        if (key.mouse.release) break;
+        if (MOUSE_IS_SCROLL(key.mouse.button)) break;
+        if (MOUSE_BTN(key.mouse.button) != 0) break;  /* left click only */
+        int tx = key.mouse.x / 2;
+        int ty = key.mouse.y - 1;  /* row 0 = header; tiles start at row 1 */
+        if (tx >= 0 && tx < WIDTH_TILES && ty >= 0 && ty < HEIGHT_TILES) {
+            state->cursors[state->current_level].x = tx;
+            state->cursors[state->current_level].y = ty;
+        }
+        break;
+    }
     default:
         break;
     }

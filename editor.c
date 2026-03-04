@@ -47,7 +47,7 @@ bool any_source_newer(struct timespec test_time) {
 game_state *state = NULL;
 
 void end() {
-    printf(RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
+    printf("\033[?1000l" RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
     if (state != NULL) {
         assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
         if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
@@ -107,7 +107,7 @@ void sigwinch_handler(int arg) {
 
 void setup() {
     assert(state == NULL && "Already setup");
-    printf(SAVE_CURSOR HIDE_CURSOR SAVE_SCREEN ENABLE_ALT_BUFFER);
+    printf(SAVE_CURSOR HIDE_CURSOR SAVE_SCREEN ENABLE_ALT_BUFFER "\033[?1000h");
 
     state = calloc(1, sizeof(game_state));
     assert(state != NULL && "Not enough memory");
