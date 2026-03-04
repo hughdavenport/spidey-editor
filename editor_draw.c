@@ -898,7 +898,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
     }
 
-    /* Phase 3: Re-overlay switch preambles so they appear above objects */
+    /* Phase 3: Re-overlay switch preambles and TOGGLE_BLOCK chunks above objects */
     if (state->debug.switches && state->current_state != GOTO_OBJECT
             && state->current_state != GOTO_SWITCH) {
         for (size_t s = 0; s < (size_t)room.num_switches; s++) {
@@ -909,6 +909,26 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             uint8_t tile = room.tiles[TILE_IDX(sx, sy)];
             GOTO(2 * sx, sy + 1);
             scr_printf("\033[4%d;30m%02X\033[m", (int)(s % 3) + 4, tile);
+            for (size_t c = 1; c < sw->chunks.length; c++) {
+                struct SwitchChunk *chunk = sw->chunks.data + c;
+                if (chunk->type != TOGGLE_BLOCK) continue;
+                uint8_t ctile = (s + 1 == state->current_switch && c == state->current_chunk)
+                    ? (state->switch_on ? chunk->on : chunk->off)
+                    : chunk->on;
+                scr_printf("\033[3%d;40m", (int)(s % 3) + 4);
+                if (chunk->dir == HORIZONTAL) {
+                    for (int cx = chunk->x; cx < chunk->x + (int)chunk->size; cx++) {
+                        GOTO(2 * cx, chunk->y + 1);
+                        scr_printf("%02X", ctile);
+                    }
+                } else {
+                    for (int cy = chunk->y; cy < chunk->y + (int)chunk->size; cy++) {
+                        GOTO(2 * chunk->x, cy + 1);
+                        scr_printf("%02X", ctile);
+                    }
+                }
+                scr_printf("\033[m");
+            }
         }
     }
 
