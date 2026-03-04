@@ -1282,7 +1282,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             else scr_printf(" | ");
             switch (obj->type) {
                 case BLOCK:
-                    scr_printf("block: (x,y)=");
+                    scr_printf("block ");
+                    if (state->current_state == TILE_EDIT) scr_printf("\033[4;1m");
+                    PRINTF_DATA((uint16_t)i);
+                    if (state->current_state == TILE_EDIT) scr_printf("\033[m");
+                    scr_printf(": (x,y)=");
                     PRINTF_DATA(obj->x);
                     scr_printf(",");
                     PRINTF_DATA(obj->y);
@@ -1293,7 +1297,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     break;
 
                 case SPRITE:
-                    scr_printf("sprite: ");
+                    scr_printf("sprite ");
+                    if (state->current_state == TILE_EDIT) scr_printf("\033[4;1m");
+                    PRINTF_DATA((uint16_t)i);
+                    if (state->current_state == TILE_EDIT) scr_printf("\033[m");
+                    scr_printf(": ");
                     switch(obj->sprite.type) {
                         case SHARK:
                             switch (obj->sprite.damage) {
