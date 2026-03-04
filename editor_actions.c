@@ -1,5 +1,165 @@
 #include "editor_types.h"
 #include <string.h>
+#include <stdlib.h>
+
+/* ── Undo/redo helpers ─────────────────────────────────────────────────── */
+
+static void room_snapshot_copy(struct DecompressedRoom *dst,
+                               const struct DecompressedRoom *src) {
+    *dst = *src;  /* copies all inline fields (tiles[], name, metadata, etc.) */
+
+    /* Deep-copy objects */
+    if (src->num_objects && src->objects) {
+        dst->objects = malloc(src->num_objects * sizeof(*dst->objects));
+        assert(dst->objects != NULL);
+        memcpy(dst->objects, src->objects, src->num_objects * sizeof(*dst->objects));
+        for (uint8_t i = 0; i < src->num_objects; i++) {
+            if (src->objects[i].type == BLOCK && src->objects[i].tiles) {
+                size_t n = (size_t)src->objects[i].block.width
+                         * src->objects[i].block.height;
+                dst->objects[i].tiles = malloc(n);
+                assert(dst->objects[i].tiles != NULL);
+                memcpy(dst->objects[i].tiles, src->objects[i].tiles, n);
+            } else {
+                dst->objects[i].tiles = NULL;
+            }
+        }
+    } else {
+        dst->objects = NULL;
+    }
+
+    /* Deep-copy switches */
+    if (src->num_switches && src->switches) {
+        dst->switches = malloc(src->num_switches * sizeof(*dst->switches));
+        assert(dst->switches != NULL);
+        for (uint8_t i = 0; i < src->num_switches; i++) {
+            dst->switches[i] = src->switches[i];
+            size_t n = src->switches[i].chunks.length;
+            if (n) {
+                dst->switches[i].chunks.data = malloc(n * sizeof(struct SwitchChunk));
+                assert(dst->switches[i].chunks.data != NULL);
+                memcpy(dst->switches[i].chunks.data, src->switches[i].chunks.data,
+                       n * sizeof(struct SwitchChunk));
+                dst->switches[i].chunks.capacity = n;
+            } else {
+                dst->switches[i].chunks.data = NULL;
+                dst->switches[i].chunks.capacity = 0;
+            }
+        }
+    } else {
+        dst->switches = NULL;
+    }
+}
+
+static void room_snapshot_free(struct DecompressedRoom *snap) {
+    if (snap->objects) {
+        for (uint8_t i = 0; i < snap->num_objects; i++)
+            free(snap->objects[i].tiles);
+        free(snap->objects);
+        snap->objects = NULL;
+    }
+    if (snap->switches) {
+        for (uint8_t i = 0; i < snap->num_switches; i++)
+            free(snap->switches[i].chunks.data);
+        free(snap->switches);
+        snap->switches = NULL;
+    }
+}
+
+void push_undo(uint8_t room_idx, bool grouped) {
+    /* Clear redo stack */
+    for (size_t i = 0; i < state->redo_stack.length; i++)
+        room_snapshot_free(&state->redo_stack.data[i].snapshot);
+    state->redo_stack.length = 0;
+
+    UndoEntry entry = { .room_idx = room_idx, .grouped = grouped };
+    room_snapshot_copy(&entry.snapshot, &state->rooms.rooms[room_idx].data);
+    ARRAY_ADD(state->undo_stack, entry);
+}
+
+/* Pop undo_stack, restore snapshot, push current state to redo_stack.
+ * Groups (grouped=true on top entry) pop multiple entries atomically.
+ * Returns room_idx of last restored room, or 255 if nothing to undo. */
+uint8_t do_undo(void) {
+    if (state->undo_stack.length == 0) return 255;
+
+    size_t redo_start = state->redo_stack.length;
+    uint8_t last_room = 255;
+
+    do {
+        UndoEntry *e = &state->undo_stack.data[state->undo_stack.length - 1];
+        bool keep_going = e->grouped;
+
+        /* Save current room state to redo stack */
+        UndoEntry redo = { .room_idx = e->room_idx, .grouped = false };
+        room_snapshot_copy(&redo.snapshot, &state->rooms.rooms[e->room_idx].data);
+        ARRAY_ADD(state->redo_stack, redo);
+
+        /* Restore snapshot (transfers ownership of pointers) */
+        room_snapshot_free(&state->rooms.rooms[e->room_idx].data);
+        state->rooms.rooms[e->room_idx].data = e->snapshot;
+        ARRAY_FREE(state->rooms.rooms[e->room_idx].compressed);
+        e->snapshot.objects = NULL;
+        e->snapshot.switches = NULL;
+
+        last_room = e->room_idx;
+        state->undo_stack.length--;
+
+        if (!keep_going) break;
+    } while (state->undo_stack.length > 0);
+
+    /* Fix grouped flag on redo entries so do_redo pops the whole group */
+    size_t redo_count = state->redo_stack.length - redo_start;
+    if (redo_count > 1)
+        state->redo_stack.data[state->redo_stack.length - 1].grouped = true;
+
+    assert(writeRooms(&state->rooms));
+    return last_room;
+}
+
+uint8_t do_redo(void) {
+    if (state->redo_stack.length == 0) return 255;
+
+    size_t undo_start = state->undo_stack.length;
+    uint8_t last_room = 255;
+
+    do {
+        UndoEntry *e = &state->redo_stack.data[state->redo_stack.length - 1];
+        bool keep_going = e->grouped;
+
+        UndoEntry undo = { .room_idx = e->room_idx, .grouped = false };
+        room_snapshot_copy(&undo.snapshot, &state->rooms.rooms[e->room_idx].data);
+        ARRAY_ADD(state->undo_stack, undo);
+
+        room_snapshot_free(&state->rooms.rooms[e->room_idx].data);
+        state->rooms.rooms[e->room_idx].data = e->snapshot;
+        ARRAY_FREE(state->rooms.rooms[e->room_idx].compressed);
+        e->snapshot.objects = NULL;
+        e->snapshot.switches = NULL;
+
+        last_room = e->room_idx;
+        state->redo_stack.length--;
+
+        if (!keep_going) break;
+    } while (state->redo_stack.length > 0);
+
+    size_t undo_count = state->undo_stack.length - undo_start;
+    if (undo_count > 1)
+        state->undo_stack.data[state->undo_stack.length - 1].grouped = true;
+
+    assert(writeRooms(&state->rooms));
+    return last_room;
+}
+
+
+void free_undo_stacks(void) {
+    for (size_t i = 0; i < state->undo_stack.length; i++)
+        room_snapshot_free(&state->undo_stack.data[i].snapshot);
+    ARRAY_FREE(state->undo_stack);
+    for (size_t i = 0; i < state->redo_stack.length; i++)
+        room_snapshot_free(&state->redo_stack.data[i].snapshot);
+    ARRAY_FREE(state->redo_stack);
+}
 
 /* Helper: given dx/dy and object position/size, compute neighbour room index and
    landing position. Returns false if no edge crossing (normal in-bounds move). */
@@ -94,9 +254,12 @@ void move(int dx, int dy) {
             size_t nbr_idx; int new_x, new_y;
             if (object_crosses_edge(x, y, 1, 1, dx, dy, room, &nbr_idx, &new_x, &new_y)) {
                 if (nbr_idx != state->current_level) {
+                    push_undo((uint8_t)nbr_idx, false);
+                    push_undo((uint8_t)state->current_level, true);
                     transfer_switch(switcch, nbr_idx, new_x, new_y);
                 } else {
                     /* Self-loop: wrap to opposite edge within same room */
+                    push_undo((uint8_t)state->current_level, false);
                     room->tiles[TILE_IDX(new_x, new_y)] = room->tiles[TILE_IDX(x, y)];
                     room->tiles[TILE_IDX(x, y)] = 0;
                     switcch->chunks.data[0].x = new_x;
@@ -107,6 +270,7 @@ void move(int dx, int dy) {
                     assert(writeRooms(&state->rooms));
                 }
             } else {
+                push_undo((uint8_t)state->current_level, false);
                 room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
                 room->tiles[TILE_IDX(x, y)] = 0;
                 switcch->chunks.data[0].x += dx;
@@ -135,6 +299,7 @@ void move(int dx, int dy) {
                 if (ch) {
                     int chunk_w = chunk->dir == HORIZONTAL ? (int)chunk->size : 1;
                     int chunk_h = chunk->dir == VERTICAL   ? (int)chunk->size : 1;
+                    push_undo((uint8_t)state->current_level, false);
                     if (dx == -1 && chunk->x == 0)
                         chunk->x = WIDTH_TILES - chunk_w;
                     else if (dx ==  1 && chunk->x + chunk_w == WIDTH_TILES)
@@ -188,9 +353,12 @@ void move(int dx, int dy) {
             if (object_crosses_edge(object->x, object->y, obj_w, obj_h, dx, dy, room,
                                     &nbr_idx, &new_x, &new_y)) {
                 if (nbr_idx != state->current_level) {
+                    push_undo((uint8_t)nbr_idx, false);
+                    push_undo((uint8_t)state->current_level, true);
                     transfer_object(object, nbr_idx, new_x, new_y);
                 } else {
                     /* Self-loop: wrap to opposite edge within same room */
+                    push_undo((uint8_t)state->current_level, false);
                     object->x = new_x;
                     object->y = new_y;
                     state->cursors[state->current_level].x = new_x;
@@ -205,6 +373,7 @@ void move(int dx, int dy) {
                                  (int)object->y + dy >= 0 &&
                                  (int)object->y + obj_h + dy <= HEIGHT_TILES;
                 if (in_bounds) {
+                    push_undo((uint8_t)state->current_level, false);
                     object->x += dx;
                     object->y += dy;
                     state->cursors[state->current_level].x += dx;
@@ -221,6 +390,8 @@ void move(int dx, int dy) {
         size_t nbr_idx; int new_x, new_y;
         if (object_crosses_edge(x, y, 1, 1, dx, dy, room, &nbr_idx, &new_x, &new_y)) {
             if (nbr_idx != state->current_level) {
+                push_undo((uint8_t)nbr_idx, false);
+                push_undo((uint8_t)state->current_level, true);
                 struct DecompressedRoom *nbr = &state->rooms.rooms[nbr_idx].data;
                 nbr->tiles[TILE_IDX(new_x, new_y)] = room->tiles[TILE_IDX(x, y)];
                 room->tiles[TILE_IDX(x, y)] = 0;
@@ -232,6 +403,7 @@ void move(int dx, int dy) {
                 assert(writeRooms(&state->rooms));
             } else {
                 /* Self-loop: wrap to opposite edge within same room */
+                push_undo((uint8_t)state->current_level, false);
                 room->tiles[TILE_IDX(new_x, new_y)] = room->tiles[TILE_IDX(x, y)];
                 room->tiles[TILE_IDX(x, y)] = 0;
                 state->cursors[state->current_level].x = new_x;
@@ -240,6 +412,7 @@ void move(int dx, int dy) {
                 assert(writeRooms(&state->rooms));
             }
         } else if (x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
+            push_undo((uint8_t)state->current_level, false);
             room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
             room->tiles[TILE_IDX(x, y)] = 0;
             state->cursors[state->current_level].x += dx;
@@ -283,6 +456,7 @@ void stretch(int dx, int dy) {
                 }
             }
             if (ch) {
+                push_undo((uint8_t)state->current_level, false);
                 if ((dy && chunk->dir == VERTICAL) || (dx && chunk->dir == HORIZONTAL)) {
                     // Expand other blocks if next to this?
                     chunk->size ++;
@@ -341,6 +515,7 @@ void stretch(int dx, int dy) {
         if (obj) {
             assert(object->type == BLOCK);
             assert(object->tiles);
+            push_undo((uint8_t)state->current_level, false);
             if (dx) {
                 // copy column
                 uint8_t *tiles = malloc((object->block.width + 1) * object->block.height);
@@ -386,6 +561,7 @@ void stretch(int dx, int dy) {
         }
     }
     if (!stretched && x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
+        push_undo((uint8_t)state->current_level, false);
         room->tiles[TILE_IDX(x + dx, y + dy)] = room->tiles[TILE_IDX(x, y)];
         state->cursors[state->current_level].x += dx;
         state->cursors[state->current_level].y += dy;
@@ -419,6 +595,7 @@ void shrink(int dx, int dy) {
             if (ch) break;
         }
         if (ch) {
+            push_undo((uint8_t)state->current_level, false);
             chunk->size--;
             if (dy > 0) chunk->y++;  /* remove top: origin moves down */
             if (dx > 0) chunk->x++;  /* remove left: origin moves right */
@@ -443,6 +620,7 @@ void shrink(int dx, int dy) {
         if (obj) {
             assert(object->type == BLOCK);
             assert(object->tiles);
+            push_undo((uint8_t)state->current_level, false);
             if (dx) {
                 /* Press right (dx=1): pull leftmost column inward → remove left edge
                  * Press left (dx=-1): pull rightmost column inward → remove right edge */

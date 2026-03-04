@@ -530,6 +530,8 @@ void redraw() {
         case CLIP_TILE:   scr_printf(" \033[1m[Y:tile]\033[m"); break;
         case CLIP_NONE: break;
     }
+    if (state->status_message[0])
+        scr_printf(" \033[1m%s\033[m", state->status_message);
 
     GOTO(MIN_WIDTH / 2 - ((room_name_len + 7) / 2), 0);
     if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM || state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM) {

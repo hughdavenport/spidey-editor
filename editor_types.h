@@ -146,6 +146,12 @@ typedef struct {
 } Clipboard;
 
 typedef struct {
+    uint8_t room_idx;
+    bool grouped;  /* true = pop one more entry from same stack (cross-room moves) */
+    struct DecompressedRoom snapshot;
+} UndoEntry;
+
+typedef struct {
     game_state_state current_state;
     game_state_state previous_state;
     size_t size;
@@ -171,6 +177,10 @@ typedef struct {
     bool switch_on;
 
     Clipboard clipboard;
+
+    ARRAY(UndoEntry) undo_stack;
+    ARRAY(UndoEntry) redo_stack;
+    char status_message[80];
 
     Cell screen_prev[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
     Cell screen_curr[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
@@ -214,3 +224,7 @@ bool update(void);
 bool process_input(void);
 void show_help(void);
 void redraw(void);
+void push_undo(uint8_t room_idx, bool grouped);
+uint8_t do_undo(void);
+uint8_t do_redo(void);
+void free_undo_stacks(void);

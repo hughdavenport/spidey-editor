@@ -125,6 +125,7 @@ static void delete_current_chunk(void) {
     struct SwitchObject *sw = room->switches + state->current_switch - 1;
     size_t ch_i = state->current_chunk;
     if (sw->chunks.length <= 1) UNREACHABLE();
+    push_undo((uint8_t)state->current_level, false);
     while (ch_i < sw->chunks.length - 1) {
         sw->chunks.data[ch_i] = sw->chunks.data[ch_i+1];
         ch_i++;
@@ -180,6 +181,7 @@ static void chunk_swap_next(void) {
         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
         struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
         if (state->current_chunk < sw->chunks.length - 1) {
+            push_undo((uint8_t)state->current_level, false);
             sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk+1];
             sw->chunks.data[state->current_chunk+1] = ch;
             state->current_chunk ++;
@@ -195,6 +197,7 @@ static void chunk_swap_prev(void) {
         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
         struct SwitchChunk ch = sw->chunks.data[state->current_chunk];
         if (state->current_chunk > 1) {
+            push_undo((uint8_t)state->current_level, false);
             sw->chunks.data[state->current_chunk] = sw->chunks.data[state->current_chunk-1];
             sw->chunks.data[state->current_chunk-1] = ch;
             state->current_chunk --;
@@ -258,6 +261,7 @@ static void delete_item_at_cursor(void) {
         if (chunk_underneath) break;
     }
 
+    push_undo((uint8_t)state->current_level, false);
     if (object_underneath) {
         while (obj_i < room->num_objects - 1) {
             if (room->objects[obj_i].tiles) {
@@ -592,6 +596,7 @@ static bool handle_edit_roomname(Key key) {
                 /* ENTER (Ctrl-J = \n) */
                 struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
                 assert(C_ARRAY_LEN(state->room_name) <= C_ARRAY_LEN(room->name));
+                push_undo((uint8_t)state->current_level, false);
                 strncpy(room->name, state->room_name, C_ARRAY_LEN(room->name));
                 state->current_state = state->previous_state;
                 state->current_switch = 0;
@@ -860,6 +865,7 @@ static bool handle_edit_roomdetails_num(Key key) {
                     }
 
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     switch (state->room_detail) {
                         case 'g': room->background = value; break;
                         case 't': room->tile_offset = value; break;
@@ -968,6 +974,7 @@ static bool handle_edit_roomdetails_room(Key key) {
                 }
                 if (room_id < C_ARRAY_LEN(state->rooms.rooms)) {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     switch (state->room_detail) {
                         case 'k': room->room_north = room_id; break;
                         case 'j': room->room_south = room_id; break;
@@ -1020,6 +1027,7 @@ static bool handle_edit_roomdetails_room(Key key) {
                         state->room_name[--state->roomname_cursor] = 0;
                     } else if (!duplicate) {
                         struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                        push_undo((uint8_t)state->current_level, false);
                         switch (state->room_detail) {
                             case 'k': room->room_north = matching_room; break;
                             case 'j': room->room_south = matching_room; break;
@@ -1109,6 +1117,7 @@ static bool handle_edit_switchdetails(Key key) {
         case KEY_UP:
         {
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+            push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
@@ -1116,6 +1125,7 @@ static bool handle_edit_switchdetails(Key key) {
         case KEY_DOWN:
         {
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+            push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
@@ -1123,6 +1133,7 @@ static bool handle_edit_switchdetails(Key key) {
         case KEY_RIGHT:
         {
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+            push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
@@ -1130,6 +1141,7 @@ static bool handle_edit_switchdetails(Key key) {
         case KEY_LEFT:
         {
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+            push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
@@ -1149,6 +1161,7 @@ static bool handle_edit_switchdetails(Key key) {
                         size_t sw_i = state->current_switch - 1;
                         struct SwitchObject sw = room->switches[sw_i];
                         if (sw_i < (unsigned)room->num_switches - 1) {
+                            push_undo((uint8_t)state->current_level, false);
                             room->switches[sw_i] = room->switches[sw_i+1];
                             room->switches[sw_i+1] = sw;
                             state->current_switch ++;
@@ -1165,6 +1178,7 @@ static bool handle_edit_switchdetails(Key key) {
                         size_t sw_i = state->current_switch - 1;
                         struct SwitchObject sw = room->switches[sw_i];
                         if (sw_i) {
+                            push_undo((uint8_t)state->current_level, false);
                             room->switches[sw_i] = room->switches[sw_i-1];
                             room->switches[sw_i-1] = sw;
                             state->current_switch --;
@@ -1177,6 +1191,7 @@ static bool handle_edit_switchdetails(Key key) {
                 case 'h':
                 {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1185,6 +1200,7 @@ static bool handle_edit_switchdetails(Key key) {
                 case 'j':
                 {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1193,6 +1209,7 @@ static bool handle_edit_switchdetails(Key key) {
                 case 'k':
                 {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1201,6 +1218,7 @@ static bool handle_edit_switchdetails(Key key) {
                 case 'l':
                 {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1209,6 +1227,7 @@ static bool handle_edit_switchdetails(Key key) {
                 case 'o':
                 {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].one_time_use = !room->switches[state->current_switch - 1].chunks.data[0].one_time_use;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1231,6 +1250,7 @@ static bool handle_edit_switchdetails(Key key) {
                     if (state->clipboard.type != CLIP_CHUNK) break;
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     struct SwitchObject *sw = room->switches + state->current_switch - 1;
+                    push_undo((uint8_t)state->current_level, false);
                     ARRAY_ADD(sw->chunks, state->clipboard.chunk);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1239,6 +1259,7 @@ static bool handle_edit_switchdetails(Key key) {
                 case 'e':
                 {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].room_entry = !room->switches[state->current_switch - 1].chunks.data[0].room_entry;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1247,6 +1268,7 @@ static bool handle_edit_switchdetails(Key key) {
                 case 's':
                 {
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = (room->switches[state->current_switch - 1].chunks.data[0].side + 1) % NUM_SIDES;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1258,6 +1280,7 @@ static bool handle_edit_switchdetails(Key key) {
                     struct SwitchObject *sw = room->switches + state->current_switch - 1;
                     if (sw->chunks.length == 1) {
                         state->current_chunk = sw->chunks.length;
+                        push_undo((uint8_t)state->current_level, false);
                         ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
                         state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
                         state->switch_on = false;
@@ -1300,6 +1323,7 @@ static bool handle_edit_switchdetails(Key key) {
                         break;
                     }
                     state->current_chunk = sw->chunks.length;
+                    push_undo((uint8_t)state->current_level, false);
                     ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
                     state->switch_on = false;
@@ -1415,6 +1439,7 @@ static bool handle_edit_switchdetails_select_chunk(Key key) {
                     if (sw->chunks.length == 16) {
                         return true;
                     }
+                    push_undo((uint8_t)state->current_level, false);
                     ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
                     state->switch_on = false;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
@@ -1552,6 +1577,7 @@ static void yank_current_switch(void) {
 static void delete_current_switch(void) {
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     size_t sw_i = state->current_switch - 1;
+    push_undo((uint8_t)state->current_level, false);
     while (sw_i < (size_t)(room->num_switches - 1)) {
         room->switches[sw_i] = room->switches[sw_i+1];
         sw_i++;
@@ -1593,6 +1619,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BIT);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->switch_idx = index;
                     state->partial_byte = 0;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
@@ -1608,6 +1635,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BIT);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->off = (chunk->off + 1) % 4;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1616,6 +1644,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BIT);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->on = (chunk->on + 1) % 4;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1624,6 +1653,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     enum SwitchChunkType typ = chunk->type;
+                    push_undo((uint8_t)state->current_level, false);
                     switch (typ) {
                         case TOGGLE_BLOCK:
                         {
@@ -1747,6 +1777,7 @@ static bool handle_edit_switchdetails_chunk_switch_room(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BIT);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->room_idx = room_id;
                     chunk->switch_idx = 0;
                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
@@ -1790,6 +1821,7 @@ static bool handle_edit_switchdetails_chunk_switch_room(Key key) {
                         struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                         struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                         assert(chunk->type == TOGGLE_BIT);
+                        push_undo((uint8_t)state->current_level, false);
                         chunk->room_idx = matching_room;
                         chunk->switch_idx = 0;
                         state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
@@ -1873,6 +1905,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (state->switch_on) {
                         chunk->on = value;
                     } else {
@@ -1890,6 +1923,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (chunk->x) {
                         chunk->x --;
                     } else {
@@ -1909,6 +1943,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->x ++;
                     if (chunk->x == WIDTH_TILES) {
                         chunk->x = 0;
@@ -1932,6 +1967,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->x ++;
                     if (chunk->x == WIDTH_TILES) {
                         chunk->x = 0;
@@ -1952,6 +1988,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (chunk->size < 8) chunk->size ++;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1960,6 +1997,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (chunk->size > 1) chunk->size --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1968,6 +2006,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->dir = (chunk->dir + 1) % NUM_DIRECTIONS;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -1976,6 +2015,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     enum SwitchChunkType typ = chunk->type;
+                    push_undo((uint8_t)state->current_level, false);
                     switch (typ) {
                         case TOGGLE_BLOCK:
                         {
@@ -2037,6 +2077,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
             assert(chunk->type == TOGGLE_BLOCK);
+            push_undo((uint8_t)state->current_level, false);
             if (chunk->x) {
                 chunk->x --;
             } else {
@@ -2057,6 +2098,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
             assert(chunk->type == TOGGLE_BLOCK);
+            push_undo((uint8_t)state->current_level, false);
             chunk->x ++;
             if (chunk->x == WIDTH_TILES) {
                 chunk->x = 0;
@@ -2127,6 +2169,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (state->switch_on) {
                         chunk->on = value;
                     } else {
@@ -2147,6 +2190,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->dir = (chunk->dir + 1) % NUM_DIRECTIONS;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -2155,6 +2199,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (chunk->size < 8) chunk->size ++;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -2163,6 +2208,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (chunk->size > 1) chunk->size --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -2171,6 +2217,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (chunk->x) chunk->x --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -2179,6 +2226,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->y ++;
                     size_t overflow = WIDTH_TILES * HEIGHT_TILES;
                     size_t point = chunk->y * WIDTH_TILES + chunk->x;
@@ -2192,6 +2240,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     if (chunk->y) chunk->y --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -2200,6 +2249,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BLOCK);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->x ++;
                     size_t overflow = WIDTH_TILES * HEIGHT_TILES;
                     size_t point = chunk->y * WIDTH_TILES + chunk->x;
@@ -2213,6 +2263,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     enum SwitchChunkType typ = chunk->type;
+                    push_undo((uint8_t)state->current_level, false);
                     switch (typ) {
                         case TOGGLE_BLOCK:
                         {
@@ -2273,6 +2324,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
             assert(chunk->type == TOGGLE_BLOCK);
+            push_undo((uint8_t)state->current_level, false);
             if (chunk->y) chunk->y --;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
@@ -2282,6 +2334,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
             assert(chunk->type == TOGGLE_BLOCK);
+            push_undo((uint8_t)state->current_level, false);
             chunk->y ++;
             size_t overflow = WIDTH_TILES * HEIGHT_TILES;
             size_t point = chunk->y * WIDTH_TILES + chunk->x;
@@ -2296,6 +2349,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
             assert(chunk->type == TOGGLE_BLOCK);
+            push_undo((uint8_t)state->current_level, false);
             if (chunk->x) chunk->x --;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
@@ -2305,6 +2359,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
             struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
             struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
             assert(chunk->type == TOGGLE_BLOCK);
+            push_undo((uint8_t)state->current_level, false);
             chunk->x ++;
             size_t overflow = WIDTH_TILES * HEIGHT_TILES;
             size_t point = chunk->y * WIDTH_TILES + chunk->x;
@@ -2368,6 +2423,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_OBJECT);
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->value = value;
                     state->partial_byte = 0;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
@@ -2380,6 +2436,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     enum SwitchChunkType typ = chunk->type;
+                    push_undo((uint8_t)state->current_level, false);
                     switch (typ) {
                         case TOGGLE_BLOCK:
                         {
@@ -2419,6 +2476,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                 case 'i': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->index = (chunk->index + 1) % 0x10;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -2426,6 +2484,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                 case 's': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                    push_undo((uint8_t)state->current_level, false);
                     chunk->test = (((chunk->test >> 4) + 1) % 4) << 4;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     assert(writeRooms(&state->rooms));
@@ -2569,6 +2628,26 @@ static bool handle_normal(Key key) {
                         }
                     }
                     break;
+                case 'u': {
+                    uint8_t r = do_undo();
+                    if (r == 255) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Nothing to undo");
+                    } else {
+                        state->current_level = r;
+                        snprintf(state->status_message, sizeof(state->status_message), "Undo");
+                    }
+                    return true;
+                }
+                case 'U': {
+                    uint8_t r = do_redo();
+                    if (r == 255) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Nothing to redo");
+                    } else {
+                        state->current_level = r;
+                        snprintf(state->status_message, sizeof(state->status_message), "Redo");
+                    }
+                    return true;
+                }
                 case 'r':
                     state->previous_state = state->current_state;
                     state->current_state = GOTO_ROOM;
@@ -2765,6 +2844,7 @@ static bool handle_tile_edit(Key key) {
                 int x = state->cursors[state->current_level].x;
                 int y = state->cursors[state->current_level].y;
                 struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                push_undo((uint8_t)state->current_level, false);
                 for (size_t j = 0; j < room->num_objects; j ++) {
                     struct RoomObject *object = room->objects + j;
                     if (object->type == BLOCK &&
@@ -2880,6 +2960,7 @@ static bool handle_tile_edit(Key key) {
                 if (chunk_underneath) break;
             }
 
+            push_undo((uint8_t)state->current_level, false);
             if (object_underneath) {
                 struct RoomObject object = *object_underneath;
                 if (obj_i) {
@@ -2956,6 +3037,7 @@ static bool handle_tile_edit(Key key) {
                 if (chunk_underneath) break;
             }
 
+            push_undo((uint8_t)state->current_level, false);
             if (object_underneath) {
                 struct RoomObject object = *object_underneath;
                 if (obj_i < room->num_objects - 1) {
@@ -2978,6 +3060,26 @@ static bool handle_tile_edit(Key key) {
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             assert(writeRooms(&state->rooms));
         }; break;
+        case 'u': {
+            uint8_t r = do_undo();
+            if (r == 255) {
+                snprintf(state->status_message, sizeof(state->status_message), "Nothing to undo");
+            } else {
+                state->current_level = r;
+                snprintf(state->status_message, sizeof(state->status_message), "Undo");
+            }
+            return true;
+        }
+        case 'U': {
+            uint8_t r = do_redo();
+            if (r == 255) {
+                snprintf(state->status_message, sizeof(state->status_message), "Nothing to redo");
+            } else {
+                state->current_level = r;
+                snprintf(state->status_message, sizeof(state->status_message), "Redo");
+            }
+            return true;
+        }
         case 'y': yank_at_cursor(); break;
         case 'x': yank_at_cursor(); delete_item_at_cursor(); break;
         case 'p': {
@@ -2985,6 +3087,7 @@ static bool handle_tile_edit(Key key) {
             size_t x = state->cursors[state->current_level].x;
             size_t y = state->cursors[state->current_level].y;
             if (state->clipboard.type == CLIP_OBJECT) {
+                push_undo((uint8_t)state->current_level, false);
                 room->objects = realloc(room->objects, (room->num_objects + 1) * sizeof(struct RoomObject));
                 assert(room->objects != NULL);
                 size_t idx = room->num_objects;
@@ -3003,6 +3106,7 @@ static bool handle_tile_edit(Key key) {
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
             } else if (state->clipboard.type == CLIP_SWITCH) {
+                push_undo((uint8_t)state->current_level, false);
                 room->switches = realloc(room->switches, (room->num_switches + 1) * sizeof(struct SwitchObject));
                 assert(room->switches != NULL);
                 size_t idx = room->num_switches;
@@ -3023,17 +3127,25 @@ static bool handle_tile_edit(Key key) {
                 assert(writeRooms(&state->rooms));
             } else if (state->clipboard.type == CLIP_CHUNK) {
                 /* Append chunk to switch preamble at cursor */
+                bool found_sw = false;
                 for (size_t sw_i = 0; sw_i < room->num_switches; sw_i++) {
                     struct SwitchObject *sw = room->switches + sw_i;
                     if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE &&
                             sw->chunks.data[0].x == x && sw->chunks.data[0].y == y) {
+                        push_undo((uint8_t)state->current_level, false);
                         ARRAY_ADD(sw->chunks, state->clipboard.chunk);
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         assert(writeRooms(&state->rooms));
+                        found_sw = true;
                         break;
                     }
                 }
+                if (!found_sw) {
+                    snprintf(state->status_message, sizeof(state->status_message),
+                             "No switch here - move cursor to a switch to paste chunk");
+                }
             } else if (state->clipboard.type == CLIP_TILE) {
+                push_undo((uint8_t)state->current_level, false);
                 room->tiles[TILE_IDX(x, y)] = state->clipboard.tile;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 assert(writeRooms(&state->rooms));
@@ -3093,6 +3205,7 @@ static bool handle_tile_edit(Key key) {
                         }
                     }
                 }
+                push_undo((uint8_t)state->current_level, false);
                 if (sw_idx == room->num_switches) {
                     room->switches = realloc(room->switches, (sw_idx + 1) * sizeof(struct SwitchObject));
                     assert(room->switches != NULL);
@@ -3124,6 +3237,7 @@ static bool handle_tile_edit(Key key) {
                     }
                 }
                 if (!found) {
+                    push_undo((uint8_t)state->current_level, false);
                     room->objects = realloc(room->objects, (room->num_objects + 1) * sizeof(struct RoomObject));
                     assert(room->objects != NULL);
                     size_t idx = room->num_objects;
@@ -3171,6 +3285,7 @@ static state_handler_fn state_handlers[NUM_STATES] = {
 };
 
 bool process_input(void) {
+    state->status_message[0] = '\0';  /* clear previous status on each keypress */
     struct pollfd fd = { .fd = STDIN_FILENO, .events = POLLIN };
     int ret = poll(&fd, 1, 1000);
     assert(ret >= 0 || errno == EINTR);

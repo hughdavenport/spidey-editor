@@ -50,6 +50,12 @@ void end() {
     printf(RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
     if (state != NULL) {
         assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
+        if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
+            free(state->clipboard.object.tiles);
+        } else if (state->clipboard.type == CLIP_SWITCH) {
+            ARRAY_FREE(state->clipboard.sw.chunks);
+        }
+        free_undo_stacks();
         freeRoomFile(&state->rooms);
         free(state);
     }
