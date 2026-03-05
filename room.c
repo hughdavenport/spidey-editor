@@ -169,12 +169,9 @@ void dumpRoom(Room *room, RoomFile *file) {
     printf("\n");
     printf("\n");
 
-    printf("back: %u", room->data.background);
-    printf(", tileset: %u", room->data.tile_offset);
-    printf(", dmg: %d", room->data.room_damage);
-    printf(", gravity (|): %u", room->data.gravity_vertical);
-    printf(", gravity (-): %u", room->data.gravity_horizontal);
-    printf("\n");
+    printf("bkgrnd: %u, tiles: %u, dmg: %d, gravity (|): %u, gravity (-): %u\n",
+            room->data.background, room->data.tile_offset, room->data.room_damage,
+            room->data.gravity_vertical, room->data.gravity_horizontal);
 
 #define READ_NEIGHBOUR(id) do { \
 neighbour_room = file->rooms[(id)].data; \
@@ -203,28 +200,25 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     READ_NEIGHBOUR(room->data.room_east);
     printf(" - \"%s\"\n", neighbour_name);
 
-    printf("  UNKNOWN (b) (base offset / 3 (i.e. index) into movertab.dat): %d 0x%02x\n", room->data.UNKNOWN_b, room->data.UNKNOWN_b);
-    printf("  UNKNOWN (c): %d 0x%02x\n", room->data.UNKNOWN_c, room->data.UNKNOWN_c);
-    printf("  UNKNOWN (e) (base idx into {0x2,0x8,0x20,0x80} for bitmask for switch tests): %d 0x%02x \n", room->data._num_switches & 0x3, room->data._num_switches & 0x3);
-    printf("  UNKNOWN (f) (base global_switch index): %d 0x%02x\n", room->data.UNKNOWN_f, room->data.UNKNOWN_f);
+    printf("UNKNOWN_b: %d, UNKNOWN_c: %d, UNKNOWN_e: %d, UNKNOWN_f: %d\n",
+            room->data.UNKNOWN_b, room->data.UNKNOWN_c,
+            room->data._num_switches & 0x3, room->data.UNKNOWN_f);
 
-    printf("  Moving objects (length=%u):\n", room->data.num_objects);
+    printf("  objects (%u):\n", room->data.num_objects);
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         switch (room->data.objects[i].type) {
             case BLOCK:
                 printf("    \033[3%ld;1m", (i % 3) + 1);
-                printf("[idx=%ld]{.type = %s, .x = %d, .y = %d, .width = %d, .height = %d}", i,
-                        "BLOCK",
+                printf("block %ld: (x,y)=%d,%d (w,h)=%d,%d", i,
                         room->data.objects[i].x, room->data.objects[i].y,
                         room->data.objects[i].block.width, room->data.objects[i].block.height);
                 for (size_t y = 0; y < room->data.objects[i].block.height; y ++) {
-                    printf("\033[m\n");
-                    printf("        \033[3%ld;1m", (i % 3) + 1);
+                    printf("\033[m\n        \033[3%ld;1m", (i % 3) + 1);
                     for (size_t x = 0; x < room->data.objects[i].block.width; x ++) {
                         uint8_t tile = room->data.objects[i].tiles[y * room->data.objects[i].block.width + x];
                         if (tile == BLANK_TILE) {
                             printf("\033[m  \033[3%ld;1m", (i % 3) + 1);
-                        } else  {
+                        } else {
                             printf("%02x", tile);
                         }
                     }
@@ -233,8 +227,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
             case SPRITE:
                 printf("    \033[4%ld;30;1m", (i % 3) + 1);
-                printf("[idx=%ld]{.type = %s, .x = %d, .y = %d, .sprite = ", i,
-                        "SPRITE",
+                printf("sprite %ld: (x,y)=%d,%d ", i,
                         room->data.objects[i].x, room->data.objects[i].y);
                 _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
                 switch (room->data.objects[i].sprite.type) {
@@ -252,92 +245,88 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         exit(1);
                         break;
                 }
-                printf(", .damage = %d}", room->data.objects[i].sprite.damage);
+                printf(" dmg:%d", room->data.objects[i].sprite.damage);
                 break;
         }
         printf("\033[m\n");
     }
 
-    printf("  Switches (length=%u):\n", room->data.num_switches);
+    printf("  switches (%u):\n", room->data.num_switches);
     for (size_t i = 0; i < room->data.num_switches; i ++) {
         printf("    \033[4%ld;30;1m", (i % 3) + 4);
         assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
-        printf("[idx=%ld]{.x = %d, .y = %d, .room_entry = %s, .one_time_use = %s, .side = %s", i,
-                room->data.switches[i].chunks.data[0].x, room->data.switches[i].chunks.data[0].y, BOOL_S(room->data.switches[i].chunks.data[0].room_entry), BOOL_S(room->data.switches[i].chunks.data[0].one_time_use), SWITCH_SIDE(room->data.switches[i].chunks.data[0].side));
-        printf(", .chunks (num=%lu) = [", room->data.switches[i].chunks.length);
-        for (size_t c = 0; c < room->data.switches[i].chunks.length; c ++) {
-            printf("\033[m\n        ");
-            /* printf("\033[m\n        \033[4%ld;30;1m", (i % 3) + 4); */
-            struct SwitchChunk *chunk = room->data.switches[i].chunks.data + c;
-            _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
-            switch (chunk->type) {
-                case PREAMBLE:
-                    assert(c == 0);
-                    printf("{.type = PREAMBLE, .x = %d, .y = %d, .room_entry = %s, .one_time_use = %s, .side = %s }",
-                            chunk->x, chunk->y, BOOL_S(chunk->room_entry), BOOL_S(chunk->one_time_use), SWITCH_SIDE(chunk->side));
-                    break;
+        struct SwitchChunk *preamble = room->data.switches[i].chunks.data;
+        printf("switch %ld: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\033[m\n",
+                i, preamble->x, preamble->y,
+                BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
+                SWITCH_SIDE(preamble->side));
+        if (room->data.switches[i].chunks.length > 1) {
+            printf("      chunks:\n");
+            for (size_t c = 1; c < room->data.switches[i].chunks.length; c ++) {
+                struct SwitchChunk *chunk = room->data.switches[i].chunks.data + c;
+                printf("        (%ld) type ", c);
+                _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
+                switch (chunk->type) {
+                    case PREAMBLE:
+                        fprintf(stderr, "%s:%d: UNREACHABLE\n", __FILE__, __LINE__);
+                        exit(1);
+                        break;
 
-                case TOGGLE_BLOCK:
-                    printf("\033[m\033[3%ld;40;1m", (i % 3) + 4);
-                    printf("{.type = TOGGLE_BLOCK, .x = %d, .y = %d, .size = %d, .dir = %s, .off = %02x, .on = %02x}",
-                            chunk->x, chunk->y, chunk->size, chunk->dir == VERTICAL ? "VERTICAL" : "HORIZONTAL", chunk->off, chunk->on);
-                    break;
+                    case TOGGLE_BLOCK:
+                        printf("block: (x,y)=%d,%d (%s)=%d (on/off)=%02x/%02x",
+                                chunk->x, chunk->y,
+                                chunk->dir == VERTICAL ? "height" : "width",
+                                chunk->size, chunk->on, chunk->off);
+                        break;
 
-                case TOGGLE_BIT: {
-                    char target_name[25] = {0};
-                    assert(chunk->room_idx < C_ARRAY_LEN(file->rooms));
-                    strncpy(target_name, file->rooms[chunk->room_idx].data.name, C_ARRAY_LEN(target_name) - 1);
-                    for (int j = (int)C_ARRAY_LEN(target_name) - 1; j >= 0; j--)
-                        if (target_name[j] == '\0' || isspace((unsigned char)target_name[j])) target_name[j] = '\0';
-                        else break;
-                    printf("{.type = TOGGLE_BIT, toggle: (room) %s (switch) %u (on/off)=%d/%d}",
-                            target_name, chunk->switch_idx, chunk->on, chunk->off);
-                    printf("\033[m\n");
-                    break;
-                }
-
-                case TOGGLE_OBJECT:
-                    printf("\033[m\033[4%d;30;1m", (chunk->index % 3) + 1);
-                    printf("{.type = TOGGLE_OBJECT, .index = %d, .test = %x, .value = ",
-                            chunk->index, chunk->test >> 4);
-                    switch (chunk->value & MOVE_LEFT) {
-                        case MOVE_LEFT:
-                            switch (chunk->value & MOVE_UP) {
-                                case MOVE_UP: printf("up+left"); break;
-                                case MOVE_DOWN: printf("down+left"); break;
-                                case '\0': printf("left"); break;
-                            }
-                            break;
-
-                        case MOVE_RIGHT:
-                            switch (chunk->value & MOVE_UP) {
-                                case MOVE_UP: printf("up+right"); break;
-                                case MOVE_DOWN: printf("down+right"); break;
-                                case '\0': printf("right"); break;
-                            }
-                            break;
-
-                        case '\0':
-                            switch (chunk->value & MOVE_UP) {
-                                case MOVE_UP: printf("up"); break;
-                                case MOVE_DOWN: printf("down"); break;
-                                case '\0': printf("stop"); break;
-                            }
-                            break;
+                    case TOGGLE_BIT: {
+                        char target_name[25] = {0};
+                        assert(chunk->room_idx < C_ARRAY_LEN(file->rooms));
+                        strncpy(target_name, file->rooms[chunk->room_idx].data.name, C_ARRAY_LEN(target_name) - 1);
+                        for (int j = (int)C_ARRAY_LEN(target_name) - 1; j >= 0; j--)
+                            if (target_name[j] == '\0' || isspace((unsigned char)target_name[j])) target_name[j] = '\0';
+                            else break;
+                        printf("toggle: (room) %s (switch) %u (on/off)=%d/%d",
+                                target_name, chunk->switch_idx, chunk->on, chunk->off);
+                        break;
                     }
-                    printf(", .value_without_direction = %02x}", chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
-                    printf("\033[m\n");
-                    break;
 
-                default:
-                    fprintf(stderr, "%s:%d: UNREACHABLE: Unexpected chunk type %d\n", __FILE__, __LINE__, chunk->type);
-                    exit(1);
-                    break;
+                    case TOGGLE_OBJECT:
+                        printf("object: idx=%d value=", chunk->index);
+                        switch (chunk->value & MOVE_LEFT) {
+                            case MOVE_LEFT:
+                                switch (chunk->value & MOVE_UP) {
+                                    case MOVE_UP: printf("up+left"); break;
+                                    case MOVE_DOWN: printf("down+left"); break;
+                                    case '\0': printf("left"); break;
+                                }
+                                break;
+                            case MOVE_RIGHT:
+                                switch (chunk->value & MOVE_UP) {
+                                    case MOVE_UP: printf("up+right"); break;
+                                    case MOVE_DOWN: printf("down+right"); break;
+                                    case '\0': printf("right"); break;
+                                }
+                                break;
+                            case '\0':
+                                switch (chunk->value & MOVE_UP) {
+                                    case MOVE_UP: printf("up"); break;
+                                    case MOVE_DOWN: printf("down"); break;
+                                    case '\0': printf("stop"); break;
+                                }
+                                break;
+                        }
+                        printf(" test=%d", chunk->test >> 4);
+                        break;
+
+                    default:
+                        fprintf(stderr, "%s:%d: UNREACHABLE: Unexpected chunk type %d\n", __FILE__, __LINE__, chunk->type);
+                        exit(1);
+                        break;
+                }
+                printf("\n");
             }
         }
-        printf("\033[m\n    \033[4%ld;30;1m", (i % 3) + 4);
-        printf("]}");
-        printf("\033[m\n");
     }
 
     printf("  Left over data (length=%zu): [", room->rest.length);
