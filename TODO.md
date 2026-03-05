@@ -64,9 +64,9 @@ Priority order: bugs → editor features → room/main quality → tests/researc
             (main value: crash recovery; each snapshot ~1-3 KB, 200 entries ~300 KB)
 
 [x] - Macro record/replay (named slots a-z)
-      [ ] - State: macro_meta, macro_replay_pending, macro_recording, macro_slot,
+      [x] - State: macro_meta, macro_replay_pending, macro_recording, macro_slot,
             macro_last_saved, macro_last_replayed, macro_buf, macro_slots[26], macro_replay
-      [ ] - Bindings (intercepted in handle_normal, active in all states):
+      [x] - Bindings (intercepted in handle_normal, active in all states):
             m (idle)       → macro_meta=true; show slot overlay ("m> a c f m p z")
             m + a-z        → start recording to slot (mm = slot 'm')
             m (recording)  → stop; save macro_buf → macro_slots[slot]; macro_last_saved=slot
@@ -75,17 +75,12 @@ Priority order: bugs → editor features → room/main quality → tests/researc
             , + ,          → replay macro_last_replayed slot
             , + .          → replay macro_last_saved slot
             , + anything   → cancel
-      [ ] - Slot overlay: drawn at bottom (status line) while waiting for slot key
-            m mode: "m> a c f m p z"  (occupied slots only)
-            , mode: ",=m .=f  a c f m p z"  (,=last-replayed .=last-saved, then occupied)
-            '\0' last-replayed/saved shown as '-': ",=- .=-" until used
-      [ ] - Replay: macro_replay ARRAY(Key) queue in game_state; drained one key per
+      [x] - Slot overlay: drawn at bottom (status line) while waiting for slot key
+      [x] - Replay: macro_replay ARRAY(Key) queue in game_state; drained one key per
             process_input() call before poll() — same dispatch path as live input
-      [ ] - Guard: m and , keys ignored (not recorded, not dispatched) during replay;
-            no replay-within-replay
-      [ ] - m is never recorded into a macro (it is the delimiter)
-      [ ] - Header shows [Mm] while recording to slot m, nothing when idle
-      [ ] - Cleanup: free macro_slots[i], macro_buf, macro_replay in end()
+      [x] - Guard: m and , keys ignored during replay; no replay-within-replay
+      [x] - Header shows [Mm] while recording to slot m, nothing when idle
+      [x] - Cleanup: free macro_slots[i], macro_buf, macro_replay in end()
 
 [ ] - Jump to arbitrary position (cursor and/or object/chunk/switch)
       [ ] - Move cursor directly to a typed (x,y) coordinate in the current room
@@ -119,8 +114,8 @@ Priority order: bugs → editor features → room/main quality → tests/researc
             - CHUNK_MEMORY: fixed Space description; fixed 0-9a-fA-F label
             - CHUNK_BLOCK: fixed 0-9a-fA-F label
 
-[ ] - Create new object from TILE_EDIT when no object is under cursor
-      [ ] - Currently shows "No object here, TODO create new?" in status
+[x] - Create new object from TILE_EDIT when no object is under cursor
+      [x] - Creates 1x1 BLOCK at cursor position
 
 ---
 
