@@ -4,6 +4,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef bool (*state_handler_fn)(Key key);
 
@@ -3616,11 +3617,15 @@ bool process_input(void) {
     struct pollfd fd = { .fd = STDIN_FILENO, .events = POLLIN };
     int ret = poll(&fd, 1, 1000);
     assert(ret >= 0 || errno == EINTR);
-    if (!(fd.revents & POLLIN)) return false;
+    if (!(fd.revents & (POLLIN | POLLHUP))) return false;
     char buf[64];
     ssize_t n = read(fd.fd, buf, sizeof(buf));
     assert(n >= 0);
-    if (n == 0) return false;
+    if (n == 0) {
+        /* EOF on stdin: exit when running non-interactively (piped input) */
+        if (!isatty(STDIN_FILENO)) { end(); UNREACHABLE(); }
+        return false;
+    }
 
     /* If buffer ends with a bare ESC (or ESC+[), the terminal has split the
      * sequence across two writes.  Wait up to 50 ms for the rest to arrive. */

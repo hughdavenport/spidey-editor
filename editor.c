@@ -49,7 +49,8 @@ game_state *state = NULL;
 void end() {
     printf("\033[?1000l\033[?1006l" RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
     if (state != NULL) {
-        assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
+        if (isatty(STDIN_FILENO))
+            assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
         if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
             free(state->clipboard.object.tiles);
         } else if (state->clipboard.type == CLIP_SWITCH) {
@@ -95,9 +96,9 @@ void get_screen_dimensions() {
         w = (struct winsize){0};
     }
 
-    /* Non-tty fallback: use the minimum dimensions the editor can work with */
-    state->screen_dimensions.x = w.ws_col ? w.ws_col : MIN_WIDTH;
-    state->screen_dimensions.y = w.ws_row ? w.ws_row : MIN_HEIGHT;
+    /* Non-tty fallback: use a wide display suitable for full panel rendering */
+    state->screen_dimensions.x = w.ws_col ? w.ws_col : 132;
+    state->screen_dimensions.y = w.ws_row ? w.ws_row : 50;
 }
 
 static void sigint_handler(int sig) { (void)sig; end(); }
@@ -122,12 +123,13 @@ void setup() {
     state->current_state = TILE_EDIT;
     state->partial_byte = 0;
 
-    assert(tcgetattr(STDIN_FILENO, &state->original_termios) == 0);
-
-    struct termios new = state->original_termios;
-    new.c_lflag &= ~(ICANON | ECHO);
-    new.c_iflag &= ~(IXON | IXOFF);
-    assert(tcsetattr(STDIN_FILENO, TCSANOW, &new) == 0);
+    if (isatty(STDIN_FILENO)) {
+        assert(tcgetattr(STDIN_FILENO, &state->original_termios) == 0);
+        struct termios new = state->original_termios;
+        new.c_lflag &= ~(ICANON | ECHO);
+        new.c_iflag &= ~(IXON | IXOFF);
+        assert(tcsetattr(STDIN_FILENO, TCSANOW, &new) == 0);
+    }
 
     get_screen_dimensions();
 
