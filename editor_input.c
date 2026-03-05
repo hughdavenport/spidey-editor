@@ -10,6 +10,7 @@ typedef bool (*state_handler_fn)(Key key);
 static bool handle_goto_object(Key key);
 static bool handle_goto_switch(Key key);
 static bool handle_goto_room(Key key);
+static bool handle_goto_coord(Key key);
 static bool handle_edit_roomname(Key key);
 static bool handle_toggle_display(Key key);
 static bool handle_edit_roomdetails(Key key);
@@ -2727,6 +2728,13 @@ static bool handle_normal(Key key) {
                     state->current_chunk = 0;
                     state->partial_byte = 0;
                     break;
+                case 'g':
+                    state->goto_coord_x = -1;
+                    state->goto_coord_move = false;
+                    state->partial_byte = 0;
+                    state->previous_state = state->current_state;
+                    state->current_state = GOTO_COORD;
+                    break;
                 case 'm':
                     if (state->macro_recording) {
                         /* Stop recording: transfer buf ownership to slot */
@@ -2826,12 +2834,19 @@ static bool handle_normal(Key key) {
             else if (key.mod == MOD_ALT)               { stretch(dx, dy); }
             else if (key.mod == (MOD_ALT | MOD_SHIFT)) { shrink(dx, dy); }
         } else if (key.code == KEY_CHAR && key.mod == MOD_NONE) {
-            /* SHIFT+hjkl (uppercase): move() */
+            /* SHIFT+hjkl (uppercase): move(); G: warp item to typed coord */
             switch (key.ch) {
                 case 'H': move(-1,  0); break;
                 case 'J': move( 0, +1); break;
                 case 'K': move( 0, -1); break;
                 case 'L': move(+1,  0); break;
+                case 'G':
+                    state->goto_coord_x = -1;
+                    state->goto_coord_move = true;
+                    state->partial_byte = 0;
+                    state->previous_state = state->current_state;
+                    state->current_state = GOTO_COORD;
+                    break;
             }
         } else if (key.code == KEY_CHAR && key.mod == MOD_ALT) {
             /* Alt+hjkl: stretch(); Alt+HJKL: shrink() */
@@ -3485,10 +3500,88 @@ static bool handle_tile_edit(Key key) {
     return handle_normal(key);
 }
 
+static bool handle_goto_coord(Key key) {
+    bool entering_x = (state->goto_coord_x < 0);
+    switch (key.code) {
+        case KEY_CHAR:
+            if (key.mod != MOD_NONE) break;
+            if ((state->debug.hex && isxdigit(key.ch)) ||
+                    (!state->debug.hex && isdigit(key.ch))) {
+                if (state->partial_byte) {
+                    /* Second digit: compute value and advance */
+                    int d = (key.ch > '9') ? tolower(key.ch) - 'a' + 10 : key.ch - '0';
+                    int val = d + (state->debug.hex ? 16 : 10) * (state->partial_byte & 0xFF);
+                    int limit = entering_x ? WIDTH_TILES : HEIGHT_TILES;
+                    if (val < limit) {
+                        if (entering_x) {
+                            state->goto_coord_x = val;
+                        } else {
+                            /* Both coords confirmed: apply */
+                            int tx = state->goto_coord_x;
+                            int ty = val;
+                            if (state->goto_coord_move) {
+                                warp_to(tx, ty);
+                            } else {
+                                state->cursors[state->current_level].x = tx;
+                                state->cursors[state->current_level].y = ty;
+                            }
+                            state->goto_coord_x = -1;
+                            state->current_state = state->previous_state;
+                        }
+                        state->partial_byte = 0;
+                    }
+                    /* else: out of range, ignore */
+                } else {
+                    /* First digit: constrain to what can yield a valid coord */
+                    char max_first = state->debug.hex ? '1'
+                                   : (entering_x ? '3' : '2');
+                    if (key.ch >= '0' && key.ch <= max_first) {
+                        state->partial_byte = 0xFF00 | (key.ch - '0');
+                    }
+                }
+            }
+            break;
+        case KEY_BS:
+        case KEY_DELETE:
+            if (state->partial_byte) {
+                state->partial_byte = 0;
+            } else if (!entering_x) {
+                state->goto_coord_x = -1;
+            } else {
+                state->goto_coord_x = -1;
+                state->current_state = state->previous_state;
+            }
+            break;
+        case KEY_ESC:
+            state->goto_coord_x = -1;
+            state->partial_byte = 0;
+            state->current_state = state->previous_state;
+            break;
+        case KEY_CTRL:
+            switch (key.ch) {
+                case '_': state->help = !state->help; break;
+                case 'H':
+                    state->debug.hex = !state->debug.hex;
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
+                        } else {
+                            state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
+                        }
+                    }
+                    break;
+            }
+            break;
+        default: break;
+    }
+    return true;
+}
+
 static state_handler_fn state_handlers[NUM_STATES] = {
     [GOTO_OBJECT]      = handle_goto_object,
     [GOTO_SWITCH]      = handle_goto_switch,
     [GOTO_ROOM]        = handle_goto_room,
+    [GOTO_COORD]       = handle_goto_coord,
     [EDIT_ROOMNAME]    = handle_edit_roomname,
     [TOGGLE_DISPLAY]   = handle_toggle_display,
     [EDIT_ROOMDETAILS]                             = handle_edit_roomdetails,

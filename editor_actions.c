@@ -750,3 +750,120 @@ void shrink(int dx, int dy) {
     /* No tile fallback: shrink on plain tiles is a no-op */
     (void)shrank;
 }
+
+void warp_to(int tx, int ty) {
+    int x = state->cursors[state->current_level].x;
+    int y = state->cursors[state->current_level].y;
+    if (tx == x && ty == y) return;
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    bool moved = false;
+
+    if (state->debug.switches) {
+        /* Priority 1: switch preamble at cursor */
+        for (size_t i = 0; i < room->num_switches; i++) {
+            struct SwitchObject *sw = room->switches + i;
+            if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE &&
+                    x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
+                push_undo((uint8_t)state->current_level, false);
+                room->tiles[TILE_IDX(tx, ty)] = room->tiles[TILE_IDX(x, y)];
+                room->tiles[TILE_IDX(x, y)] = 0;
+                sw->chunks.data[0].x = tx;
+                sw->chunks.data[0].y = ty;
+                state->cursors[state->current_level].x = tx;
+                state->cursors[state->current_level].y = ty;
+                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                snprintf(state->status_message, sizeof(state->status_message), "Writing room");
+                redraw();
+                assert(writeRooms(&state->rooms));
+                moved = true;
+                break;
+            }
+        }
+        if (!moved) {
+            /* Priority 2: TOGGLE_BLOCK chunk covering cursor */
+            for (size_t i = 0; i < room->num_switches && !moved; i++) {
+                struct SwitchObject *sw = room->switches + i;
+                for (size_t c = 1; c < sw->chunks.length; c++) {
+                    struct SwitchChunk *chunk = sw->chunks.data + c;
+                    if (chunk->type != TOGGLE_BLOCK) continue;
+                    bool at_cursor = (chunk->dir == HORIZONTAL)
+                        ? (y == chunk->y && x >= chunk->x && x < chunk->x + (int)chunk->size)
+                        : (x == chunk->x && y >= chunk->y && y < chunk->y + (int)chunk->size);
+                    if (!at_cursor) continue;
+                    int chunk_w = chunk->dir == HORIZONTAL ? (int)chunk->size : 1;
+                    int chunk_h = chunk->dir == VERTICAL   ? (int)chunk->size : 1;
+                    if (tx + chunk_w > WIDTH_TILES || ty + chunk_h > HEIGHT_TILES) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Chunk out of bounds");
+                        return;
+                    }
+                    push_undo((uint8_t)state->current_level, false);
+                    for (int iy = chunk->y; iy < chunk->y + chunk_h; iy++)
+                        for (int ix = chunk->x; ix < chunk->x + chunk_w; ix++)
+                            room->tiles[TILE_IDX(ix, iy)] = 0;
+                    chunk->x = tx;
+                    chunk->y = ty;
+                    state->cursors[state->current_level].x = tx;
+                    state->cursors[state->current_level].y = ty;
+                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                    snprintf(state->status_message, sizeof(state->status_message), "Writing room");
+                    redraw();
+                    assert(writeRooms(&state->rooms));
+                    moved = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (!moved && state->debug.objects) {
+        struct RoomObject *object = NULL;
+        for (size_t i = 0; i < room->num_objects; i++) {
+            struct RoomObject *o = room->objects + i;
+            if (o->type == SPRITE && x == o->x && y == o->y) { object = o; break; }
+        }
+        if (!object) {
+            for (size_t i = 0; i < room->num_objects; i++) {
+                struct RoomObject *o = room->objects + i;
+                if (o->type == BLOCK &&
+                        x >= o->x && x < o->x + (int)o->block.width &&
+                        y >= o->y && y < o->y + (int)o->block.height) {
+                    object = o; break;
+                }
+            }
+        }
+        if (object) {
+            if (object->type == SPRITE) {
+                if (sprite_at(room, object, tx, ty)) {
+                    snprintf(state->status_message, sizeof(state->status_message), "Sprite would overlap");
+                    return;
+                }
+            } else {
+                if (tx + (int)object->block.width > WIDTH_TILES || ty + (int)object->block.height > HEIGHT_TILES) {
+                    snprintf(state->status_message, sizeof(state->status_message), "Object out of bounds");
+                    return;
+                }
+            }
+            push_undo((uint8_t)state->current_level, false);
+            object->x = tx;
+            object->y = ty;
+            state->cursors[state->current_level].x = tx;
+            state->cursors[state->current_level].y = ty;
+            ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+            snprintf(state->status_message, sizeof(state->status_message), "Writing room");
+            redraw();
+            assert(writeRooms(&state->rooms));
+            moved = true;
+        }
+    }
+    if (!moved) {
+        /* Plain tile */
+        push_undo((uint8_t)state->current_level, false);
+        room->tiles[TILE_IDX(tx, ty)] = room->tiles[TILE_IDX(x, y)];
+        room->tiles[TILE_IDX(x, y)] = 0;
+        state->cursors[state->current_level].x = tx;
+        state->cursors[state->current_level].y = ty;
+        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+        snprintf(state->status_message, sizeof(state->status_message), "Writing room");
+        redraw();
+        assert(writeRooms(&state->rooms));
+    }
+}

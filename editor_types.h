@@ -126,6 +126,7 @@ typedef enum {
     GOTO_OBJECT,
     GOTO_SWITCH,
     GOTO_ROOM,
+    GOTO_COORD,
 
     EDIT_ROOMNAME,
     EDIT_ROOMDETAILS,
@@ -184,6 +185,10 @@ typedef struct {
     // FIXME have a pos for each room now that there is a goto
 
     uint16_t partial_byte;
+
+    /* goto-coord state (g / G) */
+    int  goto_coord_x;    /* -1 = not yet entered */
+    bool goto_coord_move; /* false = move cursor (g), true = warp item (G) */
 
     char room_detail;
     char room_name[24];
@@ -253,6 +258,7 @@ void debugalltoggle(void);
 bool debugany(void);
 void get_screen_dimensions(void);
 void move(int dx, int dy);
+void warp_to(int tx, int ty);
 void stretch(int dx, int dy);
 void shrink(int dx, int dy);
 bool update(void);

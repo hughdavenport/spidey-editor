@@ -82,11 +82,10 @@ Priority order: bugs → editor features → room/main quality → tests/researc
       [x] - Header shows [Mm] while recording to slot m, nothing when idle
       [x] - Cleanup: free macro_slots[i], macro_buf, macro_replay in end()
 
-[ ] - Jump to arbitrary position (cursor and/or object/chunk/switch)
-      [ ] - Move cursor directly to a typed (x,y) coordinate in the current room
-      [ ] - Move the active object/chunk/switch to an arbitrary position in the current room
-            (alternative to nudging one step at a time with hjkl)
-      [ ] - Keybinding TBD (e.g. `g` for goto-coord, or a `G` prefix in move mode)
+[x] - Jump to arbitrary position (cursor and/or object/chunk/switch)
+      [x] - g: move cursor to typed (x,y) in NORMAL and TILE_EDIT
+      [x] - G: warp highlighted item at cursor to typed (x,y), TILE_EDIT only
+            Respects hex/decimal mode; two digits per coordinate; backspace undoes
 
 ---
 

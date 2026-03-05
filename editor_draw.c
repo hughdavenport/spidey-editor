@@ -100,6 +100,15 @@ help_keys help[][100] = {
         {0},
     },
 
+    [GOTO_COORD]={
+        {"0-9 / 0-9a-f", "type x then y coordinate (two digits each)"},
+        {"BACKSPACE/DEL", "undo last digit"},
+        {"ESC", "cancel"},
+        {"Ctrl-h", "toggle hex input"},
+        {"Ctrl-?", "toggle help"},
+        {0},
+    },
+
     [EDIT_ROOMNAME]={
         {"any printable char", "insert character"},
         {"DEL", "delete character after cursor"},
@@ -749,6 +758,26 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             if (i != C_ARRAY_LEN(state->rooms.rooms) / 2 - 1) scr_printf("\n");
         }
         goto show_help_if_needed;
+    } else if (state->current_state == GOTO_COORD) {
+        scr_printf("%s> x:", state->goto_coord_move ? "G" : "g");
+        if (state->goto_coord_x >= 0) {
+            if (state->debug.hex) scr_printf("%02x", state->goto_coord_x);
+            else scr_printf("%02d", state->goto_coord_x);
+        } else if (state->partial_byte) {
+            if (state->debug.hex) scr_printf("%x", state->partial_byte & 0xFF);
+            else scr_printf("%u", state->partial_byte & 0xFF);
+            scr_printf("\033[4;5m_\033[m");
+        } else {
+            scr_printf("\033[4;5m__\033[m");
+        }
+        scr_printf(",y:");
+        if (state->goto_coord_x >= 0 && state->partial_byte) {
+            if (state->debug.hex) scr_printf("%x", state->partial_byte & 0xFF);
+            else scr_printf("%u", state->partial_byte & 0xFF);
+            scr_printf("\033[4;5m_\033[m");
+        } else {
+            scr_printf("\033[4;5m__\033[m");
+        }
     } else {
         PRINTF_DATA((int)level);
         scr_printf(" - \"");
