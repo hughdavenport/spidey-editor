@@ -1023,6 +1023,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             case TILE_EDIT:
             case GOTO_OBJECT:
             case GOTO_SWITCH:
+            case GOTO_COORD:
             case EDIT_ROOMNAME:
             case EDIT_ROOMDETAILS:
             case EDIT_SWITCHDETAILS:
