@@ -283,33 +283,18 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             chunk->x, chunk->y, chunk->size, chunk->dir == VERTICAL ? "VERTICAL" : "HORIZONTAL", chunk->off, chunk->on);
                     break;
 
-                case TOGGLE_BIT:
-                    // Only does this if switch_structs[unknown(f) + i / 3] has {0x2, 0x8, 0x20, 0x80}[i] set
-                    // Note i is switch index, not chunk->index, or chunk_idx
-                    printf("{.type = TOGGLE_BIT, .on = %x, .off = %x, .index = %d, .bitmask = 0x%02x}",
-                            chunk->on, chunk->off, chunk->index, chunk->bitmask);
-
+                case TOGGLE_BIT: {
+                    char target_name[25] = {0};
+                    assert(chunk->room_idx < C_ARRAY_LEN(file->rooms));
+                    strncpy(target_name, file->rooms[chunk->room_idx].data.name, C_ARRAY_LEN(target_name) - 1);
+                    for (int j = (int)C_ARRAY_LEN(target_name) - 1; j >= 0; j--)
+                        if (target_name[j] == '\0' || isspace((unsigned char)target_name[j])) target_name[j] = '\0';
+                        else break;
+                    printf("{.type = TOGGLE_BIT, toggle: (room) %s (switch) %u (on/off)=%d/%d}",
+                            target_name, chunk->switch_idx, chunk->on, chunk->off);
                     printf("\033[m\n");
-                    /* printf("            if global_switches[%ld] has bitmask %02x (staticly defined)\n", */
-                    /*         room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]); */
-                    /* printf("                remove that mask\n"); */
-                    /* printf("                *0x1d13 (flags?) is set to 0x20 when global_switches[%ld] has bitmask %02x\n", */
-                    /*         room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x1, 0x4, 0x10, 0x40}[((room->data._num_switches & 0x3) + i) % 4]); */
-                    /* printf("                if (*0x1d13 (flags?) is set)\n"); */
-                    /* printf("                    if (.on (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n", */
-                    /*         chunk->on, chunk->index, chunk->bitmask); */
-                    /* printf("                    or (.on (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n", */
-                    /*         chunk->on, chunk->index, chunk->bitmask); */
-                    /* printf("                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)\n", */
-                    /*         chunk->bitmask, chunk->bitmask << 1); */
-                    /* printf("                else if (*0x1d13 (flags?) is not set)\n"); */
-                    /* printf("                    if (.off (%02x) == 0x1 and global_switches[%d (.index)] has bitmask %02x (.bitmask))\n", */
-                    /*         chunk->off, chunk->index, chunk->bitmask); */
-                    /* printf("                    or (.off (%02x) == 0x2 and global_switches[%d] does not have bitmask %02x)\n", */
-                    /*         chunk->off, chunk->index, chunk->bitmask); */
-                    /* printf("                        remove mask %02x (.bitmask), and set mask %02x (.bitmask << 1)", */
-                    /*         chunk->bitmask, chunk->bitmask << 1); */
                     break;
+                }
 
                 case TOGGLE_OBJECT:
                     printf("\033[m\033[4%d;30;1m", (chunk->index % 3) + 1);
@@ -340,16 +325,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             }
                             break;
                     }
-
                     printf(", .value_without_direction = %02x}", chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
                     printf("\033[m\n");
-                    printf("            if global_switches[%ld] has bitmask %02x (staticly defined)\n",
-                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x2, 0x8, 0x20, 0x80}[((room->data._num_switches & 0x3) + i) % 4]);
-                    printf("                remove that mask\n");
-                    printf("                *0x1d13 (flags?) is set to 0x20 when global_switches[%ld] has bitmask %02x\n",
-                            room->data.UNKNOWN_f + ((room->data._num_switches & 0x3) + i) / 4, (uint8_t[]){0x1, 0x4, 0x10, 0x40}[((room->data._num_switches & 0x3) + i) % 4]);
-                    printf("                if *0x1d13 (flags?) != %02x (.test)\n", chunk->test);
-                    printf("                    set movertab entry[2] to 0x%02x (.value)\n", chunk->value);
                     break;
 
                 default:
