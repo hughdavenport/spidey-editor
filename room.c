@@ -82,7 +82,7 @@ bool readHeader(Header *head, FILE *fp) {
 }
 
 void dumpRoom(Room *room, RoomFile *file, bool color) {
-    printf("Room %u @0x%04X: \"%s\"\n", room->index, room->address, room->data.name);
+    printf("Room %u: \"%s\"\n", room->index, room->data.name);
 
     /* printf("  Compressed room (length=%zu): [", room->compressed.length); */
     /* for (size_t i = 0; i < room->compressed.length; i ++) { */
@@ -1290,7 +1290,7 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
 
         // Room header: "Room N @0xADDR: "name""
         unsigned uid;
-        if (sscanf(line, "Room %u @", &uid) == 1 && uid < 64) {
+        if (sscanf(line, "Room %u:", &uid) == 1 && uid < 64) {
             // If force_room_id is set and we already imported one room, stop.
             if (force_room_id >= 0 && room != NULL) break;
             room_id = (force_room_id >= 0) ? force_room_id : (int)uid;
