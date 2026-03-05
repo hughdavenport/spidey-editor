@@ -302,31 +302,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     }
 
                     case TOGGLE_OBJECT:
-                        printf("object: idx=%d value=", chunk->index);
-                        switch (chunk->value & MOVE_LEFT) {
-                            case MOVE_LEFT:
-                                switch (chunk->value & MOVE_UP) {
-                                    case MOVE_UP: printf("up+left"); break;
-                                    case MOVE_DOWN: printf("down+left"); break;
-                                    case '\0': printf("left"); break;
-                                }
-                                break;
-                            case MOVE_RIGHT:
-                                switch (chunk->value & MOVE_UP) {
-                                    case MOVE_UP: printf("up+right"); break;
-                                    case MOVE_DOWN: printf("down+right"); break;
-                                    case '\0': printf("right"); break;
-                                }
-                                break;
-                            case '\0':
-                                switch (chunk->value & MOVE_UP) {
-                                    case MOVE_UP: printf("up"); break;
-                                    case MOVE_DOWN: printf("down"); break;
-                                    case '\0': printf("stop"); break;
-                                }
-                                break;
-                        }
-                        printf(" test=%d", chunk->test >> 4);
+                        printf("object: idx=%d value=0x%02x test=%d", chunk->index, chunk->value, chunk->test >> 4);
                         break;
 
                     default:
@@ -1230,6 +1206,395 @@ bool writeFile(RoomFile *file, FILE *fp) {
 
     if (fseek(fp, 0, SEEK_SET) == -1) return false;
     if (fwrite(&head, sizeof(Header), 1, fp) != 1) return false;
+    return true;
+}
+
+static void strip_ansi(char *line) {
+    char *r = line, *w = line;
+    while (*r) {
+        if (*r == '\033' && *(r+1) == '[') {
+            r += 2;
+            while (*r && !isalpha((unsigned char)*r)) r++;
+            if (*r) r++;
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = '\0';
+}
+
+static uint8_t parse_hex_pair(char a, char b) {
+    uint8_t hi = isdigit((unsigned char)a) ? (uint8_t)(a - '0') : (uint8_t)(10 + tolower((unsigned char)a) - 'a');
+    uint8_t lo = isdigit((unsigned char)b) ? (uint8_t)(b - '0') : (uint8_t)(10 + tolower((unsigned char)b) - 'a');
+    return (hi << 4) | lo;
+}
+
+// Recompute chunk->index and chunk->bitmask for all TOGGLE_BIT chunks from
+// chunk->room_idx / chunk->switch_idx, using the current global switch ordering.
+// Called after importRooms (since import may not have the original file for lookup).
+bool recomputeToggleBits(RoomFile *file) {
+    uint8_t bitmasks[] = {0x01, 0x04, 0x10, 0x40};
+    for (size_t idx = 0; idx < C_ARRAY_LEN(file->rooms); idx++) {
+        Room *r = file->rooms + idx;
+        if (!r->valid) continue;
+        for (size_t sw = 0; sw < r->data.num_switches; sw++) {
+            struct SwitchObject *switcch = r->data.switches + sw;
+            for (size_t c = 1; c < switcch->chunks.length; c++) {
+                struct SwitchChunk *chunk = switcch->chunks.data + c;
+                if (chunk->type != TOGGLE_BIT) continue;
+                uint16_t index = 0; uint8_t mask = 0;
+                for (size_t _idx = 0; _idx < C_ARRAY_LEN(file->rooms); _idx++) {
+                    Room *_r = file->rooms + _idx;
+                    if (!_r->valid) continue;
+                    for (size_t _sw = 0; _sw < _r->data.num_switches; _sw++) {
+                        if (chunk->room_idx == _idx && chunk->switch_idx == _sw) {
+                            chunk->index   = index;
+                            chunk->bitmask = bitmasks[mask];
+                            goto tb_found;
+                        }
+                        if (++mask == C_ARRAY_LEN(bitmasks)) { mask = 0; index++; }
+                    }
+                }
+                fprintf(stderr, "recomputeToggleBits: room %u switch %u not found\n",
+                        chunk->room_idx, chunk->switch_idx);
+                return false;
+tb_found:       ;
+            }
+        }
+    }
+    return true;
+}
+
+// force_room_id >= 0: import the first room found into that slot (ignore file's Room N id).
+// force_room_id < 0: use the room id from the "Room N @..." header.
+bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
+    char line[1024];
+    int room_id = -1;
+    Room *room = NULL;
+    int tile_row = -1;
+    int obj_idx = -1;
+    int obj_tile_row = -1;
+    int sw_idx = -1;
+    bool in_chunks = false;
+
+    // Deferred TOGGLE_BIT entries: chunk pointers with the room name and switch_idx to resolve
+    // after all rooms have been imported (handles forward references and blank-first imports).
+    typedef struct { struct SwitchChunk *chunk; char room_name[64]; unsigned switch_idx; } DeferredTB;
+    DeferredTB deferred[1024];
+    int n_deferred = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        strip_ansi(line);
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+
+        // Room header: "Room N @0xADDR: "name""
+        unsigned uid;
+        if (sscanf(line, "Room %u @", &uid) == 1 && uid < 64) {
+            // If force_room_id is set and we already imported one room, stop.
+            if (force_room_id >= 0 && room != NULL) break;
+            room_id = (force_room_id >= 0) ? force_room_id : (int)uid;
+            room = &file->rooms[room_id];
+            room->valid = true;
+            room->index = (uint8_t)room_id;
+            // Parse name from header: Room N @ADDR: "NAME"
+            memset(room->data.name, ' ', sizeof(room->data.name));
+            char *q = strchr(line, '"');
+            if (q) {
+                q++; // skip opening quote
+                char *eq = strchr(q, '"');
+                size_t nlen = eq ? (size_t)(eq - q) : strlen(q);
+                if (nlen > sizeof(room->data.name)) nlen = sizeof(room->data.name);
+                memcpy(room->data.name, q, nlen);
+            }
+            // Free dynamic data; fixed fields (tiles, metadata, name) will be overwritten below
+            if (room->data.objects) {
+                for (size_t i = 0; i < room->data.num_objects; i++)
+                    if (room->data.objects[i].tiles) free(room->data.objects[i].tiles);
+                free(room->data.objects);
+                room->data.objects = NULL;
+            }
+            room->data.num_objects = 0;
+            if (room->data.switches) {
+                for (size_t i = 0; i < room->data.num_switches; i++)
+                    ARRAY_FREE(room->data.switches[i].chunks);
+                free(room->data.switches);
+                room->data.switches = NULL;
+            }
+            room->data.num_switches = 0;
+            room->data._num_switches = 0;
+            ARRAY_FREE(room->rest);
+            ARRAY_FREE(room->compressed);
+            tile_row = -1; obj_idx = -1; obj_tile_row = -1; sw_idx = -1; in_chunks = false;
+            continue;
+        }
+
+        if (room == NULL) continue;
+
+        // Tiles label
+        if (strcmp(line, "Tiles:") == 0) {
+            tile_row = 0;
+            memset(room->data.tiles, 0, sizeof(room->data.tiles));
+            continue;
+        }
+
+        // Reading tile rows (HEIGHT_TILES rows, 2 chars per tile)
+        if (tile_row >= 0 && tile_row < HEIGHT_TILES) {
+            for (int x = 0; x < WIDTH_TILES; x++) {
+                char a = (size_t)(x*2)   < len ? line[x*2]   : ' ';
+                char b = (size_t)(x*2+1) < len ? line[x*2+1] : ' ';
+                room->data.tiles[tile_row * WIDTH_TILES + x] =
+                    (a == ' ' && b == ' ') ? 0 : parse_hex_pair(a, b);
+            }
+            tile_row++;
+            if (tile_row == HEIGHT_TILES) tile_row = -1;
+            continue;
+        }
+
+        // Empty line
+        if (len == 0) continue;
+
+        // Metadata: "bkgrnd: B, tiles: T, dmg: D, gravity (|): V, gravity (-): H"
+        unsigned bkgrnd, tiles_v, grav_v, grav_h; int dmg;
+        if (sscanf(line, "bkgrnd: %u, tiles: %u, dmg: %d, gravity (|): %u, gravity (-): %u",
+                   &bkgrnd, &tiles_v, &dmg, &grav_v, &grav_h) == 5) {
+            room->data.background = bkgrnd;
+            room->data.tile_offset = tiles_v;
+            room->data.room_damage = dmg;
+            room->data.gravity_vertical = grav_v;
+            room->data.gravity_horizontal = grav_h;
+            continue;
+        }
+
+        // Neighbor links
+        unsigned nb;
+        if (sscanf(line, "left: %u",  &nb) == 1) { room->data.room_west  = nb; continue; }
+        if (sscanf(line, "down: %u",  &nb) == 1) { room->data.room_south = nb; continue; }
+        if (sscanf(line, "up: %u",    &nb) == 1) { room->data.room_north = nb; continue; }
+        if (sscanf(line, "right: %u", &nb) == 1) { room->data.room_east  = nb; continue; }
+
+        // UNKNOWN fields
+        int ub, uc, ue, uf;
+        if (sscanf(line, "UNKNOWN_b: %d, UNKNOWN_c: %d, UNKNOWN_e: %d, UNKNOWN_f: %d",
+                   &ub, &uc, &ue, &uf) == 4) {
+            room->data.UNKNOWN_b = ub;
+            room->data.UNKNOWN_c = uc;
+            room->data._num_switches = (room->data._num_switches & ~0x3) | (ue & 0x3);
+            room->data.UNKNOWN_f = uf;
+            continue;
+        }
+
+        // Objects header: "  objects (N):"
+        unsigned num_obj;
+        if (sscanf(line, "  objects (%u):", &num_obj) == 1) {
+            room->data.num_objects = num_obj;
+            room->data.objects = num_obj ? calloc(num_obj, sizeof(struct RoomObject)) : NULL;
+            assert(room->data.objects != NULL || num_obj == 0);
+            obj_idx = -1;
+            continue;
+        }
+
+        // Block object tile rows (8-space indent, only while obj_tile_row >= 0)
+        if (obj_tile_row >= 0 && len >= 8 && memcmp(line, "        ", 8) == 0) {
+            struct RoomObject *obj = &room->data.objects[obj_idx];
+            char *p = line + 8;
+            size_t plen = len - 8;
+            for (int x = 0; x < obj->block.width; x++) {
+                char a = (size_t)(x*2)   < plen ? p[x*2]   : ' ';
+                char b = (size_t)(x*2+1) < plen ? p[x*2+1] : ' ';
+                obj->tiles[obj_tile_row * obj->block.width + x] =
+                    (a == ' ' && b == ' ') ? 0 : parse_hex_pair(a, b);
+            }
+            obj_tile_row++;
+            if (obj_tile_row >= obj->block.height) obj_tile_row = -1;
+            continue;
+        }
+        obj_tile_row = -1;
+
+        // Block object header: "    block I: (x,y)=X,Y (w,h)=W,H"
+        long bi; int bx, by, bw, bh;
+        if (sscanf(line, "    block %ld: (x,y)=%d,%d (w,h)=%d,%d", &bi, &bx, &by, &bw, &bh) == 5) {
+            obj_idx = (int)bi;
+            if (obj_idx < 0 || obj_idx >= (int)room->data.num_objects) {
+                fprintf(stderr, "import: block %d out of range (num_objects=%u)\n", obj_idx, room->data.num_objects);
+                return false;
+            }
+            struct RoomObject *obj = &room->data.objects[obj_idx];
+            obj->type = BLOCK;
+            obj->x = bx; obj->y = by;
+            obj->block.width = bw; obj->block.height = bh;
+            obj->tiles = calloc((size_t)(bw * bh), 1);
+            assert(obj->tiles != NULL);
+            obj_tile_row = 0;
+            continue;
+        }
+
+        // Sprite object: "    sprite I: (x,y)=X,Y TYPENAME dmg:D"
+        long si; int sx, sy, sdmg; char stype[32];
+        if (sscanf(line, "    sprite %ld: (x,y)=%d,%d %31s dmg:%d", &si, &sx, &sy, stype, &sdmg) == 5) {
+            obj_idx = (int)si;
+            if (obj_idx < 0 || obj_idx >= (int)room->data.num_objects) {
+                fprintf(stderr, "import: sprite %d out of range (num_objects=%u)\n", obj_idx, room->data.num_objects);
+                return false;
+            }
+            struct RoomObject *obj = &room->data.objects[obj_idx];
+            obj->type = SPRITE;
+            obj->x = sx; obj->y = sy;
+            obj->sprite.damage = sdmg;
+            _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
+            if      (strcmp(stype, "SHARK")        == 0) obj->sprite.type = SHARK;
+            else if (strcmp(stype, "MUMMY")        == 0) obj->sprite.type = MUMMY;
+            else if (strcmp(stype, "BLUE_MAN")     == 0) obj->sprite.type = BLUE_MAN;
+            else if (strcmp(stype, "WOLF")         == 0) obj->sprite.type = WOLF;
+            else if (strcmp(stype, "R2D2")         == 0) obj->sprite.type = R2D2;
+            else if (strcmp(stype, "DINOSAUR")     == 0) obj->sprite.type = DINOSAUR;
+            else if (strcmp(stype, "RAT")          == 0) obj->sprite.type = RAT;
+            else if (strcmp(stype, "SHOTGUN_LADY") == 0) obj->sprite.type = SHOTGUN_LADY;
+            else {
+                fprintf(stderr, "import: unknown sprite type '%s'\n", stype);
+                return false;
+            }
+            continue;
+        }
+
+        // Switches header: "  switches (N):"
+        unsigned num_sw;
+        if (sscanf(line, "  switches (%u):", &num_sw) == 1) {
+            room->data.num_switches = num_sw;
+            room->data._num_switches = (num_sw << 2) | (room->data._num_switches & 0x3);
+            room->data.switches = num_sw ? calloc(num_sw, sizeof(struct SwitchObject)) : NULL;
+            assert(room->data.switches != NULL || num_sw == 0);
+            sw_idx = -1; in_chunks = false;
+            continue;
+        }
+
+        // Switch header: "    switch I: (x,y)=X,Y (entry)=E (once)=O (side)=S"
+        long swi; int swx, swy; char entry_s[8], once_s[8], side_s[8];
+        if (sscanf(line, "    switch %ld: (x,y)=%d,%d (entry)=%7s (once)=%7s (side)=%7s",
+                   &swi, &swx, &swy, entry_s, once_s, side_s) == 6) {
+            sw_idx = (int)swi;
+            if (sw_idx < 0 || sw_idx >= (int)room->data.num_switches) {
+                fprintf(stderr, "import: switch %d out of range (num_switches=%u)\n", sw_idx, room->data.num_switches);
+                return false;
+            }
+            bool room_entry    = strncmp(entry_s, "true", 4) == 0;
+            bool one_time_use  = strncmp(once_s,  "true", 4) == 0;
+            _Static_assert(NUM_SIDES == 4, "Unexpected number of switch sides");
+            enum SwitchSide side = TOP;
+            if      (strncmp(side_s, "RIGHT",  5) == 0) side = RIGHT;
+            else if (strncmp(side_s, "BOTTOM", 6) == 0) side = BOTTOM;
+            else if (strncmp(side_s, "LEFT",   4) == 0) side = LEFT;
+            struct SwitchObject *sw = &room->data.switches[sw_idx];
+            ARRAY_FREE(sw->chunks);
+            ARRAY_ADD(sw->chunks, ((struct SwitchChunk){
+                .type = PREAMBLE, .x = swx, .y = swy,
+                .room_entry = room_entry, .one_time_use = one_time_use, .side = side
+            }));
+            in_chunks = false;
+            continue;
+        }
+
+        // Chunks label
+        if (strcmp(line, "      chunks:") == 0) { in_chunks = true; continue; }
+
+        // Chunk line: "        (N) type ..."
+        if (in_chunks && sw_idx >= 0 && len > 9 && memcmp(line, "        (", 9) == 0) {
+            struct SwitchObject *sw = &room->data.switches[sw_idx];
+            char *type_p = strstr(line, ") type ");
+            if (!type_p) continue;
+            type_p += 7; // skip ") type "
+
+            _Static_assert(NUM_CHUNK_TYPES == 4, "Unexpected number of chunk types");
+            if (strncmp(type_p, "block: ", 7) == 0) {
+                // TOGGLE_BLOCK: "(x,y)=X,Y (width|height)=S (on/off)=HH/HH"
+                int cx, cy, csize; unsigned con, coff; char dir_s[8];
+                if (sscanf(type_p, "block: (x,y)=%d,%d (%7[^)])=%d (on/off)=%x/%x",
+                           &cx, &cy, dir_s, &csize, &con, &coff) == 6) {
+                    enum SwitchChunkDirection dir = strncmp(dir_s, "height", 6) == 0 ? VERTICAL : HORIZONTAL;
+                    ARRAY_ADD(sw->chunks, ((struct SwitchChunk){
+                        .type = TOGGLE_BLOCK, .x = cx, .y = cy, .size = csize,
+                        .dir = dir, .on = (uint8_t)con, .off = (uint8_t)coff
+                    }));
+                }
+            } else if (strncmp(type_p, "toggle: ", 8) == 0) {
+                // TOGGLE_BIT: "(room) NAME (switch) IDX (on/off)=D/D"
+                // Parse room name (may contain spaces) by finding " (switch) "
+                const char *p = type_p + 8;
+                if (strncmp(p, "(room) ", 7) != 0) continue;
+                p += 7;
+                const char *sw_marker = strstr(p, " (switch) ");
+                if (!sw_marker) continue;
+                size_t name_len = (size_t)(sw_marker - p);
+                char room_name[64] = {0};
+                if (name_len >= sizeof(room_name)) name_len = sizeof(room_name) - 1;
+                memcpy(room_name, p, name_len);
+                unsigned switch_idx; int ton, toff;
+                if (sscanf(sw_marker + 10, "%u (on/off)=%d/%d", &switch_idx, &ton, &toff) != 3) continue;
+                // Defer name→room_id resolution until all rooms are parsed
+                ARRAY_ADD(sw->chunks, ((struct SwitchChunk){
+                    .type = TOGGLE_BIT, .on = ton, .off = toff,
+                }));
+                if (n_deferred < (int)(sizeof(deferred)/sizeof(deferred[0]))) {
+                    deferred[n_deferred].chunk = sw->chunks.data + sw->chunks.length - 1;
+                    deferred[n_deferred].switch_idx = switch_idx;
+                    if (name_len >= sizeof(deferred[n_deferred].room_name))
+                        name_len = sizeof(deferred[n_deferred].room_name) - 1;
+                    memcpy(deferred[n_deferred].room_name, room_name, name_len);
+                    deferred[n_deferred].room_name[name_len] = '\0';
+                    n_deferred++;
+                }
+            } else if (strncmp(type_p, "object: ", 8) == 0) {
+                // TOGGLE_OBJECT: "idx=I value=0xHH test=N"
+                int oidx, otest; unsigned oval;
+                if (sscanf(type_p, "object: idx=%d value=0x%x test=%d", &oidx, &oval, &otest) == 3) {
+                    ARRAY_ADD(sw->chunks, ((struct SwitchChunk){
+                        .type = TOGGLE_OBJECT, .index = (uint8_t)oidx,
+                        .value = (uint8_t)oval, .test = (uint8_t)(otest << 4)
+                    }));
+                }
+            }
+            continue;
+        }
+
+        // Rest data: "  Left over data (length=N): [0xHH, ...]"
+        if (strncmp(line, "  Left over data", 16) == 0) {
+            ARRAY_FREE(room->rest);
+            char *p = strchr(line, '[');
+            if (p) {
+                p++;
+                while (*p && *p != ']') {
+                    unsigned val;
+                    if (sscanf(p, "0x%x", &val) == 1)
+                        ARRAY_ADD(room->rest, (uint8_t)val);
+                    p = strchr(p, ',');
+                    if (p) p++; else break;
+                }
+            }
+            continue;
+        }
+    }
+
+    // Resolve deferred TOGGLE_BIT entries now that all rooms have been imported
+    for (int d = 0; d < n_deferred; d++) {
+        DeferredTB *dt = &deferred[d];
+        uint16_t target_room = 0xFFFF;
+        for (size_t r = 0; r < C_ARRAY_LEN(file->rooms); r++) {
+            if (!file->rooms[r].valid) continue;
+            char trimmed[25] = {0};
+            strncpy(trimmed, file->rooms[r].data.name, 24);
+            for (int j = 23; j >= 0; j--)
+                if (trimmed[j] == ' ' || trimmed[j] == '\0') trimmed[j] = '\0'; else break;
+            if (strcmp(trimmed, dt->room_name) == 0) { target_room = (uint16_t)r; break; }
+        }
+        if (target_room == 0xFFFF) {
+            fprintf(stderr, "import: TOGGLE_BIT target room '%s' not found\n", dt->room_name);
+            return false;
+        }
+        dt->chunk->room_idx = target_room;
+        dt->chunk->switch_idx = dt->switch_idx;
+        // chunk->index and chunk->bitmask are set by recomputeToggleBits() before writing
+    }
+
     return true;
 }
 

@@ -919,6 +919,68 @@ bool main_find_sprite(int *argc, char ***argv, char *program, int *find_sprite) 
     return true;
 }
 
+bool main_import(int *argc, char ***argv, char *program, RoomFile *file, bool *import_done) {
+    FILE *fp = NULL;
+    bool use_stdin = (*argc <= 1 || strcmp((*argv)[1], "-") == 0);
+    if (use_stdin) {
+        fp = stdin;
+    } else {
+        fp = fopen((*argv)[1], "r");
+        if (fp == NULL) {
+            fprintf(stderr, "Could not open file: %s: %s\n", (*argv)[1], strerror(errno));
+            fprintf(stderr, "Usage: %s import [FILE|-]\n", program);
+            return false;
+        }
+    }
+    *argv += use_stdin ? 1 : 2;
+    *argc -= use_stdin ? 1 : 2;
+
+    // Blank all rooms: rooms absent from the import file will be empty.
+    freeRoomFile(file);
+    memset(file, 0, sizeof(*file));
+
+    bool ok = importRooms(fp, file, -1);
+    if (!use_stdin) fclose(fp);
+    if (!ok) return false;
+    *import_done = true;
+    return true;
+}
+
+bool main_importRoom(int *argc, char ***argv, char *program, RoomFile *file, bool *import_done) {
+    if (*argc <= 2) {
+        fprintf(stderr, "Usage: %s importRoom ROOMID FILE\n", program);
+        return false;
+    }
+    char *end;
+    long room_id = strtol((*argv)[1], &end, 0);
+    if (errno == EINVAL || end == NULL || *end != '\0' ||
+            room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file->rooms)) {
+        fprintf(stderr, "Invalid room id: %s\n", (*argv)[1]);
+        fprintf(stderr, "Usage: %s importRoom ROOMID FILE\n", program);
+        return false;
+    }
+    FILE *fp = NULL;
+    bool use_stdin = strcmp((*argv)[2], "-") == 0;
+    if (use_stdin) {
+        fp = stdin;
+    } else {
+        fp = fopen((*argv)[2], "r");
+        if (fp == NULL) {
+            fprintf(stderr, "Could not open file: %s: %s\n", (*argv)[2], strerror(errno));
+            fprintf(stderr, "Usage: %s importRoom ROOMID FILE\n", program);
+            return false;
+        }
+    }
+    *argv += 3;
+    *argc -= 3;
+
+    bool ok = importRooms(fp, file, (int)room_id);
+    if (!use_stdin) fclose(fp);
+    if (!ok) return false;
+    *import_done = true;
+    return true;
+}
+
 int editor_main();
 int main(int argc, char **argv) {
     char *fileName = ROOMS_FILE;
@@ -928,6 +990,7 @@ int main(int argc, char **argv) {
     int recompress_room = -1;
     bool display = false;
     bool display_color = true;
+    bool import_done = false;
     bool list = false;
     int display_room = -1;
     int find_tile = -1;
@@ -964,6 +1027,14 @@ int main(int argc, char **argv) {
             }
         } else if (strcasecmp(argv[0], "display") == 0) {
             if (!main_display(&argc, &argv, program, &file, &display, &display_room, &display_color)) {
+                defer_return(1);
+            }
+        } else if (strcasecmp(argv[0], "import") == 0) {
+            if (!main_import(&argc, &argv, program, &file, &import_done)) {
+                defer_return(1);
+            }
+        } else if (strcasecmp(argv[0], "importRoom") == 0) {
+            if (!main_importRoom(&argc, &argv, program, &file, &import_done)) {
                 defer_return(1);
             }
         } else if (strcasecmp(argv[0], "find_tile") == 0) {
@@ -1146,6 +1217,8 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Subcommands:\n");
             fprintf(stderr, "    rooms                                - List rooms\n");
             fprintf(stderr, "    display [ROOMID]                     - Defaults to all rooms\n");
+            fprintf(stderr, "    import [FILE|-]                      - Import display output; rooms not in file are blanked\n");
+            fprintf(stderr, "    importRoom ROOMID [FILE|-]           - Import one room at ROOMID, others unchanged\n");
             fprintf(stderr, "    recompress                           - No changes to underlying data, just recompress\n");
             fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
             fprintf(stderr, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
@@ -1161,7 +1234,7 @@ int main(int argc, char **argv) {
             argc --;
         }
     }
-    if (find_sprite == -1 && find_tile == -1 && !list && !display && !recompress && patches.length == 0) {
+    if (find_sprite == -1 && find_tile == -1 && !list && !display && !recompress && !import_done && patches.length == 0) {
         fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
         fprintf(stderr, "Subcommands:\n");
         fprintf(stderr, "    rooms                                - List rooms\n");
@@ -1636,7 +1709,10 @@ int main(int argc, char **argv) {
             dumpRoom(&file.rooms[rooms.data[i]], &file, display_color);
         }
     }
-    if (patches.length > 0 || recompress) {
+    if (patches.length > 0 || recompress || import_done) {
+        if (import_done) {
+            if (!recomputeToggleBits(&file)) defer_return(1);
+        }
         if (recompress) {
             if (recompress_room == -1) {
                 for (size_t i = 0; i < C_ARRAY_LEN(file.rooms); i ++) {
