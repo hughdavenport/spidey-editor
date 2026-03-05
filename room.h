@@ -241,6 +241,6 @@ bool writeFile(RoomFile *file, FILE *fp);
 bool readRooms(RoomFile *file);
 bool readRoomFromFile(Room *room, FILE *fp, const char *filename);
 bool writeRooms(RoomFile *file);
-void dumpRoom(Room *room, RoomFile *file);
+void dumpRoom(Room *room, RoomFile *file, bool color);
 
 #endif // ROOM_H

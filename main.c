@@ -772,21 +772,32 @@ bool main_recompress(int *argc, char ***argv, char *program, RoomFile *file, boo
     return true;
 }
 
-bool main_display(int *argc, char ***argv, char *program, RoomFile *file, bool *display, int *display_room) {
+bool main_display(int *argc, char ***argv, char *program, RoomFile *file, bool *display, int *display_room, bool *display_color) {
     char *end;
     *display = true;
     *argv += 1;
     *argc -= 1;
+    while (*argc > 0 && (*argv)[0][0] == '-') {
+        if (strcmp((*argv)[0], "--no-color") == 0) {
+            *display_color = false;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", (*argv)[0]);
+            fprintf(stderr, "Usage: %s display [--no-color] [ROOM_ID] [FILENAME]\n", program);
+            return false;
+        }
+        *argv += 1;
+        *argc -= 1;
+    }
     if (*argc > 0 && isdigit(*(*argv)[0])) {
         long room_id = strtol((*argv)[0], &end, 0);
         if (errno == EINVAL || end == NULL || *end != '\0') {
             fprintf(stderr, "Invalid number: %s\n", (*argv)[0]);
-            fprintf(stderr, "Usage: %s display [ROOM_ID] [FILENAME]\n", program);
+            fprintf(stderr, "Usage: %s display [--no-color] [ROOM_ID] [FILENAME]\n", program);
             return false;
         }
         if (room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file->rooms)) {
             fprintf(stderr, "Value must be in the range 0..%lu\n", C_ARRAY_LEN(file->rooms) - 1);
-            fprintf(stderr, "Usage: %s display [ROOM_ID] [FILENAME]\n", program);
+            fprintf(stderr, "Usage: %s display [--no-color] [ROOM_ID] [FILENAME]\n", program);
             return false;
         }
         *display_room = room_id;
@@ -916,6 +927,7 @@ int main(int argc, char **argv) {
     bool recompress = false;
     int recompress_room = -1;
     bool display = false;
+    bool display_color = true;
     bool list = false;
     int display_room = -1;
     int find_tile = -1;
@@ -951,7 +963,7 @@ int main(int argc, char **argv) {
                 defer_return(1);
             }
         } else if (strcasecmp(argv[0], "display") == 0) {
-            if (!main_display(&argc, &argv, program, &file, &display, &display_room)) {
+            if (!main_display(&argc, &argv, program, &file, &display, &display_room, &display_color)) {
                 defer_return(1);
             }
         } else if (strcasecmp(argv[0], "find_tile") == 0) {
@@ -1258,7 +1270,7 @@ int main(int argc, char **argv) {
         if (display_room == -1) {
             for (size_t i = 0; i < C_ARRAY_LEN(file.rooms); i ++) {
                 if (file.rooms[i].valid) {
-                    dumpRoom(&file.rooms[i], &file);
+                    dumpRoom(&file.rooms[i], &file, display_color);
                 }
             }
         } else {
@@ -1266,7 +1278,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Room %d is invalid\n", display_room);
                 defer_return(1);
             }
-            dumpRoom(&file.rooms[display_room], &file);
+            dumpRoom(&file.rooms[display_room], &file, display_color);
         }
     }
     if (patches.length > 0) {
@@ -1621,7 +1633,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Room %d is invalid\n", rooms.data[i]);
                 defer_return(1);
             }
-            dumpRoom(&file.rooms[rooms.data[i]], &file);
+            dumpRoom(&file.rooms[rooms.data[i]], &file, display_color);
         }
     }
     if (patches.length > 0 || recompress) {

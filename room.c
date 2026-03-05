@@ -81,7 +81,7 @@ bool readHeader(Header *head, FILE *fp) {
     return true;
 }
 
-void dumpRoom(Room *room, RoomFile *file) {
+void dumpRoom(Room *room, RoomFile *file, bool color) {
     printf("Room %u @0x%04X: \"%s\"\n", room->index, room->address, room->data.name);
 
     /* printf("  Compressed room (length=%zu): [", room->compressed.length); */
@@ -116,7 +116,7 @@ void dumpRoom(Room *room, RoomFile *file) {
                     if (x >= object->x && x < object->x + object->block.width &&
                         y >= object->y && y < object->y + object->block.height) {
 
-                        printf("\033[3%ldm", (o % 7) + 1);
+                        if (color) printf("\033[3%ldm", (o % 7) + 1);
                         colored = true;
                         assert(object->tiles != NULL);
                         int o_x = x - object->x;
@@ -128,7 +128,7 @@ void dumpRoom(Room *room, RoomFile *file) {
 
                 case SPRITE:
                     if (x == object->x && y == object->y) {
-                        printf("\033[4%ld;30m", (o % 7) + 1);
+                        if (color) printf("\033[4%ld;30m", (o % 7) + 1);
                         colored = true;
                         tile = object->sprite.type << 4 | object->sprite.damage;
                         obj = true;
@@ -140,7 +140,7 @@ void dumpRoom(Room *room, RoomFile *file) {
             struct SwitchObject *sw = room->data.switches + s;
             assert(sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE);
             if (x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
-                printf("\033[4%ld;30m", (s % 3) + 4);
+                if (color) printf("\033[4%ld;30m", (s % 3) + 4);
                 colored = true;
                 break;
             }
@@ -149,12 +149,12 @@ void dumpRoom(Room *room, RoomFile *file) {
                 if (chunk->type == TOGGLE_BLOCK) {
                     if (chunk->dir == HORIZONTAL) {
                         if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
-                            printf("\033[m\033[3%ld;40m", (s % 3) + 4);
+                            if (color) printf("\033[m\033[3%ld;40m", (s % 3) + 4);
                             colored = true;
                             tile = chunk->on;
                         }
                     } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
-                        printf("\033[m\033[3%ld;40m", (s % 3) + 4);
+                        if (color) printf("\033[m\033[3%ld;40m", (s % 3) + 4);
                         colored = true;
                         tile = chunk->on;
                     }
@@ -164,7 +164,7 @@ void dumpRoom(Room *room, RoomFile *file) {
 
         if (tile != BLANK_TILE || (colored && !obj)) printf("%02X", tile);
         else printf("  ");
-        if (colored) printf("\033[m");
+        if (colored && color) printf("\033[m");
     }
     printf("\n");
     printf("\n");
@@ -208,16 +208,21 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         switch (room->data.objects[i].type) {
             case BLOCK:
-                printf("    \033[3%ld;1m", (i % 3) + 1);
+                printf("    ");
+                if (color) printf("\033[3%ld;1m", (i % 3) + 1);
                 printf("block %ld: (x,y)=%d,%d (w,h)=%d,%d", i,
                         room->data.objects[i].x, room->data.objects[i].y,
                         room->data.objects[i].block.width, room->data.objects[i].block.height);
                 for (size_t y = 0; y < room->data.objects[i].block.height; y ++) {
-                    printf("\033[m\n        \033[3%ld;1m", (i % 3) + 1);
+                    if (color) printf("\033[m");
+                    printf("\n        ");
+                    if (color) printf("\033[3%ld;1m", (i % 3) + 1);
                     for (size_t x = 0; x < room->data.objects[i].block.width; x ++) {
                         uint8_t tile = room->data.objects[i].tiles[y * room->data.objects[i].block.width + x];
                         if (tile == BLANK_TILE) {
-                            printf("\033[m  \033[3%ld;1m", (i % 3) + 1);
+                            if (color) printf("\033[m");
+                            printf("  ");
+                            if (color) printf("\033[3%ld;1m", (i % 3) + 1);
                         } else {
                             printf("%02x", tile);
                         }
@@ -226,7 +231,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 break;
 
             case SPRITE:
-                printf("    \033[4%ld;30;1m", (i % 3) + 1);
+                printf("    ");
+                if (color) printf("\033[4%ld;30;1m", (i % 3) + 1);
                 printf("sprite %ld: (x,y)=%d,%d ", i,
                         room->data.objects[i].x, room->data.objects[i].y);
                 _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
@@ -248,18 +254,22 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 printf(" dmg:%d", room->data.objects[i].sprite.damage);
                 break;
         }
-        printf("\033[m\n");
+        if (color) printf("\033[m");
+        printf("\n");
     }
 
     printf("  switches (%u):\n", room->data.num_switches);
     for (size_t i = 0; i < room->data.num_switches; i ++) {
-        printf("    \033[4%ld;30;1m", (i % 3) + 4);
+        printf("    ");
+        if (color) printf("\033[4%ld;30;1m", (i % 3) + 4);
         assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
         struct SwitchChunk *preamble = room->data.switches[i].chunks.data;
-        printf("switch %ld: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\033[m\n",
+        printf("switch %ld: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s",
                 i, preamble->x, preamble->y,
                 BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
                 SWITCH_SIDE(preamble->side));
+        if (color) printf("\033[m");
+        printf("\n");
         if (room->data.switches[i].chunks.length > 1) {
             printf("      chunks:\n");
             for (size_t c = 1; c < room->data.switches[i].chunks.length; c ++) {
