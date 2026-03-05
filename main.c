@@ -1003,13 +1003,27 @@ int main(int argc, char **argv) {
 #define defer_return(code) { ret = code; goto defer; }
     fp = fopen(fileName, "rb");
     if (fp == NULL) {
-        fprintf(stderr, "Could not open %s for reading.\n", fileName);
-        defer_return(1);
+        if (errno == ENOENT) {
+            fprintf(stderr, "Warning: %s not found, treating as blank.\n", fileName);
+        } else {
+            fprintf(stderr, "Could not open %s for reading: %s\n", fileName, strerror(errno));
+            defer_return(1);
+        }
+    } else {
+        fseek(fp, 0, SEEK_END);
+        long fsize = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (fsize == 0) {
+            fprintf(stderr, "Warning: %s is empty, treating as blank.\n", fileName);
+            fclose(fp);
+            fp = NULL;
+        } else {
+            /* fprintf(stderr, "Reading file %s.\n", fileName); */
+            if (!readFile(&file, fp)) defer_return(1);
+            fclose(fp);
+            fp = NULL;
+        }
     }
-    /* fprintf(stderr, "Reading file %s.\n", fileName); */
-    if (!readFile(&file, fp)) defer_return(1);
-    fclose(fp);
-    fp = NULL;
     argc --;
     argv ++;
     while (argc > 0) {
