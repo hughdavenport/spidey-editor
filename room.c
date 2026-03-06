@@ -817,7 +817,7 @@ bool readFile(RoomFile *file, FILE *fp) {
     return true;
 }
 
-#define MAX_ROOM_FILE_SIZE 0x3000
+#define MAX_ROOM_FILE_SIZE 0x3100
 // there is also a MAX_ROOM_SIZE, unknown yet, add a few switches to midnight and it will corrupt
 
 bool writeRoom(Room *room, FILE *fp) {
@@ -1062,6 +1062,7 @@ bool writeRoom(Room *room, FILE *fp) {
                 continue;
             }
         }
+        length = 1;
         if (d_idx >= 2 && byte == decompressed[d_idx - 2]) {
             while (d_idx + length - 1 < d_len && length - 2 < 0x7e) {
                 if (decompressed[d_idx + length - 1] != byte) break;
