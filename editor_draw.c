@@ -47,7 +47,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"Ctrl-r[gtdbcef|-]", "edit room detail (hjkl/arrows = room links)"},
         {"Ctrl-s", "create/edit switch"},
-        {"Ctrl-o", "create object (1x1 block at cursor)"},
+        {"Ctrl-o", "create/cycle object/sprites"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble / delete / clear tile"},
