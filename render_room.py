@@ -215,6 +215,17 @@ def main():
         frames[0].save(out, save_all=True, append_images=frames[1:], duration=160, loop=0)
         print(f"wrote {out}")
         return
+    if len(sys.argv) >= 3 and sys.argv[1] == "tilesets":
+        # one folder per used tile_offset, one PNG per tile (00..3f) in that set
+        root = Path(sys.argv[2]); root.mkdir(parents=True, exist_ok=True)
+        blocks = _f("BLOCKS.EGA")
+        for off in (0, 4, 8, 12, 16, 20, 24, 28):
+            d = root / f"offset{off:02d}"; d.mkdir(exist_ok=True)
+            for t in range(64):
+                img = decode_tile(blocks, t + off * 16, None).convert("RGB")
+                img.resize((64, 64), Image.Resampling.NEAREST).save(d / f"tile{t:02x}.png")
+        print(f"wrote 8 offset folders x 64 tiles -> {root}")
+        return
     if len(sys.argv) >= 3 and sys.argv[1] == "all":
         out_dir = Path(sys.argv[2]); out_dir.mkdir(parents=True, exist_ok=True)
         tw, th = W * TILE, H * TILE
