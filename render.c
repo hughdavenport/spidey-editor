@@ -216,23 +216,41 @@ static void draw_overlay(uint8_t *cv, struct DecompressedRoom *room) {
         draw_number(cv, i, o->x * 8 + 1, o->y * 8 + 1, col);
     }
 
-    // switches: marker at origin, line to each toggle target, coloured by type
+    // switches: marker at origin, then per-chunk effect, by type.
     for (int i = 0; i < room->num_switches; i++) {
         struct SwitchObject *sw = room->switches + i;
         if (sw->chunks.length == 0) continue;
         int ox = sw->chunks.data[0].x * 8 + 4, oy = sw->chunks.data[0].y * 8 + 4;
         draw_box(cv, ox - 3, oy - 3, ox + 3, oy + 3, COL_SW);
         draw_number(cv, i, ox + 5, oy - 2, COL_SW);
-        for (size_t c = 0; c < sw->chunks.length; c++) {
+        for (size_t c = 1; c < sw->chunks.length; c++) {   // chunk 0 = PREAMBLE
             struct SwitchChunk *ch = sw->chunks.data + c;
-            const uint8_t *col;
-            if (ch->type == TOGGLE_BLOCK) col = COL_TBLOCK;
-            else if (ch->type == TOGGLE_BIT) col = COL_TBIT;
-            else if (ch->type == TOGGLE_OBJECT) col = COL_TOBJ;
-            else continue;
-            int tx = ch->x * 8 + 4, ty = ch->y * 8 + 4;
-            draw_line(cv, ox, oy, tx, ty, col);
-            draw_box(cv, tx - 2, ty - 2, tx + 2, ty + 2, col);
+            if (ch->type == TOGGLE_BLOCK) {
+                // outline the affected tile span and link the switch to it
+                int x1 = ch->x + (ch->dir == HORIZONTAL ? ch->size - 1 : 0);
+                int y1 = ch->y + (ch->dir == VERTICAL ? ch->size - 1 : 0);
+                draw_box(cv, ch->x * 8, ch->y * 8, (x1 + 1) * 8 - 1, (y1 + 1) * 8 - 1, COL_TBLOCK);
+                draw_line(cv, ox, oy, ch->x * 8 + 4, ch->y * 8 + 4, COL_TBLOCK);
+            } else if (ch->type == TOGGLE_OBJECT) {
+                // link to the object it targets (by index), not an x,y tile
+                if (ch->index < room->num_objects) {
+                    struct RoomObject *t = room->objects + ch->index;
+                    int tcx = t->x * 8 + (t->type == BLOCK ? t->block.width * 4 : 4);
+                    int tcy = t->y * 8 + (t->type == BLOCK ? t->block.height * 4 : 4);
+                    draw_line(cv, ox, oy, tcx, tcy, COL_TOBJ);
+                    draw_box(cv, tcx - 2, tcy - 2, tcx + 2, tcy + 2, COL_TOBJ);
+                }
+            } else if (ch->type == TOGGLE_BIT) {
+                // cross-room: target is a switch in room_idx, not a local tile.
+                // Point an arrow toward the matching neighbour edge.
+                int rid = ch->room_idx, ex = ox, ey = oy;
+                if (rid == room->room_north) ey = 1;
+                else if (rid == room->room_south) ey = BH - 2;
+                else if (rid == room->room_west) ex = 1;
+                else if (rid == room->room_east) ex = BW - 2;
+                if (ex != ox || ey != oy) draw_line(cv, ox, oy, ex, ey, COL_TBIT);
+                draw_box(cv, ox - 1, oy - 1, ox + 1, oy + 1, COL_TBIT);
+            }
         }
     }
 }
