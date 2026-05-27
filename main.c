@@ -1226,36 +1226,42 @@ int main(int argc, char **argv) {
             return editor_main();
         } else if (strcasecmp(argv[0], "render") == 0) {
             argv ++; argc --;
-            if (argc < 2) {
-                fprintf(stderr, "Usage: render ROOMID|all|montage OUT.png|DIR [--debug] [--scale N] [--data-dir DIR]\n");
-                defer_return(1);
-            }
-            bool render_all = (strcasecmp(argv[0], "all") == 0);
-            bool render_mont = (strcasecmp(argv[0], "montage") == 0);
-            long rid = 0;
-            if (!render_all && !render_mont) {
-                char *rend;
-                rid = strtol(argv[0], &rend, 0);
-                if (*rend != '\0' || rid < 0 || rid >= 64) {
-                    fprintf(stderr, "render: invalid room id '%s'\n", argv[0]);
-                    defer_return(1);
-                }
-            }
-            const char *out = argv[1];
-            argv += 2; argc -= 2;
+            // Collect flags (any position) and up to two positionals (TARGET, OUT).
             RenderOpts opts = { .data_dir = ".", .scale = 3, .debug = false };
-            while (argc > 0 && argv[0][0] == '-') {
+            const char *pos[2] = {NULL, NULL};
+            int npos = 0;
+            bool bad = false;
+            while (argc > 0) {
                 if (strcmp(argv[0], "--debug") == 0) {
                     opts.debug = true; argv ++; argc --;
                 } else if (strcmp(argv[0], "--scale") == 0 && argc >= 2) {
                     opts.scale = (int)strtol(argv[1], NULL, 10); argv += 2; argc -= 2;
                 } else if (strcmp(argv[0], "--data-dir") == 0 && argc >= 2) {
                     opts.data_dir = argv[1]; argv += 2; argc -= 2;
-                } else {
+                } else if (argv[0][0] == '-' && argv[0][1] != '\0') {
                     fprintf(stderr, "render: unknown option '%s'\n", argv[0]);
+                    bad = true; break;
+                } else {
+                    if (npos < 2) pos[npos++] = argv[0];
+                    argv ++; argc --;
+                }
+            }
+            if (bad || npos < 2) {
+                fprintf(stderr, "Usage: render ROOMID|all|montage OUT.png|DIR [--debug] [--scale N] [--data-dir DIR]\n");
+                defer_return(1);
+            }
+            bool render_all = (strcasecmp(pos[0], "all") == 0);
+            bool render_mont = (strcasecmp(pos[0], "montage") == 0);
+            long rid = 0;
+            if (!render_all && !render_mont) {
+                char *rend;
+                rid = strtol(pos[0], &rend, 0);
+                if (*rend != '\0' || rid < 0 || rid >= 64) {
+                    fprintf(stderr, "render: invalid room id '%s'\n", pos[0]);
                     defer_return(1);
                 }
             }
+            const char *out = pos[1];
             if (render_all) {
                 if (!render_all_png(&file, out, opts)) defer_return(1);
             } else if (render_mont) {
