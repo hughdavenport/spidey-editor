@@ -30,7 +30,7 @@ SPRITE_ORDER = (3, 2, 1, 0)         # SPIDS plane -> EGA colour bit
 TILE_ORDER = (3, 2, 1, 0)           # BLOCKS/SCENERY plane -> bit (B/G swapped vs sprites)
 SPIDS_PLANE, SPIDS_STRIDE = 63, 256
 SPIDS_W, SPIDS_H = 24, 21
-PLAYER_ROOM, PLAYER_POS = 1, (3, 20)   # Spidey only appears in room 1
+PLAYER_ROOM, PLAYER_FEET = 1, (3, 20)  # Spidey only appears in room 1; feet tile
 PLAYER_START_FRAME = 9                  # his resting/start pose in SPIDS1
 
 # Each creature's animation frame range (file, first, last-inclusive). Frame
@@ -95,13 +95,15 @@ def decode_sprite(fname, frame):
 
 
 def _s8(b): return b - 256 if b >= 128 else b
-def backs_tilemap(rid, target=704):
-    """Decompress a BACKS.SPL room (same LZ/RLE as ROOMS.SPL; see spl.c)."""
+def backs_tilemap(bid, target=704):
+    """Decompress BACKS.SPL block `bid` (the room's `bkgrnd` metadata value,
+    NOT its room id). Many rooms share a background, selected by `bkgrnd`.
+    Same LZ/RLE format as ROOMS.SPL; see spl.c."""
     d = _f("BACKS.SPL")
     offs = [(d[i * 2] << 8) | d[i * 2 + 1] for i in range(64)]
     file_size = (d[0x80] << 8) | d[0x81]
-    start = offs[rid]
-    end = offs[rid + 1] if rid + 1 < 64 else file_size
+    start = offs[bid]
+    end = offs[bid + 1] if bid + 1 < 64 else file_size
     if end <= start:
         return [0] * target
     m, i, out = d[start:start + 4], start + 4, []
@@ -164,6 +166,7 @@ def creature_frame(creature, phase):
 
 
 TILE_OFFSET_RE = re.compile(r"tiles:\s*(\d+)")
+BKGRND_RE = re.compile(r"bkgrnd:\s*(\d+)")
 
 
 def room_display(rid):
@@ -178,10 +181,12 @@ def render_room(rid, phase=0, out=None):
     # tile_offset advances in steps of 4 per 64-tile set (0,4,8,..,28 = 8 sets
     # = BLOCKS' 512 tiles), so one unit = 16 tiles.
     tile_offset = int(m[1]) if m else 0
+    mb = BKGRND_RE.search(ANSI_RE.sub("", out))
+    bkgrnd = int(mb[1]) if mb else rid       # background block selector
     canvas = Image.new("RGBA", (W * TILE, H * TILE), (0, 0, 0, 255))
     scenery, blocks = _f("SCENERY.EGA"), _f("BLOCKS.EGA")
     # background: SCENERY, opaque (colour 0 = black night sky)
-    bg = backs_tilemap(rid)
+    bg = backs_tilemap(bkgrnd)
     for ty in range(H):
         for tx in range(W):
             v = bg[ty * W + tx] & 0xff
@@ -201,15 +206,16 @@ def render_room(rid, phase=0, out=None):
                 canvas.alpha_composite(decode_tile(blocks, v + tile_offset * 16, 0),
                                        (tx * TILE, ty * TILE))
     # sprites + player; `phase` cycles each creature through its frame range.
-    # A sprite's stored (x,y) is the tile one step up-left of its footprint:
-    # left edge at column x+1, feet resting on the bottom of row y+1.
-    def blit(spr, x, y):
-        canvas.alpha_composite(spr, ((x + 1) * TILE, max(0, (y + 2) * TILE - SPIDS_H)))
+    # blit at a *feet tile* (fx, fy): left edge at column fx, feet resting on
+    # the bottom of row fy. An enemy's stored (x,y) is one tile up-left of its
+    # feet tile, so its feet tile is (x+1, y+1). The player's feet tile is
+    # given directly (PLAYER_FEET).
+    def blit(spr, fx, fy):
+        canvas.alpha_composite(spr, (fx * TILE, max(0, (fy + 1) * TILE - SPIDS_H)))
     if rid == PLAYER_ROOM:
-        x, y = PLAYER_POS
-        blit(decode_sprite(*creature_frame("SPIDEY", PLAYER_START_FRAME + phase)), x, y)
+        blit(decode_sprite(*creature_frame("SPIDEY", PLAYER_START_FRAME + phase)), *PLAYER_FEET)
     for x, y, creature in sprites:
-        blit(decode_sprite(*creature_frame(creature, phase)), x, y)
+        blit(decode_sprite(*creature_frame(creature, phase)), x + 1, y + 1)
     return canvas.convert("RGB")
 
 
