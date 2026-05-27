@@ -316,80 +316,93 @@ static bool write_png(const char *path, const uint8_t *rgb, int w, int h) {
 
 /* --------------------------------------------------------------- render */
 
+typedef struct {
+    uint8_t *blocks, *scenery, *spids1, *spids2;
+    size_t blocks_len, scenery_len, s1_len, s2_len;
+} Assets;
+
+static bool load_assets(const char *dir, Assets *a) {
+    a->blocks  = read_asset(dir, "BLOCKS.EGA",  &a->blocks_len);
+    a->scenery = read_asset(dir, "SCENERY.EGA", &a->scenery_len);
+    a->spids1  = read_asset(dir, "SPIDS1.EGA",  &a->s1_len);
+    a->spids2  = read_asset(dir, "SPIDS2.EGA",  &a->s2_len);
+    return a->blocks && a->scenery && a->spids1 && a->spids2;
+}
+static void free_assets(Assets *a) {
+    free(a->blocks); free(a->scenery); free(a->spids1); free(a->spids2);
+}
+
+// Fill a BW*BH*3 RGB buffer with one room (background + foreground + sprites,
+// plus the overlay if requested). Assumes the room is valid.
+static void render_room_base(RoomFile *file, int room_id, const char *dir,
+                             const Assets *a, bool debug, uint8_t *cv) {
+    struct DecompressedRoom *room = &file->rooms[room_id].data;
+    memset(cv, 0, (size_t)BW * BH * 3);
+
+    uint8_t bg[704];
+    decode_backs_block(dir, room->background, bg);
+    for (int ty = 0; ty < HEIGHT_TILES; ty++)
+        for (int tx = 0; tx < WIDTH_TILES; tx++) {
+            int v = bg[ty * WIDTH_TILES + tx];
+            if (v && (size_t)(v * 32 + 31) < a->scenery_len)
+                draw_tile(cv, a->scenery, v, tx * 8, ty * 8, -1);
+        }
+    for (int ty = 0; ty < HEIGHT_TILES; ty++)
+        for (int tx = 0; tx < WIDTH_TILES; tx++) {
+            int v = room->tiles[ty * WIDTH_TILES + tx] & 0x3f;
+            if (v) {
+                int idx = v + room->tile_offset * 16;
+                if ((size_t)(idx * 32 + 31) < a->blocks_len)
+                    draw_tile(cv, a->blocks, idx, tx * 8, ty * 8, -1);
+            }
+        }
+    for (int i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        if (o->type != SPRITE) continue;
+        int s2, frame;
+        creature_frame(o->sprite.type, o->sprite.damage, &s2, &frame);
+        int dx = (o->x + 1 - SPRITE_X_PAD) * 8;
+        int dy = (o->y + 1 + 1) * 8 - SPIDS_H;
+        if (s2) draw_spids(cv, a->spids2, a->s2_len, frame, dx, dy);
+        else    draw_spids(cv, a->spids1, a->s1_len, frame, dx, dy);
+    }
+    if (room_id == PLAYER_ROOM)
+        draw_spids(cv, a->spids1, a->s1_len, PLAYER_FRAME,
+                   (3 - SPRITE_X_PAD) * 8, (20 + 1) * 8 - SPIDS_H);
+    if (debug) draw_overlay(cv, room);
+}
+
+// Nearest-neighbour upscale `cv` (BW*BH) into a fresh buffer and write a PNG.
+static bool write_scaled(const char *out_path, const uint8_t *cv, int scale) {
+    int w = BW * scale, h = BH * scale;
+    uint8_t *big = malloc((size_t)w * h * 3);
+    if (big == NULL) return false;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const uint8_t *src = cv + ((y / scale) * BW + (x / scale)) * 3;
+            uint8_t *dst = big + ((size_t)y * w + x) * 3;
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+        }
+    bool ok = write_png(out_path, big, w, h);
+    free(big);
+    return ok;
+}
+
 bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOpts opts) {
     if (room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid) {
         fprintf(stderr, "render: room %d is not present\n", room_id);
         return false;
     }
     const char *dir = opts.data_dir ? opts.data_dir : ".";
-    int scale = opts.scale > 0 ? opts.scale : 1;
-    struct DecompressedRoom *room = &file->rooms[room_id].data;
-
-    size_t blocks_len, scenery_len, s1_len, s2_len;
-    uint8_t *blocks = read_asset(dir, "BLOCKS.EGA", &blocks_len);
-    uint8_t *scenery = read_asset(dir, "SCENERY.EGA", &scenery_len);
-    uint8_t *spids1 = read_asset(dir, "SPIDS1.EGA", &s1_len);
-    uint8_t *spids2 = read_asset(dir, "SPIDS2.EGA", &s2_len);
-    bool ok = blocks && scenery && spids1 && spids2;
-
-    uint8_t *cv = ok ? calloc((size_t)BW * BH * 3, 1) : NULL;
-    if (cv != NULL) {
-        uint8_t bg[704];
-        decode_backs_block(dir, room->background, bg);
-
-        for (int ty = 0; ty < HEIGHT_TILES; ty++)
-            for (int tx = 0; tx < WIDTH_TILES; tx++) {
-                int v = bg[ty * WIDTH_TILES + tx];
-                if (v && (size_t)(v * 32 + 31) < scenery_len)
-                    draw_tile(cv, scenery, v, tx * 8, ty * 8, -1);
-            }
-        for (int ty = 0; ty < HEIGHT_TILES; ty++)
-            for (int tx = 0; tx < WIDTH_TILES; tx++) {
-                int v = room->tiles[ty * WIDTH_TILES + tx] & 0x3f;
-                if (v) {
-                    int idx = v + room->tile_offset * 16;
-                    if ((size_t)(idx * 32 + 31) < blocks_len)
-                        draw_tile(cv, blocks, idx, tx * 8, ty * 8, -1);
-                }
-            }
-
-        // sprites: feet tile (x+1, y+1); box left shifted by SPRITE_X_PAD.
-        for (int i = 0; i < room->num_objects; i++) {
-            struct RoomObject *o = room->objects + i;
-            if (o->type != SPRITE) continue;
-            int s2, frame;
-            creature_frame(o->sprite.type, o->sprite.damage, &s2, &frame);
-            int feet_x = o->x + 1, feet_y = o->y + 1;
-            int dx = (feet_x - SPRITE_X_PAD) * 8;
-            int dy = (feet_y + 1) * 8 - SPIDS_H;
-            if (s2) draw_spids(cv, spids2, s2_len, frame, dx, dy);
-            else    draw_spids(cv, spids1, s1_len, frame, dx, dy);
-        }
-        if (room_id == PLAYER_ROOM)
-            draw_spids(cv, spids1, s1_len, PLAYER_FRAME, (3 - SPRITE_X_PAD) * 8, (20 + 1) * 8 - SPIDS_H);
-
-        if (opts.debug) draw_overlay(cv, room);
+    Assets a = {0};
+    if (!load_assets(dir, &a)) { free_assets(&a); return false; }
+    uint8_t *cv = malloc((size_t)BW * BH * 3);
+    bool ok = cv != NULL;
+    if (ok) {
+        render_room_base(file, room_id, dir, &a, opts.debug, cv);
+        ok = write_scaled(out_path, cv, opts.scale > 0 ? opts.scale : 1);
     }
-
-    // nearest-neighbour upscale + write
-    if (cv != NULL) {
-        int w = BW * scale, h = BH * scale;
-        uint8_t *big = malloc((size_t)w * h * 3);
-        if (big != NULL) {
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++) {
-                    const uint8_t *src = cv + ((y / scale) * BW + (x / scale)) * 3;
-                    uint8_t *dst = big + ((size_t)y * w + x) * 3;
-                    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
-                }
-            ok = write_png(out_path, big, w, h);
-            free(big);
-        } else {
-            ok = false;
-        }
-    }
-
-    free(cv); free(blocks); free(scenery); free(spids1); free(spids2);
+    free(cv); free_assets(&a);
     return ok;
 }
 
@@ -398,14 +411,50 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
         fprintf(stderr, "render: cannot create '%s': %s\n", out_dir, strerror(errno));
         return false;
     }
+    const char *dir = opts.data_dir ? opts.data_dir : ".";
+    Assets a = {0};
+    if (!load_assets(dir, &a)) { free_assets(&a); return false; }
+    uint8_t *cv = malloc((size_t)BW * BH * 3);
+    bool ok = cv != NULL;
     int n = 0;
-    for (int rid = 0; rid < 64; rid++) {
+    for (int rid = 0; ok && rid < 64; rid++) {
         if (!file->rooms[rid].valid) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/room%02d.png", out_dir, rid);
-        if (!render_room_png(file, rid, path, opts)) return false;
+        render_room_base(file, rid, dir, &a, opts.debug, cv);
+        ok = write_scaled(path, cv, opts.scale > 0 ? opts.scale : 1);
         n++;
     }
+    free(cv); free_assets(&a);
+    if (!ok) return false;
     fprintf(stderr, "Wrote %d rooms to %s\n", n, out_dir);
     return true;
+}
+
+bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
+    const char *dir = opts.data_dir ? opts.data_dir : ".";
+    Assets a = {0};
+    if (!load_assets(dir, &a)) { free_assets(&a); return false; }
+    const int cw = BW / 2, ch = BH / 2, pad = 4;       // half-size cells, 8x8 grid
+    const int mw = 8 * (cw + pad) + pad, mh = 8 * (ch + pad) + pad;
+    uint8_t *cv = malloc((size_t)BW * BH * 3);
+    uint8_t *m = malloc((size_t)mw * mh * 3);
+    bool ok = cv != NULL && m != NULL;
+    if (ok) {
+        for (int i = 0; i < mw * mh; i++) { m[i*3] = 40; m[i*3+1] = 40; m[i*3+2] = 48; }
+        for (int rid = 0; rid < 64; rid++) {
+            if (!file->rooms[rid].valid) continue;
+            render_room_base(file, rid, dir, &a, opts.debug, cv);
+            int ox = pad + (rid % 8) * (cw + pad), oy = pad + (rid / 8) * (ch + pad);
+            for (int y = 0; y < ch; y++)
+                for (int x = 0; x < cw; x++) {
+                    const uint8_t *src = cv + ((y * 2) * BW + (x * 2)) * 3;
+                    uint8_t *dst = m + ((size_t)(oy + y) * mw + (ox + x)) * 3;
+                    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+                }
+        }
+        ok = write_png(out_path, m, mw, mh);
+    }
+    free(cv); free(m); free_assets(&a);
+    return ok;
 }

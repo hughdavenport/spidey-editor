@@ -1227,12 +1227,13 @@ int main(int argc, char **argv) {
         } else if (strcasecmp(argv[0], "render") == 0) {
             argv ++; argc --;
             if (argc < 2) {
-                fprintf(stderr, "Usage: render ROOMID|all OUT.png|DIR [--debug] [--scale N] [--data-dir DIR]\n");
+                fprintf(stderr, "Usage: render ROOMID|all|montage OUT.png|DIR [--debug] [--scale N] [--data-dir DIR]\n");
                 defer_return(1);
             }
             bool render_all = (strcasecmp(argv[0], "all") == 0);
+            bool render_mont = (strcasecmp(argv[0], "montage") == 0);
             long rid = 0;
-            if (!render_all) {
+            if (!render_all && !render_mont) {
                 char *rend;
                 rid = strtol(argv[0], &rend, 0);
                 if (*rend != '\0' || rid < 0 || rid >= 64) {
@@ -1257,6 +1258,9 @@ int main(int argc, char **argv) {
             }
             if (render_all) {
                 if (!render_all_png(&file, out, opts)) defer_return(1);
+            } else if (render_mont) {
+                if (!render_montage_png(&file, out, opts)) defer_return(1);
+                fprintf(stderr, "Wrote %s\n", out);
             } else {
                 if (!render_room_png(&file, (int)rid, out, opts)) defer_return(1);
                 fprintf(stderr, "Wrote %s\n", out);

@@ -19,4 +19,7 @@ bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOp
 // directory can't be created or any room fails.
 bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts);
 
+// Render all rooms tiled into a single overview image at out_path.
+bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts);
+
 #endif /* RENDER_H */
