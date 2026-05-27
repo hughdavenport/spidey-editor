@@ -82,6 +82,16 @@ bool readHeader(Header *head, FILE *fp) {
     return true;
 }
 
+// Describe a TOGGLE_OBJECT value's movement direction, matching the editor's
+// decode (MOVE_* masks overlap, so switch on each axis). See editor_draw.c.
+static const char *move_desc(uint8_t value) {
+    switch (value & MOVE_LEFT) {
+        case MOVE_LEFT:  switch (value & MOVE_UP) { case MOVE_UP: return "up+left"; case MOVE_DOWN: return "down+left"; default: return "left"; }
+        case MOVE_RIGHT: switch (value & MOVE_UP) { case MOVE_UP: return "up+right"; case MOVE_DOWN: return "down+right"; default: return "right"; }
+        default:         switch (value & MOVE_UP) { case MOVE_UP: return "up"; case MOVE_DOWN: return "down"; default: return "stop"; }
+    }
+}
+
 void dumpRoom(Room *room, RoomFile *file, bool color) {
     printf("Room %u: \"%s\"\n", room->index, room->data.name);
 
@@ -303,7 +313,10 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     }
 
                     case TOGGLE_OBJECT:
-                        printf("object: idx=%d value=0x%02x test=%d", chunk->index, chunk->value, chunk->test >> 4);
+                        printf("object: idx=%d value=0x%02x test=%d (move=%s, value_without_direction=0x%02x)",
+                                chunk->index, chunk->value, chunk->test >> 4,
+                                move_desc(chunk->value),
+                                chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
                         break;
 
                     default:
