@@ -984,6 +984,24 @@ bool main_importRoom(int *argc, char ***argv, char *program, RoomFile *file, boo
 }
 
 int editor_main();
+
+static void print_subcommands(FILE *out) {
+    fprintf(out, "Subcommands:\n");
+    fprintf(out, "    rooms                                - List rooms\n");
+    fprintf(out, "    display [ROOMID]                     - Defaults to all rooms\n");
+    fprintf(out, "    import [FILE|-]                      - Import display output; rooms not in file are blanked\n");
+    fprintf(out, "    importRoom ROOMID [FILE|-]           - Import one room at ROOMID, others unchanged\n");
+    fprintf(out, "    recompress                           - No changes to underlying data, just recompress\n");
+    fprintf(out, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
+    fprintf(out, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
+    fprintf(out, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
+    fprintf(out, "    find_sprite SPRITENAME               - Find a sprite\n");
+    fprintf(out, "    render ROOMID|all|montage OUT|DIR    - Render room(s) to PNG (--debug --scale N --data-dir DIR)\n");
+    fprintf(out, "    gui [--data-dir DIR]                 - Hot-reloadable raylib GUI editor\n");
+    fprintf(out, "    editor                               - Start the text-mode editor\n");
+    fprintf(out, "    help                                 - Display this message\n");
+}
+
 int main(int argc, char **argv) {
     char *fileName = ROOMS_FILE;
     RoomFile file = {0};
@@ -1290,21 +1308,8 @@ int main(int argc, char **argv) {
             argv ++;
             argc --;
         } else if (strcasecmp(argv[0], "help") == 0) {
-            fprintf(stderr, "Subcommands:\n");
-            fprintf(stderr, "    rooms                                - List rooms\n");
-            fprintf(stderr, "    display [ROOMID]                     - Defaults to all rooms\n");
-            fprintf(stderr, "    import [FILE|-]                      - Import display output; rooms not in file are blanked\n");
-            fprintf(stderr, "    importRoom ROOMID [FILE|-]           - Import one room at ROOMID, others unchanged\n");
-            fprintf(stderr, "    recompress                           - No changes to underlying data, just recompress\n");
-            fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
-            fprintf(stderr, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
-            fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
-            fprintf(stderr, "    find_sprite SPRITENAME               - Find a sprite\n");
-            fprintf(stderr, "    render ROOMID OUT.png [opts]         - Render a room to PNG (--debug --scale N --data-dir DIR)\n");
-            fprintf(stderr, "    gui [--data-dir DIR]                 - Hot-reloadable raylib GUI viewer\n");
-            fprintf(stderr, "    editor                               - Start an editor\n");
-            fprintf(stderr, "    help                                 - Display this message\n");
-            defer_return(1);
+            print_subcommands(stderr);
+            defer_return(0);
         } else {
             fileName = argv[0];
             // Should we allow args after this?
@@ -1314,16 +1319,7 @@ int main(int argc, char **argv) {
     }
     if (find_sprite == -1 && find_tile == -1 && !list && !display && !recompress && !import_done && patches.length == 0) {
         fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
-        fprintf(stderr, "Subcommands:\n");
-        fprintf(stderr, "    rooms                                - List rooms\n");
-        fprintf(stderr, "    display [ROOMID]                     - Defaults to all rooms\n");
-        fprintf(stderr, "    recompress                           - No changes to underlying data, just recompress\n");
-        fprintf(stderr, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
-        fprintf(stderr, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
-        fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
-        fprintf(stderr, "    find_sprite SPRITENAME               - Find a sprite\n");
-        fprintf(stderr, "    editor                               - Start an editor\n");
-        fprintf(stderr, "    help                                 - Display this message\n");
+        print_subcommands(stderr);
         defer_return(1);
     }
     if (find_tile != -1) {
