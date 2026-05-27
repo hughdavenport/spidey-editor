@@ -1,0 +1,365 @@
+#include "render.h"
+
+#include <errno.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "array.h"
+#include "spl.h"
+
+// Game palette (16 RGB triplets) read from the unpacked SPIDEY.EXE DAC table
+// at DS:0x97AE; see Spider-claude/game_palette.py.
+static const uint8_t PAL[16][3] = {
+    {0, 0, 0}, {0, 97, 194}, {227, 65, 0}, {227, 227, 227},
+    {97, 97, 97}, {0, 65, 162}, {162, 32, 0}, {162, 162, 162},
+    {97, 227, 227}, {32, 194, 65}, {194, 65, 227}, {227, 130, 0},
+    {0, 162, 227}, {0, 97, 32}, {97, 32, 130}, {227, 194, 0},
+};
+
+#define BW (WIDTH_TILES * 8)    // 256
+#define BH (HEIGHT_TILES * 8)   // 176
+#define SPIDS_W 24
+#define SPIDS_H 21
+#define SPIDS_PLANE 63
+#define SPIDS_STRIDE 256
+#define SPRITE_KEY 15           // SPIDS transparency colour
+#define SPRITE_X_PAD 2          // figure sits ~2 tiles in from the box's left
+#define PLAYER_ROOM 1
+#define PLAYER_FRAME 9
+
+// EGA plane -> colour-bit order, universal for tiles and sprites.
+static const int PLANE_ORDER[4] = {3, 2, 1, 0};
+
+/* ------------------------------------------------------------------ assets */
+
+static uint8_t *read_asset(const char *dir, const char *name, size_t *len_out) {
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) {
+        fprintf(stderr, "render: required asset '%s' not found in '%s' (%s); "
+                "use --data-dir <dir>\n", name, dir, strerror(errno));
+        return NULL;
+    }
+    fseek(fp, 0, SEEK_END);
+    long sz = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (sz <= 0) { fclose(fp); fprintf(stderr, "render: asset '%s' is empty\n", name); return NULL; }
+    uint8_t *buf = malloc((size_t)sz);
+    if (buf == NULL) { fclose(fp); return NULL; }
+    if (fread(buf, 1, (size_t)sz, fp) != (size_t)sz) {
+        fclose(fp); free(buf);
+        fprintf(stderr, "render: short read on '%s'\n", name);
+        return NULL;
+    }
+    fclose(fp);
+    if (len_out) *len_out = (size_t)sz;
+    return buf;
+}
+
+// Decompress BACKS.SPL block `bid` into a 704-byte tilemap (mirrors room.c's
+// ROOMS read: seek, read 4 markers, spl_decompress the remainder).
+static void decode_backs_block(const char *dir, int bid, uint8_t out[704]) {
+    memset(out, 0, 704);
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", dir, "BACKS.SPL");
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) return;
+    uint8_t hdr[0x82];
+    if (fread(hdr, 1, sizeof hdr, fp) != sizeof hdr) { fclose(fp); return; }
+    int start = (hdr[bid * 2] << 8) | hdr[bid * 2 + 1];
+    int end = (bid + 1 < 64) ? ((hdr[(bid + 1) * 2] << 8) | hdr[(bid + 1) * 2 + 1])
+                             : ((hdr[0x80] << 8) | hdr[0x81]);
+    if (end <= start) { fclose(fp); return; }
+    if (fseek(fp, start, SEEK_SET) != 0) { fclose(fp); return; }
+    uint8_t markers[4];
+    if (fread(markers, 1, 4, fp) != 4) { fclose(fp); return; }
+    uint8_array dec = {0};
+    if (spl_decompress(fp, (size_t)(end - start - 4), markers, &dec, NULL)) {
+        size_t n = dec.length < 704 ? dec.length : 704;
+        memcpy(out, dec.data, n);
+    }
+    ARRAY_FREE(dec);
+    fclose(fp);
+}
+
+/* ------------------------------------------------------------------- draw */
+
+static inline void put_px(uint8_t *cv, int x, int y, const uint8_t rgb[3]) {
+    if (x < 0 || x >= BW || y < 0 || y >= BH) return;
+    uint8_t *p = cv + (y * BW + x) * 3;
+    p[0] = rgb[0]; p[1] = rgb[1]; p[2] = rgb[2];
+}
+
+// 8x8 sequential-planar tile. key < 0 => fully opaque.
+static void draw_tile(uint8_t *cv, const uint8_t *ega, int idx, int dx, int dy, int key) {
+    const uint8_t *base = ega + idx * 32;
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            int c = 0;
+            for (int p = 0; p < 4; p++)
+                c |= ((base[p * 8 + y] >> (7 - x)) & 1) << PLANE_ORDER[p];
+            if (c != key) put_px(cv, dx + x, dy + y, PAL[c]);
+        }
+    }
+}
+
+// 24x21 SPIDS frame, plane-planar, colour 15 transparent.
+static void draw_spids(uint8_t *cv, const uint8_t *ega, size_t ega_len, int frame, int dx, int dy) {
+    int base = frame * SPIDS_STRIDE;
+    for (int y = 0; y < SPIDS_H; y++) {
+        for (int x = 0; x < SPIDS_W; x++) {
+            int c = 0;
+            for (int s = 0; s < 4; s++) {
+                int o = base + s * SPIDS_PLANE + y * 3 + x / 8;
+                if (o >= 0 && (size_t)o < ega_len)
+                    c |= ((ega[o] >> (7 - (x % 8))) & 1) << PLANE_ORDER[s];
+            }
+            if (c != SPRITE_KEY) put_px(cv, dx + x, dy + y, PAL[c]);
+        }
+    }
+}
+
+/* --------------------------------------------------------------- creatures */
+
+// Resolve a sprite (editor type + damage) to a SPIDS sheet + first frame.
+// SHARK is overloaded by damage: 3 = Mysterio, 4 = Mary Jane, else shark.
+static void creature_frame(SpriteType type, uint8_t dmg, int *use_spids2, int *frame) {
+    switch (type) {
+        case MUMMY:        *use_spids2 = 0; *frame = 32; return;
+        case BLUE_MAN:     *use_spids2 = 0; *frame = 38; return;
+        case WOLF:         *use_spids2 = 0; *frame = 46; return;
+        case R2D2:         *use_spids2 = 0; *frame = 50; return;
+        case DINOSAUR:     *use_spids2 = 0; *frame = 53; return;
+        case RAT:          *use_spids2 = 0; *frame = 58; return;
+        case SHOTGUN_LADY: *use_spids2 = 1; *frame = 0;  return;
+        case SHARK:
+            if (dmg == 3) { *use_spids2 = 1; *frame = 6;  return; }  // Mysterio
+            if (dmg == 4) { *use_spids2 = 0; *frame = 62; return; }  // Mary Jane
+            *use_spids2 = 0; *frame = 43; return;                    // Shark
+        default:           *use_spids2 = 0; *frame = 0;  return;
+    }
+}
+
+/* --------------------------------------------------------------- overlay */
+
+static void draw_box(uint8_t *cv, int x0, int y0, int x1, int y1, const uint8_t rgb[3]) {
+    for (int x = x0; x <= x1; x++) { put_px(cv, x, y0, rgb); put_px(cv, x, y1, rgb); }
+    for (int y = y0; y <= y1; y++) { put_px(cv, x0, y, rgb); put_px(cv, x1, y, rgb); }
+}
+
+static void draw_line(uint8_t *cv, int x0, int y0, int x1, int y1, const uint8_t rgb[3]) {
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    for (;;) {
+        put_px(cv, x0, y0, rgb);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+static const uint8_t COL_BLOCK[3]  = {0, 255, 255};    // cyan
+static const uint8_t COL_SPRITE[3] = {255, 255, 0};    // yellow
+static const uint8_t COL_SW[3]     = {255, 0, 255};    // magenta: switch origin
+static const uint8_t COL_TBLOCK[3] = {255, 96, 0};     // orange: toggles a block
+static const uint8_t COL_TBIT[3]   = {0, 255, 96};     // green:  toggles a bit
+static const uint8_t COL_TOBJ[3]   = {96, 160, 255};   // blue:   toggles an object
+static const uint8_t COL_GRID[3]   = {40, 40, 40};
+
+static void draw_overlay(uint8_t *cv, struct DecompressedRoom *room) {
+    // faint tile grid
+    for (int gx = 0; gx <= WIDTH_TILES; gx++)
+        for (int y = 0; y < BH; y++) put_px(cv, gx * 8, y, COL_GRID);
+    for (int gy = 0; gy <= HEIGHT_TILES; gy++)
+        for (int x = 0; x < BW; x++) put_px(cv, x, gy * 8, COL_GRID);
+
+    // objects / sprites
+    for (int i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        if (o->type == BLOCK)
+            draw_box(cv, o->x * 8, o->y * 8,
+                     (o->x + o->block.width) * 8 - 1, (o->y + o->block.height) * 8 - 1, COL_BLOCK);
+        else
+            draw_box(cv, o->x * 8, o->y * 8, o->x * 8 + 7, o->y * 8 + 7, COL_SPRITE);
+    }
+
+    // switches: marker at origin, line to each toggle target, coloured by type
+    for (int i = 0; i < room->num_switches; i++) {
+        struct SwitchObject *sw = room->switches + i;
+        if (sw->chunks.length == 0) continue;
+        int ox = sw->chunks.data[0].x * 8 + 4, oy = sw->chunks.data[0].y * 8 + 4;
+        draw_box(cv, ox - 3, oy - 3, ox + 3, oy + 3, COL_SW);
+        for (size_t c = 0; c < sw->chunks.length; c++) {
+            struct SwitchChunk *ch = sw->chunks.data + c;
+            const uint8_t *col;
+            if (ch->type == TOGGLE_BLOCK) col = COL_TBLOCK;
+            else if (ch->type == TOGGLE_BIT) col = COL_TBIT;
+            else if (ch->type == TOGGLE_OBJECT) col = COL_TOBJ;
+            else continue;
+            int tx = ch->x * 8 + 4, ty = ch->y * 8 + 4;
+            draw_line(cv, ox, oy, tx, ty, col);
+            draw_box(cv, tx - 2, ty - 2, tx + 2, ty + 2, col);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------- PNG */
+
+static uint32_t crc_table[256];
+static void crc_init(void) {
+    for (uint32_t n = 0; n < 256; n++) {
+        uint32_t c = n;
+        for (int k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320u ^ (c >> 1) : c >> 1;
+        crc_table[n] = c;
+    }
+}
+static uint32_t crc_upd(uint32_t c, const uint8_t *buf, size_t n) {
+    for (size_t i = 0; i < n; i++) c = crc_table[(c ^ buf[i]) & 0xff] ^ (c >> 8);
+    return c;
+}
+
+static void put_be32(FILE *f, uint32_t v) {
+    fputc(v >> 24, f); fputc(v >> 16, f); fputc(v >> 8, f); fputc(v, f);
+}
+static void put_chunk(FILE *f, const char *type, const uint8_t *data, size_t len) {
+    put_be32(f, (uint32_t)len);
+    uint32_t c = 0xffffffffu;
+    c = crc_upd(c, (const uint8_t *)type, 4);
+    if (len) c = crc_upd(c, data, len);
+    fwrite(type, 1, 4, f);
+    if (len) fwrite(data, 1, len, f);
+    put_be32(f, c ^ 0xffffffffu);
+}
+
+static bool write_png(const char *path, const uint8_t *rgb, int w, int h) {
+    crc_init();
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) { fprintf(stderr, "render: cannot write '%s': %s\n", path, strerror(errno)); return false; }
+    static const uint8_t sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+    fwrite(sig, 1, 8, f);
+
+    uint8_t ihdr[13];
+    ihdr[0] = w >> 24; ihdr[1] = w >> 16; ihdr[2] = w >> 8; ihdr[3] = w;
+    ihdr[4] = h >> 24; ihdr[5] = h >> 16; ihdr[6] = h >> 8; ihdr[7] = h;
+    ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+    put_chunk(f, "IHDR", ihdr, sizeof ihdr);
+
+    // raw filtered scanlines: 0x00 filter byte + RGB row
+    size_t row = (size_t)w * 3;
+    size_t raw_len = (size_t)h * (row + 1);
+    uint8_t *raw = malloc(raw_len);
+    if (raw == NULL) { fclose(f); return false; }
+    for (int y = 0; y < h; y++) {
+        raw[y * (row + 1)] = 0;
+        memcpy(raw + y * (row + 1) + 1, rgb + (size_t)y * row, row);
+    }
+    // zlib stream of stored DEFLATE blocks
+    size_t zcap = raw_len + (raw_len / 65535 + 1) * 5 + 16;
+    uint8_t *z = malloc(zcap);
+    if (z == NULL) { free(raw); fclose(f); return false; }
+    size_t zp = 0;
+    z[zp++] = 0x78; z[zp++] = 0x01;
+    size_t pos = 0;
+    while (pos < raw_len) {
+        size_t blk = raw_len - pos;
+        if (blk > 65535) blk = 65535;
+        z[zp++] = (pos + blk == raw_len) ? 1 : 0;
+        z[zp++] = blk & 0xff; z[zp++] = (blk >> 8) & 0xff;
+        z[zp++] = ~blk & 0xff; z[zp++] = (~blk >> 8) & 0xff;
+        memcpy(z + zp, raw + pos, blk); zp += blk; pos += blk;
+    }
+    // adler32 of raw
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < raw_len; i++) { a = (a + raw[i]) % 65521; b = (b + a) % 65521; }
+    uint32_t adler = (b << 16) | a;
+    z[zp++] = adler >> 24; z[zp++] = adler >> 16; z[zp++] = adler >> 8; z[zp++] = adler;
+
+    put_chunk(f, "IDAT", z, zp);
+    put_chunk(f, "IEND", NULL, 0);
+    free(z); free(raw); fclose(f);
+    return true;
+}
+
+/* --------------------------------------------------------------- render */
+
+bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOpts opts) {
+    if (room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid) {
+        fprintf(stderr, "render: room %d is not present\n", room_id);
+        return false;
+    }
+    const char *dir = opts.data_dir ? opts.data_dir : ".";
+    int scale = opts.scale > 0 ? opts.scale : 1;
+    struct DecompressedRoom *room = &file->rooms[room_id].data;
+
+    size_t blocks_len, scenery_len, s1_len, s2_len;
+    uint8_t *blocks = read_asset(dir, "BLOCKS.EGA", &blocks_len);
+    uint8_t *scenery = read_asset(dir, "SCENERY.EGA", &scenery_len);
+    uint8_t *spids1 = read_asset(dir, "SPIDS1.EGA", &s1_len);
+    uint8_t *spids2 = read_asset(dir, "SPIDS2.EGA", &s2_len);
+    bool ok = blocks && scenery && spids1 && spids2;
+
+    uint8_t *cv = ok ? calloc((size_t)BW * BH * 3, 1) : NULL;
+    if (cv != NULL) {
+        uint8_t bg[704];
+        decode_backs_block(dir, room->background, bg);
+
+        for (int ty = 0; ty < HEIGHT_TILES; ty++)
+            for (int tx = 0; tx < WIDTH_TILES; tx++) {
+                int v = bg[ty * WIDTH_TILES + tx];
+                if (v && (size_t)(v * 32 + 31) < scenery_len)
+                    draw_tile(cv, scenery, v, tx * 8, ty * 8, -1);
+            }
+        for (int ty = 0; ty < HEIGHT_TILES; ty++)
+            for (int tx = 0; tx < WIDTH_TILES; tx++) {
+                int v = room->tiles[ty * WIDTH_TILES + tx] & 0x3f;
+                if (v) {
+                    int idx = v + room->tile_offset * 16;
+                    if ((size_t)(idx * 32 + 31) < blocks_len)
+                        draw_tile(cv, blocks, idx, tx * 8, ty * 8, -1);
+                }
+            }
+
+        // sprites: feet tile (x+1, y+1); box left shifted by SPRITE_X_PAD.
+        for (int i = 0; i < room->num_objects; i++) {
+            struct RoomObject *o = room->objects + i;
+            if (o->type != SPRITE) continue;
+            int s2, frame;
+            creature_frame(o->sprite.type, o->sprite.damage, &s2, &frame);
+            int feet_x = o->x + 1, feet_y = o->y + 1;
+            int dx = (feet_x - SPRITE_X_PAD) * 8;
+            int dy = (feet_y + 1) * 8 - SPIDS_H;
+            if (s2) draw_spids(cv, spids2, s2_len, frame, dx, dy);
+            else    draw_spids(cv, spids1, s1_len, frame, dx, dy);
+        }
+        if (room_id == PLAYER_ROOM)
+            draw_spids(cv, spids1, s1_len, PLAYER_FRAME, (3 - SPRITE_X_PAD) * 8, (20 + 1) * 8 - SPIDS_H);
+
+        if (opts.debug) draw_overlay(cv, room);
+    }
+
+    // nearest-neighbour upscale + write
+    if (cv != NULL) {
+        int w = BW * scale, h = BH * scale;
+        uint8_t *big = malloc((size_t)w * h * 3);
+        if (big != NULL) {
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    const uint8_t *src = cv + ((y / scale) * BW + (x / scale)) * 3;
+                    uint8_t *dst = big + ((size_t)y * w + x) * 3;
+                    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+                }
+            ok = write_png(out_path, big, w, h);
+            free(big);
+        } else {
+            ok = false;
+        }
+    }
+
+    free(cv); free(blocks); free(scenery); free(spids1); free(spids2);
+    return ok;
+}

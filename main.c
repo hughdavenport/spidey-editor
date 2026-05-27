@@ -1,5 +1,6 @@
 #include "array.h"
 #include "room.h"
+#include "render.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -1223,6 +1224,36 @@ int main(int argc, char **argv) {
             freeRoomFile(&file);
             if (fp) { fclose(fp); fp = NULL; }
             return editor_main();
+        } else if (strcasecmp(argv[0], "render") == 0) {
+            argv ++; argc --;
+            if (argc < 2) {
+                fprintf(stderr, "Usage: render ROOMID OUT.png [--debug] [--scale N] [--data-dir DIR]\n");
+                defer_return(1);
+            }
+            char *rend;
+            long rid = strtol(argv[0], &rend, 0);
+            if (*rend != '\0' || rid < 0 || rid >= 64) {
+                fprintf(stderr, "render: invalid room id '%s'\n", argv[0]);
+                defer_return(1);
+            }
+            const char *out = argv[1];
+            argv += 2; argc -= 2;
+            RenderOpts opts = { .data_dir = ".", .scale = 3, .debug = false };
+            while (argc > 0 && argv[0][0] == '-') {
+                if (strcmp(argv[0], "--debug") == 0) {
+                    opts.debug = true; argv ++; argc --;
+                } else if (strcmp(argv[0], "--scale") == 0 && argc >= 2) {
+                    opts.scale = (int)strtol(argv[1], NULL, 10); argv += 2; argc -= 2;
+                } else if (strcmp(argv[0], "--data-dir") == 0 && argc >= 2) {
+                    opts.data_dir = argv[1]; argv += 2; argc -= 2;
+                } else {
+                    fprintf(stderr, "render: unknown option '%s'\n", argv[0]);
+                    defer_return(1);
+                }
+            }
+            if (!render_room_png(&file, (int)rid, out, opts)) defer_return(1);
+            fprintf(stderr, "Wrote %s\n", out);
+            defer_return(0);
         } else if (strcasecmp(argv[0], "rooms") == 0) {
             list = true;
             argv ++;
@@ -1238,6 +1269,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
             fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
             fprintf(stderr, "    find_sprite SPRITENAME               - Find a sprite\n");
+            fprintf(stderr, "    render ROOMID OUT.png [opts]         - Render a room to PNG (--debug --scale N --data-dir DIR)\n");
             fprintf(stderr, "    editor                               - Start an editor\n");
             fprintf(stderr, "    help                                 - Display this message\n");
             defer_return(1);

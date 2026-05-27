@@ -6,3 +6,12 @@ editor.so
 Spider/
 *.bz2
 *.gz
+# Copyrighted game assets (Paragon Software 1990) — never commit
+*.EGA
+*.ega
+*.CGA
+*.cga
+*.DAT
+*.dat
+*.EXE
+*.exe
