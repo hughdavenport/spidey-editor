@@ -6,9 +6,10 @@ Usage:
     python3 render_room.py <roomid> <out.png>
     python3 render_room.py all <out_dir>      # all 64 rooms + montage
 
-All EGA graphics use plane order (3,2,0,1) and the EXE-derived palette
-(game_palette.py). Sprite transparency key = colour 15; foreground-block
-transparency key = colour 0 (shows the background through).
+Plane order differs by asset: tiles (BLOCKS/SCENERY) use (3,2,1,0), sprites
+(SPIDS) use (3,2,0,1) — they store the B/G planes in opposite order. Palette is
+the EXE-derived one (game_palette.py). Sprite transparency key = colour 15;
+foreground-block transparency key = colour 0 (shows the background through).
 """
 import re
 import subprocess
@@ -26,7 +27,8 @@ AOUT = str(ROOT / "a.out")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 SPRITE_RE = re.compile(r"sprite \d+: \(x,y\)=(\d+),(\d+) (\w+)")
 W, H, TILE = 32, 22, 8
-PLANE_ORDER = (3, 2, 0, 1)          # file plane -> EGA colour bit (tiles & sprites)
+SPRITE_ORDER = (3, 2, 0, 1)         # SPIDS plane -> EGA colour bit
+TILE_ORDER = (3, 2, 1, 0)           # BLOCKS/SCENERY plane -> bit (B/G swapped vs sprites)
 SPIDS_PLANE, SPIDS_STRIDE = 63, 256
 SPIDS_W, SPIDS_H = 24, 21
 PLAYER_ROOM, PLAYER_POS, PLAYER_FRAME = 1, (3, 20), 0   # Spidey only in room 1
@@ -50,7 +52,7 @@ def decode_tile(data, idx, key):
         for x in range(8):
             c = 0
             for p in range(4):
-                c |= ((data[base + p * 8 + y] >> (7 - x)) & 1) << PLANE_ORDER[p]
+                c |= ((data[base + p * 8 + y] >> (7 - x)) & 1) << TILE_ORDER[p]
             if c != key:
                 px[x, y] = (*PAL[c], 255)
     return img
@@ -67,7 +69,7 @@ def decode_sprite(fname, frame):
             for slot in range(4):
                 o = base + slot * SPIDS_PLANE + y * 3 + x // 8
                 if o < len(data):
-                    c |= ((data[o] >> (7 - (x % 8))) & 1) << PLANE_ORDER[slot]
+                    c |= ((data[o] >> (7 - (x % 8))) & 1) << SPRITE_ORDER[slot]
             if c != 15:                       # 15 = sprite transparency key
                 px[x, y] = (*PAL[c], 255)
     return img
