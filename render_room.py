@@ -6,9 +6,8 @@ Usage:
     python3 render_room.py <roomid> <out.png>
     python3 render_room.py all <out_dir>      # all 64 rooms + montage
 
-Plane order differs by asset: tiles (BLOCKS/SCENERY) use (3,2,1,0), sprites
-(SPIDS) use (3,2,0,1) — they store the B/G planes in opposite order. Palette is
-the EXE-derived one (game_palette.py). Sprite transparency key = colour 15;
+All EGA graphics use plane order (3,2,1,0) and the EXE-derived palette
+(game_palette.py). Sprite transparency key = colour 15;
 foreground-block transparency key = colour 0 (shows the background through).
 """
 import re
@@ -27,7 +26,7 @@ AOUT = str(ROOT / "a.out")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 SPRITE_RE = re.compile(r"sprite \d+: \(x,y\)=(\d+),(\d+) (\w+)")
 W, H, TILE = 32, 22, 8
-SPRITE_ORDER = (3, 2, 0, 1)         # SPIDS plane -> EGA colour bit
+SPRITE_ORDER = (3, 2, 1, 0)         # SPIDS plane -> EGA colour bit
 TILE_ORDER = (3, 2, 1, 0)           # BLOCKS/SCENERY plane -> bit (B/G swapped vs sprites)
 SPIDS_PLANE, SPIDS_STRIDE = 63, 256
 SPIDS_W, SPIDS_H = 24, 21
