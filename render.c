@@ -509,6 +509,25 @@ bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out) 
     return true;
 }
 
+void render_tileset_rgb(RenderCtx *ctx, int tile_offset, uint8_t *out) {
+    memset(out, 0, (size_t)TILESET_PX * TILESET_PX * 3);
+    if (ctx == NULL) return;
+    for (int t = 0; t < 64; t++) {
+        int idx = t + tile_offset * 16;
+        if ((size_t)(idx * 32 + 31) >= ctx->a.blocks_len) continue;
+        const uint8_t *base = ctx->a.blocks + idx * 32;
+        int cx = (t % 8) * 8, cy = (t / 8) * 8;
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++) {
+                int c = 0;
+                for (int p = 0; p < 4; p++)
+                    c |= ((base[p * 8 + y] >> (7 - x)) & 1) << PLANE_ORDER[p];
+                uint8_t *px = out + ((size_t)(cy + y) * TILESET_PX + (cx + x)) * 3;
+                px[0] = PAL[c][0]; px[1] = PAL[c][1]; px[2] = PAL[c][2];
+            }
+    }
+}
+
 bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
     const char *dir = opts.data_dir ? opts.data_dir : ".";
     Assets a = {0};

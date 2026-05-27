@@ -38,4 +38,10 @@ void render_close(RenderCtx *ctx);
 // background + foreground + sprites, no debug overlay (the GUI draws its own).
 bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out);
 
+#define TILESET_PX 64   // 8x8 grid of 8x8 tiles = the 64 tiles of one tileset
+
+// Render the 64 foreground (BLOCKS) tiles for `tile_offset` into `out`
+// (TILESET_PX*TILESET_PX*3 RGB), laid out 8 across, tile t at (t%8, t/8).
+void render_tileset_rgb(RenderCtx *ctx, int tile_offset, uint8_t *out);
+
 #endif /* RENDER_H */

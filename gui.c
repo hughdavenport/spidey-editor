@@ -11,6 +11,7 @@
 #include "room.h"
 
 #define HUD_H 64
+#define PANEL_PAD 8
 
 // Files whose change triggers a hot rebuild of gui.so.
 static const char *WATCHED[] = {
@@ -37,6 +38,11 @@ typedef struct {
     bool dirty;             // unsaved edits pending (debounced autosave)
     float save_timer;       // seconds until the pending save flushes
     float src_check;        // seconds until the next hot-reload source check
+    Texture2D pal_tex;      // tileset palette (current tile_offset)
+    bool pal_loaded;
+    int pal_offset;         // tile_offset the palette texture was built for
+    uint8_t sel_tile;       // currently selected palette tile (0..63)
+    bool painting;          // left-mouse drag painting into the room
     int undo_n, redo_n;     // tile-snapshot undo/redo stacks
     struct { uint8_t room; uint8_t tiles[WIDTH_TILES * HEIGHT_TILES]; } undo[24], redo[24];
 } GuiState;
@@ -142,6 +148,36 @@ static void draw_cursor(GuiState *g) {
     Rectangle box = { c.x * s, HUD_H + c.y * s, s, s };
     DrawRectangleLinesEx(box, 2, (Color){255, 255, 255, 230});
     DrawRectangleLinesEx((Rectangle){box.x - 1, box.y - 1, box.width + 2, box.height + 2}, 1, BLACK);
+}
+
+static int panel_x0(GuiState *g) { return ROOM_PX_W * g->scale + PANEL_PAD; }
+
+static void draw_palette(GuiState *g) {
+    int s = 8 * g->scale, x0 = panel_x0(g), y0 = HUD_H;
+    DrawTexturePro(g->pal_tex, (Rectangle){0, 0, TILESET_PX, TILESET_PX},
+                   (Rectangle){x0, y0, TILESET_PX * g->scale, TILESET_PX * g->scale},
+                   (Vector2){0, 0}, 0, WHITE);
+    for (int i = 0; i <= 8; i++) {
+        DrawLine(x0 + i * s, y0, x0 + i * s, y0 + 8 * s, (Color){80, 80, 80, 255});
+        DrawLine(x0, y0 + i * s, x0 + 8 * s, y0 + i * s, (Color){80, 80, 80, 255});
+    }
+    int sx = g->sel_tile % 8, sy = g->sel_tile / 8;
+    DrawRectangleLinesEx((Rectangle){x0 + sx * s, y0 + sy * s, s, s}, 2, GOLD);
+    gtext(g, TextFormat("tileset %d  sel 0x%02x", g->pal_offset, g->sel_tile), x0, y0 + 8 * s + 6, 14, RAYWHITE);
+    gtext(g, "click tile, drag in room", x0, y0 + 8 * s + 24, 12, GRAY);
+}
+
+// Ghost-preview the selected tile at the hovered room cell ("see the change").
+static void draw_hover_preview(GuiState *g) {
+    Vector2 m = GetMousePosition();
+    int s = 8 * g->scale;
+    if (m.x < 0 || m.x >= ROOM_PX_W * g->scale || m.y < HUD_H || m.y >= HUD_H + ROOM_PX_H * g->scale)
+        return;
+    int tx = (int)m.x / s, ty = ((int)m.y - HUD_H) / s;
+    Rectangle dst = { tx * s, HUD_H + ty * s, s, s };
+    Rectangle src = { (g->sel_tile % 8) * 8, (g->sel_tile / 8) * 8, 8, 8 };
+    DrawTexturePro(g->pal_tex, src, dst, (Vector2){0, 0}, 0, (Color){255, 255, 255, 150});
+    DrawRectangleLinesEx(dst, 2, GOLD);
 }
 
 static void draw_overlay(GuiState *g, RoomFile *file) {
@@ -271,7 +307,8 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
         g->room_id = first_valid(file);
         g->rctx = render_open(data_dir);
         if (g->rctx == NULL) { free(g); return NULL; }
-        InitWindow(ROOM_PX_W * g->scale, ROOM_PX_H * g->scale + HUD_H, "Spidey Editor — GUI");
+        InitWindow(ROOM_PX_W * g->scale + TILESET_PX * g->scale + PANEL_PAD * 2,
+                   ROOM_PX_H * g->scale + HUD_H, "Spidey Editor — GUI");
         SetTargetFPS(60);
         SetExitKey(KEY_NULL);   // free ESC for "cancel"; close via window button
     }
@@ -346,6 +383,35 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
             if (ok) mark_edited(g);
         }
 
+        // mouse: pick a tile from the palette, or paint into the room (drag)
+        {
+            Vector2 m = GetMousePosition();
+            int s = 8 * g->scale, px0 = panel_x0(g);
+            bool in_pal = m.x >= px0 && m.x < px0 + 8 * s && m.y >= HUD_H && m.y < HUD_H + 8 * s;
+            bool in_room = m.x >= 0 && m.x < ROOM_PX_W * g->scale && m.y >= HUD_H
+                           && m.y < HUD_H + ROOM_PX_H * g->scale;
+            int tx = (int)m.x / s, ty = ((int)m.y - HUD_H) / s;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if (in_pal) {
+                    g->sel_tile = ((int)(m.y - HUD_H) / s) * 8 + (int)(m.x - px0) / s;
+                } else if (in_room) {
+                    snapshot(g, file);                  // one undo entry per stroke
+                    g->painting = true;
+                    g->cursors[g->room_id] = (Cur){tx, ty};
+                    file->rooms[g->room_id].data.tiles[ty * WIDTH_TILES + tx] = g->sel_tile;
+                    mark_edited(g);
+                }
+            }
+            if (g->painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && in_room) {
+                if (tx != g->cursors[g->room_id].x || ty != g->cursors[g->room_id].y) {
+                    g->cursors[g->room_id] = (Cur){tx, ty};
+                    file->rooms[g->room_id].data.tiles[ty * WIDTH_TILES + tx] = g->sel_tile;
+                    mark_edited(g);
+                }
+            }
+            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->painting = false;
+        }
+
         if (g->dirty) {                                 // debounced autosave
             g->save_timer -= dt;
             if (g->save_timer <= 0) { writeRooms(file); g->dirty = false; g->saved_flash = 1.2f; }
@@ -365,6 +431,20 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
             g->drawn_room = g->room_id;
         }
 
+        int toff = file->rooms[g->room_id].data.tile_offset;   // rebuild palette on tileset change
+        if (!g->pal_loaded || g->pal_offset != toff) {
+            static uint8_t pbuf[TILESET_PX * TILESET_PX * 3];
+            render_tileset_rgb(g->rctx, toff, pbuf);
+            Image pimg = { .data = pbuf, .width = TILESET_PX, .height = TILESET_PX,
+                           .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8 };
+            if (!g->pal_loaded) {
+                g->pal_tex = LoadTextureFromImage(pimg);
+                SetTextureFilter(g->pal_tex, TEXTURE_FILTER_POINT);
+                g->pal_loaded = true;
+            } else UpdateTexture(g->pal_tex, pbuf);
+            g->pal_offset = toff;
+        }
+
         if (g->saved_flash > 0) g->saved_flash -= GetFrameTime();
         BeginDrawing();
         ClearBackground(BLACK);
@@ -373,13 +453,16 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
                        (Rectangle){0, HUD_H, ROOM_PX_W * g->scale, ROOM_PX_H * g->scale},
                        (Vector2){0, 0}, 0, WHITE);
         if (g->debug) draw_overlay(g, file);
+        draw_hover_preview(g);
         draw_cursor(g);
+        draw_palette(g);
         draw_hud(g, file);
         EndDrawing();
     }
 
     if (g->dirty) writeRooms(file);   // flush any pending edit before closing
     if (g->tex_loaded) UnloadTexture(g->tex);
+    if (g->pal_loaded) UnloadTexture(g->pal_tex);
     if (g->font_loaded) UnloadFont(g->font);
     render_close(g->rctx);
     free(g);
