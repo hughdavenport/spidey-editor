@@ -332,6 +332,34 @@ static void free_assets(Assets *a) {
     free(a->blocks); free(a->scenery); free(a->spids1); free(a->spids2);
 }
 
+// Effective foreground tile at (x,y), mirroring dumpRoom's resolution: a BLOCK
+// object's own tile data overrides the base tilemap, and a TOGGLE_BLOCK switch
+// chunk (shown in its "on" state) overrides that. Sprites are NOT applied here
+// (they're drawn as real sprite graphics on top).
+static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y) {
+    uint8_t tile = room->tiles[y * WIDTH_TILES + x];
+    for (int o = 0; o < room->num_objects; o++) {
+        struct RoomObject *ob = room->objects + o;
+        if (ob->type == BLOCK && ob->tiles &&
+            x >= ob->x && x < ob->x + ob->block.width &&
+            y >= ob->y && y < ob->y + ob->block.height) {
+            return ob->tiles[(y - ob->y) * ob->block.width + (x - ob->x)];
+        }
+    }
+    for (int s = 0; s < room->num_switches; s++) {
+        struct SwitchObject *sw = room->switches + s;
+        for (size_t c = 1; c < sw->chunks.length; c++) {
+            struct SwitchChunk *ch = sw->chunks.data + c;
+            if (ch->type != TOGGLE_BLOCK) continue;
+            bool hit = (ch->dir == HORIZONTAL)
+                ? (y == ch->y && x >= ch->x && x < ch->x + ch->size)
+                : (x == ch->x && y >= ch->y && y < ch->y + ch->size);
+            if (hit) return ch->on;
+        }
+    }
+    return tile;
+}
+
 // Fill a BW*BH*3 RGB buffer with one room (background + foreground + sprites,
 // plus the overlay if requested). Assumes the room is valid.
 static void render_room_base(RoomFile *file, int room_id, const char *dir,
@@ -349,7 +377,7 @@ static void render_room_base(RoomFile *file, int room_id, const char *dir,
         }
     for (int ty = 0; ty < HEIGHT_TILES; ty++)
         for (int tx = 0; tx < WIDTH_TILES; tx++) {
-            int v = room->tiles[ty * WIDTH_TILES + tx] & 0x3f;
+            int v = effective_tile(room, tx, ty) & 0x3f;
             if (v) {
                 int idx = v + room->tile_offset * 16;
                 if ((size_t)(idx * 32 + 31) < a->blocks_len)
