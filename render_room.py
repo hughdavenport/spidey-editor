@@ -165,8 +165,13 @@ def creature_frame(creature, phase):
 TILE_OFFSET_RE = re.compile(r"tiles:\s*(\d+)")
 
 
-def render_room(rid, phase=0):
-    out = subprocess.run([AOUT, "display", str(rid)], capture_output=True, text=True, timeout=20).stdout
+def room_display(rid):
+    return subprocess.run([AOUT, "display", str(rid)], capture_output=True, text=True, timeout=20).stdout
+
+
+def render_room(rid, phase=0, out=None):
+    if out is None:
+        out = room_display(rid)
     grid, sprites = parse_grid(out), parse_sprites(out)
     m = TILE_OFFSET_RE.search(ANSI_RE.sub("", out))
     # tile_offset advances in steps of 4 per 64-tile set (0,4,8,..,28 = 8 sets
@@ -225,6 +230,27 @@ def main():
                 img = decode_tile(blocks, t + off * 16, None).convert("RGB")
                 img.resize((64, 64), Image.Resampling.NEAREST).save(d / f"tile{t:02x}.png")
         print(f"wrote 8 offset folders x 64 tiles -> {root}")
+        return
+    if len(sys.argv) >= 3 and sys.argv[1] == "roomframes":
+        # folder per used tile_offset; inside, a full room render per sprite
+        # animation frame (walking/standing/etc). Frame count per room = the
+        # longest frame range among its sprites (incl. the player in room 1).
+        root = Path(sys.argv[2]); root.mkdir(parents=True, exist_ok=True)
+        tw, th = W * TILE, H * TILE
+        for rid in range(64):
+            out = room_display(rid)
+            mo = TILE_OFFSET_RE.search(ANSI_RE.sub("", out))
+            off = int(mo[1]) if mo else 0
+            creatures = [c for _, _, c in parse_sprites(out)]
+            if rid == PLAYER_ROOM:
+                creatures.append("SPIDEY")
+            nframes = max((CREATURE_FRAMES[c][2] - CREATURE_FRAMES[c][1] + 1
+                           for c in creatures), default=1)
+            d = root / f"offset{off:02d}"; d.mkdir(exist_ok=True)
+            for p in range(nframes):
+                render_room(rid, p, out).resize((tw * 3, th * 3), Image.Resampling.NEAREST) \
+                    .save(d / f"room{rid:02d}_f{p:02d}.png")
+        print(f"wrote per-offset room frames -> {root}")
         return
     if len(sys.argv) >= 3 and sys.argv[1] == "all":
         out_dir = Path(sys.argv[2]); out_dir.mkdir(parents=True, exist_ok=True)
