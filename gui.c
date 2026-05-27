@@ -32,7 +32,12 @@ typedef struct {
     Cur cursors[64];        // per-room cursor (editor-style)
     Font font;
     bool font_loaded;
+    uint16_t partial;       // hex entry: 0 = empty, 0xFF00|d after the 1st digit
+    float saved_flash;      // seconds left to show the "saved" indicator
+    int undo_n, redo_n;     // tile-snapshot undo/redo stacks
+    struct { uint8_t room; uint8_t tiles[WIDTH_TILES * HEIGHT_TILES]; } undo[24], redo[24];
 } GuiState;
+#define UNDO_MAX 24
 
 static const char *FONT_CANDIDATES[] = {
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
@@ -100,13 +105,15 @@ static void draw_hud(GuiState *g, RoomFile *file) {
     for (int j = 23; j >= 0 && (name[j] == ' ' || name[j] == '\0'); j--) name[j] = '\0';
     DrawRectangle(0, 0, GetScreenWidth(), HUD_H, (Color){20, 20, 28, 255});
     gtext(g, TextFormat("Room %d: %s", g->room_id, name), 8, 5, 20, GOLD);
-    gtext(g, TextFormat("bkgrnd %d  tileset %d  dmg %d  grav |%d -%d   cur %d,%d = 0x%02x",
+    if (g->saved_flash > 0) gtext(g, "saved", GetScreenWidth() - 70, 8, 16, GREEN);
+    const char *entry = g->partial ? TextFormat("  entry:%X_", g->partial & 0x0f) : "";
+    gtext(g, TextFormat("bkgrnd %d  tileset %d  dmg %d  grav |%d -%d   cur %d,%d = 0x%02x%s",
                         r->background, r->tile_offset, r->room_damage,
                         r->gravity_vertical, r->gravity_horizontal,
-                        cur.x, cur.y, r->tiles[cur.y * WIDTH_TILES + cur.x]), 8, 30, 14, LIGHTGRAY);
-    gtext(g, TextFormat("up:%d down:%d left:%d right:%d   [arrows/hjkl] cursor   [D] debug:%s",
+                        cur.x, cur.y, r->tiles[cur.y * WIDTH_TILES + cur.x], entry), 8, 30, 14, LIGHTGRAY);
+    gtext(g, TextFormat("up:%d dn:%d l:%d r:%d  [hjkl]move [0-f]tile [bksp]clear [u/U]undo [^D]dbg:%s",
                         r->room_north, r->room_south, r->room_west, r->room_east,
-                        g->debug ? "on" : "off"), 8, 47, 14, GRAY);
+                        g->debug ? "on" : "off"), 8, 47, 13, GRAY);
 }
 
 // Move the cursor; wrap to the linked neighbour room at an edge (editor-style).
@@ -200,6 +207,49 @@ static void draw_overlay(GuiState *g, RoomFile *file) {
     }
 }
 
+/* ---------------------------------------------------------------- editing */
+
+// Return the hex nibble (0..15) pressed this frame, or -1. a-f via KEY_A..F.
+static int poll_hex(void) {
+    for (int d = 0; d < 10; d++) if (IsKeyPressed(KEY_ZERO + d)) return d;
+    for (int d = 0; d < 6; d++) if (IsKeyPressed(KEY_A + d)) return 10 + d;
+    return -1;
+}
+
+static void snapshot(GuiState *g, RoomFile *file) {  // push current room tiles to undo
+    if (g->undo_n == UNDO_MAX) {                      // drop oldest
+        memmove(g->undo, g->undo + 1, (UNDO_MAX - 1) * sizeof g->undo[0]);
+        g->undo_n--;
+    }
+    g->undo[g->undo_n].room = g->room_id;
+    memcpy(g->undo[g->undo_n].tiles, file->rooms[g->room_id].data.tiles, WIDTH_TILES * HEIGHT_TILES);
+    g->undo_n++;
+    g->redo_n = 0;                                    // a new edit clears redo
+}
+
+static void autosave(GuiState *g, RoomFile *file) {
+    writeRooms(file);
+    g->saved_flash = 1.2f;
+    g->drawn_room = -1;                               // re-render the room texture
+}
+
+// Restore from src stack into the room, saving current tiles to dst stack first.
+static bool restore(GuiState *g, RoomFile *file, int *src_n, void *src_v, int *dst_n, void *dst_v) {
+    typedef struct { uint8_t room; uint8_t tiles[WIDTH_TILES * HEIGHT_TILES]; } Snap;
+    Snap *src = src_v, *dst = dst_v;
+    if (*src_n == 0) return false;
+    Snap *s = &src[*src_n - 1];
+    g->room_id = s->room;
+    if (*dst_n < UNDO_MAX) {
+        dst[*dst_n].room = s->room;
+        memcpy(dst[*dst_n].tiles, file->rooms[s->room].data.tiles, WIDTH_TILES * HEIGHT_TILES);
+        (*dst_n)++;
+    }
+    memcpy(file->rooms[s->room].data.tiles, s->tiles, WIDTH_TILES * HEIGHT_TILES);
+    (*src_n)--;
+    return true;
+}
+
 /* ------------------------------------------------------------------ loop */
 
 void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *state) {
@@ -224,6 +274,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
         if (g->rctx == NULL) { free(g); return NULL; }
         InitWindow(ROOM_PX_W * g->scale, ROOM_PX_H * g->scale + HUD_H, "Spidey Editor — GUI");
         SetTargetFPS(60);
+        SetExitKey(KEY_NULL);   // free ESC for "cancel"; close via window button
     }
     g->drawn_room = -1;   // force a texture refresh on (re)entry
 
@@ -245,13 +296,45 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
             last_build = GetFileModTime(library);          // avoid rebuild loop
         }
 
+        bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
         if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_L)) move_cursor(g, file, +1, 0);
         if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_H)) move_cursor(g, file, -1, 0);
         if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_K)) move_cursor(g, file, 0, -1);
         if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_J)) move_cursor(g, file, 0, +1);
         if (IsKeyPressed(KEY_LEFT_BRACKET))  g->room_id = next_valid(file, g->room_id, -1);
         if (IsKeyPressed(KEY_RIGHT_BRACKET)) g->room_id = next_valid(file, g->room_id, +1);
-        if (IsKeyPressed(KEY_D)) g->debug = !g->debug;
+        if (ctrl && IsKeyPressed(KEY_D)) g->debug = !g->debug;   // Ctrl-D (editor-style)
+
+        // hex tile entry into the tile under the cursor (two nibbles -> one byte)
+        int nib = poll_hex();
+        if (nib >= 0) {
+            if (g->partial == 0) {
+                g->partial = 0xFF00 | nib;             // first nibble
+            } else {
+                uint8_t byte = ((g->partial & 0x0f) << 4) | nib;
+                Cur c = g->cursors[g->room_id];
+                snapshot(g, file);
+                file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x] = byte;
+                g->partial = 0;
+                autosave(g, file);
+            }
+        }
+        if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressed(KEY_DELETE)) {
+            if (g->partial) { g->partial = 0; }        // cancel partial first
+            else {
+                Cur c = g->cursors[g->room_id];
+                snapshot(g, file);
+                file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x] = 0;
+                autosave(g, file);
+            }
+        }
+        if (IsKeyPressed(KEY_ESCAPE)) g->partial = 0;
+        if (!ctrl && IsKeyPressed(KEY_U)) {            // u = undo, Shift+U = redo
+            bool redo = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            bool ok = redo ? restore(g, file, &g->redo_n, g->redo, &g->undo_n, g->undo)
+                           : restore(g, file, &g->undo_n, g->undo, &g->redo_n, g->redo);
+            if (ok) autosave(g, file);
+        }
 
         if (g->drawn_room != g->room_id) {
             render_room_rgb(g->rctx, file, g->room_id, buf);
@@ -267,6 +350,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
             g->drawn_room = g->room_id;
         }
 
+        if (g->saved_flash > 0) g->saved_flash -= GetFrameTime();
         BeginDrawing();
         ClearBackground(BLACK);
         DrawTexturePro(g->tex,
