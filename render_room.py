@@ -201,13 +201,15 @@ def render_room(rid, phase=0, out=None):
                 canvas.alpha_composite(decode_tile(blocks, v + tile_offset * 16, 0),
                                        (tx * TILE, ty * TILE))
     # sprites + player; `phase` cycles each creature through its frame range.
+    # A sprite's stored (x,y) is the tile one step up-left of its footprint:
+    # left edge at column x+1, feet resting on the bottom of row y+1.
+    def blit(spr, x, y):
+        canvas.alpha_composite(spr, ((x + 1) * TILE, max(0, (y + 2) * TILE - SPIDS_H)))
     if rid == PLAYER_ROOM:
         x, y = PLAYER_POS
-        canvas.alpha_composite(decode_sprite(*creature_frame("SPIDEY", PLAYER_START_FRAME + phase)),
-                               (x * TILE, max(0, (y + 1) * TILE - SPIDS_H)))
+        blit(decode_sprite(*creature_frame("SPIDEY", PLAYER_START_FRAME + phase)), x, y)
     for x, y, creature in sprites:
-        spr = decode_sprite(*creature_frame(creature, phase))
-        canvas.alpha_composite(spr, (x * TILE, max(0, (y + 1) * TILE - SPIDS_H)))
+        blit(decode_sprite(*creature_frame(creature, phase)), x, y)
     return canvas.convert("RGB")
 
 
