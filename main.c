@@ -1,6 +1,7 @@
 #include "array.h"
 #include "room.h"
 #include "render.h"
+#include "gui.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -1272,6 +1273,18 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Wrote %s\n", out);
             }
             defer_return(0);
+        } else if (strcasecmp(argv[0], "gui") == 0) {
+            argv ++; argc --;
+            const char *data_dir = ".";
+            while (argc > 0 && strcmp(argv[0], "--data-dir") == 0 && argc >= 2) {
+                data_dir = argv[1]; argv += 2; argc -= 2;
+            }
+            int rc = gui_main(&file, data_dir);
+            ARRAY_FREE(rooms);
+            ARRAY_FREE(patches);
+            freeRoomFile(&file);
+            if (fp) { fclose(fp); fp = NULL; }
+            return rc;
         } else if (strcasecmp(argv[0], "rooms") == 0) {
             list = true;
             argv ++;
@@ -1288,6 +1301,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
             fprintf(stderr, "    find_sprite SPRITENAME               - Find a sprite\n");
             fprintf(stderr, "    render ROOMID OUT.png [opts]         - Render a room to PNG (--debug --scale N --data-dir DIR)\n");
+            fprintf(stderr, "    gui [--data-dir DIR]                 - Hot-reloadable raylib GUI viewer\n");
             fprintf(stderr, "    editor                               - Start an editor\n");
             fprintf(stderr, "    help                                 - Display this message\n");
             defer_return(1);

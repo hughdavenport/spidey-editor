@@ -477,6 +477,38 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
     return true;
 }
 
+/* --- reusable decode API for the GUI ------------------------------------ */
+
+struct RenderCtx {
+    Assets a;
+    char dir[1024];
+};
+
+RenderCtx *render_open(const char *data_dir) {
+    RenderCtx *ctx = calloc(1, sizeof *ctx);
+    if (ctx == NULL) return NULL;
+    snprintf(ctx->dir, sizeof ctx->dir, "%s", data_dir ? data_dir : ".");
+    if (!load_assets(ctx->dir, &ctx->a)) {
+        free_assets(&ctx->a);
+        free(ctx);
+        return NULL;
+    }
+    return ctx;
+}
+
+void render_close(RenderCtx *ctx) {
+    if (ctx == NULL) return;
+    free_assets(&ctx->a);
+    free(ctx);
+}
+
+bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out) {
+    if (ctx == NULL || room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid)
+        return false;
+    render_room_base(file, room_id, ctx->dir, &ctx->a, false, out);
+    return true;
+}
+
 bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
     const char *dir = opts.data_dir ? opts.data_dir : ".";
     Assets a = {0};

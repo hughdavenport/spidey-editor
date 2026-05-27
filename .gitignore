@@ -1,5 +1,6 @@
 a.out
 editor.so
+gui.so
 *.SPL
 *.spl
 *.png
@@ -15,3 +16,5 @@ Spider/
 *.dat
 *.EXE
 *.exe
+# Pinned raylib 6.0 prebuilt (binary blob; fetch from the GitHub release)
+raylib-6.0_linux_amd64/
