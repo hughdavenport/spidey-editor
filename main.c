@@ -930,7 +930,7 @@ bool main_import(int *argc, char ***argv, char *program, RoomFile *file, bool *i
         fp = fopen((*argv)[1], "r");
         if (fp == NULL) {
             fprintf(stderr, "Could not open file: %s: %s\n", (*argv)[1], strerror(errno));
-            fprintf(stderr, "Usage: %s import [FILE|-]\n", program);
+            fprintf(stderr, "Usage: %s import [FILE|-] [OUT.SPL]\n", program);
             return false;
         }
     }
@@ -950,7 +950,7 @@ bool main_import(int *argc, char ***argv, char *program, RoomFile *file, bool *i
 
 bool main_importRoom(int *argc, char ***argv, char *program, RoomFile *file, bool *import_done) {
     if (*argc <= 2) {
-        fprintf(stderr, "Usage: %s importRoom ROOMID FILE\n", program);
+        fprintf(stderr, "Usage: %s importRoom ROOMID FILE [OUT.SPL]\n", program);
         return false;
     }
     char *end;
@@ -958,7 +958,7 @@ bool main_importRoom(int *argc, char ***argv, char *program, RoomFile *file, boo
     if (errno == EINVAL || end == NULL || *end != '\0' ||
             room_id < 0 || (unsigned)room_id >= C_ARRAY_LEN(file->rooms)) {
         fprintf(stderr, "Invalid room id: %s\n", (*argv)[1]);
-        fprintf(stderr, "Usage: %s importRoom ROOMID FILE\n", program);
+        fprintf(stderr, "Usage: %s importRoom ROOMID FILE [OUT.SPL]\n", program);
         return false;
     }
     FILE *fp = NULL;
@@ -969,7 +969,7 @@ bool main_importRoom(int *argc, char ***argv, char *program, RoomFile *file, boo
         fp = fopen((*argv)[2], "r");
         if (fp == NULL) {
             fprintf(stderr, "Could not open file: %s: %s\n", (*argv)[2], strerror(errno));
-            fprintf(stderr, "Usage: %s importRoom ROOMID FILE\n", program);
+            fprintf(stderr, "Usage: %s importRoom ROOMID FILE [OUT.SPL]\n", program);
             return false;
         }
     }
@@ -989,8 +989,8 @@ static void print_subcommands(FILE *out) {
     fprintf(out, "Subcommands:\n");
     fprintf(out, "    rooms                                - List rooms\n");
     fprintf(out, "    display [ROOMID]                     - Defaults to all rooms\n");
-    fprintf(out, "    import [FILE|-]                      - Import display output; rooms not in file are blanked\n");
-    fprintf(out, "    importRoom ROOMID [FILE|-]           - Import one room at ROOMID, others unchanged\n");
+    fprintf(out, "    import [FILE|-] [OUT.SPL]             - Import display output (rooms not in file blanked); writes OUT.SPL (default ROOMS.SPL)\n");
+    fprintf(out, "    importRoom ROOMID [FILE|-] [OUT.SPL]  - Import one room at ROOMID; writes OUT.SPL (default ROOMS.SPL)\n");
     fprintf(out, "    recompress                           - No changes to underlying data, just recompress\n");
     fprintf(out, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
     fprintf(out, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
