@@ -34,6 +34,9 @@ typedef struct {
     bool font_loaded;
     uint16_t partial;       // hex entry: 0 = empty, 0xFF00|d after the 1st digit
     float saved_flash;      // seconds left to show the "saved" indicator
+    bool dirty;             // unsaved edits pending (debounced autosave)
+    float save_timer;       // seconds until the pending save flushes
+    float src_check;        // seconds until the next hot-reload source check
     int undo_n, redo_n;     // tile-snapshot undo/redo stacks
     struct { uint8_t room; uint8_t tiles[WIDTH_TILES * HEIGHT_TILES]; } undo[24], redo[24];
 } GuiState;
@@ -209,13 +212,6 @@ static void draw_overlay(GuiState *g, RoomFile *file) {
 
 /* ---------------------------------------------------------------- editing */
 
-// Return the hex nibble (0..15) pressed this frame, or -1. a-f via KEY_A..F.
-static int poll_hex(void) {
-    for (int d = 0; d < 10; d++) if (IsKeyPressed(KEY_ZERO + d)) return d;
-    for (int d = 0; d < 6; d++) if (IsKeyPressed(KEY_A + d)) return 10 + d;
-    return -1;
-}
-
 static void snapshot(GuiState *g, RoomFile *file) {  // push current room tiles to undo
     if (g->undo_n == UNDO_MAX) {                      // drop oldest
         memmove(g->undo, g->undo + 1, (UNDO_MAX - 1) * sizeof g->undo[0]);
@@ -227,9 +223,12 @@ static void snapshot(GuiState *g, RoomFile *file) {  // push current room tiles 
     g->redo_n = 0;                                    // a new edit clears redo
 }
 
-static void autosave(GuiState *g, RoomFile *file) {
-    writeRooms(file);
-    g->saved_flash = 1.2f;
+// Mark the room edited: re-render now, flush to disk after a short idle so we
+// don't run the (expensive) full recompress on every keystroke (which stalled
+// the frame and dropped the next key).
+static void mark_edited(GuiState *g) {
+    g->dirty = true;
+    g->save_timer = 0.4f;
     g->drawn_room = -1;                               // re-render the room texture
 }
 
@@ -289,11 +288,17 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
     }
 
     while (!WindowShouldClose()) {
-        if (sources_changed(last_build)) {
-            fprintf(stderr, "gui: source changed, rebuilding\n");
-            if (system(GUI_BUILD_CMD) == 0) return g;     // host reloads
-            fprintf(stderr, "gui: rebuild failed, not reloading\n");
-            last_build = GetFileModTime(library);          // avoid rebuild loop
+        float dt = GetFrameTime();
+        g->src_check -= dt;                                // throttle the hot-reload stat()s
+        if (g->src_check <= 0) {
+            g->src_check = 0.5f;
+            if (sources_changed(last_build)) {
+                fprintf(stderr, "gui: source changed, rebuilding\n");
+                if (g->dirty) { writeRooms(file); g->dirty = false; }  // don't lose edits
+                if (system(GUI_BUILD_CMD) == 0) return g;  // host reloads
+                fprintf(stderr, "gui: rebuild failed, not reloading\n");
+                last_build = GetFileModTime(library);
+            }
         }
 
         bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
@@ -305,9 +310,14 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
         if (IsKeyPressed(KEY_RIGHT_BRACKET)) g->room_id = next_valid(file, g->room_id, +1);
         if (ctrl && IsKeyPressed(KEY_D)) g->debug = !g->debug;   // Ctrl-D (editor-style)
 
-        // hex tile entry into the tile under the cursor (two nibbles -> one byte)
-        int nib = poll_hex();
-        if (nib >= 0) {
+        // hex tile entry via the char queue (catches every typed key, even if a
+        // frame was slow). Two nibbles -> one byte written under the cursor.
+        for (int ch = GetCharPressed(); ch != 0; ch = GetCharPressed()) {
+            int nib = -1;
+            if (ch >= '0' && ch <= '9') nib = ch - '0';
+            else if (ch >= 'a' && ch <= 'f') nib = 10 + ch - 'a';
+            else if (ch >= 'A' && ch <= 'F') nib = 10 + ch - 'A';
+            if (nib < 0) continue;
             if (g->partial == 0) {
                 g->partial = 0xFF00 | nib;             // first nibble
             } else {
@@ -316,7 +326,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
                 snapshot(g, file);
                 file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x] = byte;
                 g->partial = 0;
-                autosave(g, file);
+                mark_edited(g);
             }
         }
         if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressed(KEY_DELETE)) {
@@ -325,7 +335,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
                 Cur c = g->cursors[g->room_id];
                 snapshot(g, file);
                 file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x] = 0;
-                autosave(g, file);
+                mark_edited(g);
             }
         }
         if (IsKeyPressed(KEY_ESCAPE)) g->partial = 0;
@@ -333,7 +343,12 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
             bool redo = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
             bool ok = redo ? restore(g, file, &g->redo_n, g->redo, &g->undo_n, g->undo)
                            : restore(g, file, &g->undo_n, g->undo, &g->redo_n, g->redo);
-            if (ok) autosave(g, file);
+            if (ok) mark_edited(g);
+        }
+
+        if (g->dirty) {                                 // debounced autosave
+            g->save_timer -= dt;
+            if (g->save_timer <= 0) { writeRooms(file); g->dirty = false; g->saved_flash = 1.2f; }
         }
 
         if (g->drawn_room != g->room_id) {
@@ -363,6 +378,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
         EndDrawing();
     }
 
+    if (g->dirty) writeRooms(file);   // flush any pending edit before closing
     if (g->tex_loaded) UnloadTexture(g->tex);
     if (g->font_loaded) UnloadFont(g->font);
     render_close(g->rctx);
