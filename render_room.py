@@ -31,6 +31,7 @@ TILE_ORDER = (3, 2, 1, 0)           # BLOCKS/SCENERY plane -> bit (B/G swapped v
 SPIDS_PLANE, SPIDS_STRIDE = 63, 256
 SPIDS_W, SPIDS_H = 24, 21
 PLAYER_ROOM, PLAYER_POS = 1, (3, 20)   # Spidey only appears in room 1
+PLAYER_START_FRAME = 9                  # his resting/start pose in SPIDS1
 
 # Each creature's animation frame range (file, first, last-inclusive). Frame
 # ranges verified from the SPIDS contact sheets; SPIDS1 32-37 is the white
@@ -202,7 +203,7 @@ def render_room(rid, phase=0, out=None):
     # sprites + player; `phase` cycles each creature through its frame range.
     if rid == PLAYER_ROOM:
         x, y = PLAYER_POS
-        canvas.alpha_composite(decode_sprite(*creature_frame("SPIDEY", phase)),
+        canvas.alpha_composite(decode_sprite(*creature_frame("SPIDEY", PLAYER_START_FRAME + phase)),
                                (x * TILE, max(0, (y + 1) * TILE - SPIDS_H)))
     for x, y, creature in sprites:
         spr = decode_sprite(*creature_frame(creature, phase))
