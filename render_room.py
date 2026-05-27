@@ -32,6 +32,7 @@ SPIDS_PLANE, SPIDS_STRIDE = 63, 256
 SPIDS_W, SPIDS_H = 24, 21
 PLAYER_ROOM, PLAYER_FEET = 1, (3, 20)  # Spidey only appears in room 1; feet tile
 PLAYER_START_FRAME = 9                  # his resting/start pose in SPIDS1
+SPRITE_X_PAD = 2                        # figure sits ~2 tiles right within the 24px box
 
 # Each creature's animation frame range (file, first, last-inclusive). Frame
 # ranges verified from the SPIDS contact sheets; SPIDS1 32-37 is the white
@@ -208,12 +209,14 @@ def render_room(rid, phase=0, out=None):
                 canvas.alpha_composite(decode_tile(blocks, v + tile_offset * 16, None),
                                        (tx * TILE, ty * TILE))
     # sprites + player; `phase` cycles each creature through its frame range.
-    # blit at a *feet tile* (fx, fy): left edge at column fx, feet resting on
-    # the bottom of row fy. An enemy's stored (x,y) is one tile up-left of its
-    # feet tile, so its feet tile is (x+1, y+1). The player's feet tile is
-    # given directly (PLAYER_FEET).
+    # Anchor at a *feet tile* (fx, fy): feet rest on the bottom of row fy. The
+    # 24px sprite figure sits ~2 tiles in from the box's left edge (the left of
+    # the box is blank padding), so shift the box left by SPRITE_X_PAD to put
+    # the figure over its feet column. An enemy's stored (x,y) is one tile
+    # up-left of its feet tile (x+1, y+1); the player's is given (PLAYER_FEET).
     def blit(spr, fx, fy):
-        canvas.alpha_composite(spr, (fx * TILE, max(0, (fy + 1) * TILE - SPIDS_H)))
+        canvas.alpha_composite(spr, ((fx - SPRITE_X_PAD) * TILE,
+                                     max(0, (fy + 1) * TILE - SPIDS_H)))
     if rid == PLAYER_ROOM:
         blit(decode_sprite(*creature_frame("SPIDEY", PLAYER_START_FRAME + phase)), *PLAYER_FEET)
     for x, y, creature in sprites:
