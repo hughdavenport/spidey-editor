@@ -24,20 +24,39 @@ from game_palette import GAME_PALETTE as PAL  # noqa: E402
 
 AOUT = str(ROOT / "a.out")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-SPRITE_RE = re.compile(r"sprite \d+: \(x,y\)=(\d+),(\d+) (\w+)")
+SPRITE_RE = re.compile(r"sprite \d+: \(x,y\)=(\d+),(\d+) (\w+) dmg:(\d+)")
 W, H, TILE = 32, 22, 8
 SPRITE_ORDER = (3, 2, 1, 0)         # SPIDS plane -> EGA colour bit
 TILE_ORDER = (3, 2, 1, 0)           # BLOCKS/SCENERY plane -> bit (B/G swapped vs sprites)
 SPIDS_PLANE, SPIDS_STRIDE = 63, 256
 SPIDS_W, SPIDS_H = 24, 21
-PLAYER_ROOM, PLAYER_POS, PLAYER_FRAME = 1, (3, 20), 0   # Spidey only in room 1
+PLAYER_ROOM, PLAYER_POS = 1, (3, 20)   # Spidey only appears in room 1
 
-SPRITE_FRAME = {
-    "SHARK": ("SPIDS1.EGA", 43), "MUMMY": ("SPIDS1.EGA", 32),
-    "BLUE_MAN": ("SPIDS2.EGA", 6), "WOLF": ("SPIDS1.EGA", 46),
-    "R2D2": ("SPIDS1.EGA", 50), "DINOSAUR": ("SPIDS1.EGA", 53),
-    "RAT": ("SPIDS1.EGA", 58), "SHOTGUN_LADY": ("SPIDS2.EGA", 0),
+# Each creature's animation frame range (file, first, last-inclusive). Frame
+# ranges verified from the SPIDS contact sheets; SPIDS1 32-37 is the white
+# mummy and 38-42 is the distinct blue-man figure (not extra mummy frames).
+CREATURE_FRAMES = {
+    "SPIDEY":       ("SPIDS1.EGA", 0, 31),
+    "MUMMY":        ("SPIDS1.EGA", 32, 37),
+    "BLUE_MAN":     ("SPIDS1.EGA", 38, 42),
+    "SHARK":        ("SPIDS1.EGA", 43, 45),
+    "WOLF":         ("SPIDS1.EGA", 46, 49),
+    "R2D2":         ("SPIDS1.EGA", 50, 52),
+    "DINOSAUR":     ("SPIDS1.EGA", 53, 57),
+    "RAT":          ("SPIDS1.EGA", 58, 61),
+    "MARY_JANE":    ("SPIDS1.EGA", 62, 63),
+    "SHOTGUN_LADY": ("SPIDS2.EGA", 0, 5),
+    "MYSTERIO":     ("SPIDS2.EGA", 6, 10),
 }
+
+
+def resolve_creature(type_name, dmg):
+    """Map an editor sprite (type + damage) to the creature actually drawn.
+    The SHARK type is overloaded by damage (see room.h): dmg 3 = Mysterio,
+    dmg 4 = Mary Jane, otherwise a shark."""
+    if type_name == "SHARK":
+        return {3: "MYSTERIO", 4: "MARY_JANE"}.get(dmg, "SHARK")
+    return type_name
 _cache: dict[str, bytes] = {}
 def _f(name): return _cache.setdefault(name, (SPC / name).read_bytes())
 
@@ -132,12 +151,27 @@ def parse_grid(text):
 
 
 def parse_sprites(text):
-    return [(int(m[1]), int(m[2]), m[3]) for m in SPRITE_RE.finditer(ANSI_RE.sub("", text))]
+    """-> list of (x, y, creature) using the type+damage resolution."""
+    return [(int(m[1]), int(m[2]), resolve_creature(m[3], int(m[4])))
+            for m in SPRITE_RE.finditer(ANSI_RE.sub("", text))]
 
 
-def render_room(rid):
+def creature_frame(creature, phase):
+    """Pick a frame for a creature, cycling through its range by `phase`."""
+    fname, lo, hi = CREATURE_FRAMES[creature]
+    return fname, lo + (phase % (hi - lo + 1))
+
+
+TILE_OFFSET_RE = re.compile(r"tiles:\s*(\d+)")
+
+
+def render_room(rid, phase=0):
     out = subprocess.run([AOUT, "display", str(rid)], capture_output=True, text=True, timeout=20).stdout
     grid, sprites = parse_grid(out), parse_sprites(out)
+    m = TILE_OFFSET_RE.search(ANSI_RE.sub("", out))
+    # tile_offset advances in steps of 4 per 64-tile set (0,4,8,..,28 = 8 sets
+    # = BLOCKS' 512 tiles), so one unit = 16 tiles.
+    tile_offset = int(m[1]) if m else 0
     canvas = Image.new("RGBA", (W * TILE, H * TILE), (0, 0, 0, 255))
     scenery, blocks = _f("SCENERY.EGA"), _f("BLOCKS.EGA")
     # background: SCENERY, opaque (colour 0 = black night sky)
@@ -147,25 +181,40 @@ def render_room(rid):
             v = bg[ty * W + tx] & 0xff
             if v:
                 canvas.alpha_composite(decode_tile(scenery, v, None), (tx * TILE, ty * TILE))
-    # foreground: BLOCKS, colour 0 transparent (background shows through)
+    # blank the tile cell each sprite sits on (display marks it; it isn't a tile)
+    for x, y, _ in sprites:
+        if 0 <= y < H and 0 <= x < W:
+            grid[y][x] = 0
+    # foreground: BLOCKS. Tile index = (raw & 0x3f) within the 64-tile set
+    # selected by tile_offset (one unit = 16 tiles); high bits of raw are
+    # attributes (solid/magnetic/slippery), not part of the tile index.
     for ty, row in enumerate(grid):
         for tx, raw in enumerate(row):
             v = raw & 0x3f
             if v:
-                canvas.alpha_composite(decode_tile(blocks, v, 0), (tx * TILE, ty * TILE))
-    # sprites + player
-    drawn = list(sprites)
+                canvas.alpha_composite(decode_tile(blocks, v + tile_offset * 16, 0),
+                                       (tx * TILE, ty * TILE))
+    # sprites + player; `phase` cycles each creature through its frame range.
     if rid == PLAYER_ROOM:
-        canvas.alpha_composite(decode_sprite("SPIDS1.EGA", PLAYER_FRAME),
-                               (PLAYER_POS[0] * TILE, max(0, (PLAYER_POS[1] + 1) * TILE - SPIDS_H)))
-    for x, y, name in drawn:
-        if name in SPRITE_FRAME:
-            spr = decode_sprite(*SPRITE_FRAME[name])
-            canvas.alpha_composite(spr, (x * TILE, max(0, (y + 1) * TILE - SPIDS_H)))
+        x, y = PLAYER_POS
+        canvas.alpha_composite(decode_sprite(*creature_frame("SPIDEY", phase)),
+                               (x * TILE, max(0, (y + 1) * TILE - SPIDS_H)))
+    for x, y, creature in sprites:
+        spr = decode_sprite(*creature_frame(creature, phase))
+        canvas.alpha_composite(spr, (x * TILE, max(0, (y + 1) * TILE - SPIDS_H)))
     return canvas.convert("RGB")
 
 
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "cycle":
+        # animated GIF cycling every sprite through all its frames
+        rid = int(sys.argv[2])
+        out = Path(sys.argv[3]) if len(sys.argv) > 3 else Path(f"room{rid:02d}.gif")
+        frames = [render_room(rid, p).resize((W * TILE * 2, H * TILE * 2), Image.Resampling.NEAREST)
+                  for p in range(8)]
+        frames[0].save(out, save_all=True, append_images=frames[1:], duration=160, loop=0)
+        print(f"wrote {out}")
+        return
     if len(sys.argv) >= 3 and sys.argv[1] == "all":
         out_dir = Path(sys.argv[2]); out_dir.mkdir(parents=True, exist_ok=True)
         tw, th = W * TILE, H * TILE
