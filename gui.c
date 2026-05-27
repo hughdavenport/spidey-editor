@@ -18,6 +18,8 @@ static const char *WATCHED[] = {
     "room.c", "room.h", "spl.c", "spl.h", "array.h",
 };
 
+typedef struct { int x, y; } Cur;
+
 typedef struct {
     size_t structsize;
     int room_id;
@@ -27,7 +29,24 @@ typedef struct {
     int drawn_room;
     RenderCtx *rctx;
     Texture2D tex;
+    Cur cursors[64];        // per-room cursor (editor-style)
+    Font font;
+    bool font_loaded;
 } GuiState;
+
+static const char *FONT_CANDIDATES[] = {
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+};
+
+// DrawText replacement using the loaded TTF (falls back to raylib's default).
+static void gtext(GuiState *g, const char *s, int x, int y, int size, Color col) {
+    if (g->font_loaded)
+        DrawTextEx(g->font, s, (Vector2){x, y}, size, size / 10.0f, col);
+    else
+        DrawText(s, x, y, size, col);
+}
 
 /* --------------------------------------------------------------- helpers */
 
@@ -75,17 +94,44 @@ static Vector2 tile_pt(GuiState *g, float tx, float ty) {
 
 static void draw_hud(GuiState *g, RoomFile *file) {
     struct DecompressedRoom *r = &file->rooms[g->room_id].data;
+    Cur cur = g->cursors[g->room_id];
     char name[25] = {0};
     strncpy(name, r->name, 24);
     for (int j = 23; j >= 0 && (name[j] == ' ' || name[j] == '\0'); j--) name[j] = '\0';
     DrawRectangle(0, 0, GetScreenWidth(), HUD_H, (Color){20, 20, 28, 255});
-    DrawText(TextFormat("Room %d: %s", g->room_id, name), 8, 6, 20, GOLD);
-    DrawText(TextFormat("bkgrnd %d  tileset %d  dmg %d  grav |%d -%d",
+    gtext(g, TextFormat("Room %d: %s", g->room_id, name), 8, 5, 20, GOLD);
+    gtext(g, TextFormat("bkgrnd %d  tileset %d  dmg %d  grav |%d -%d   cur %d,%d = 0x%02x",
                         r->background, r->tile_offset, r->room_damage,
-                        r->gravity_vertical, r->gravity_horizontal), 8, 30, 14, LIGHTGRAY);
-    DrawText(TextFormat("links  up:%d down:%d left:%d right:%d   [<-/->] room   [D] debug:%s",
+                        r->gravity_vertical, r->gravity_horizontal,
+                        cur.x, cur.y, r->tiles[cur.y * WIDTH_TILES + cur.x]), 8, 30, 14, LIGHTGRAY);
+    gtext(g, TextFormat("up:%d down:%d left:%d right:%d   [arrows/hjkl] cursor   [D] debug:%s",
                         r->room_north, r->room_south, r->room_west, r->room_east,
-                        g->debug ? "on" : "off"), 8, 46, 14, GRAY);
+                        g->debug ? "on" : "off"), 8, 47, 14, GRAY);
+}
+
+// Move the cursor; wrap to the linked neighbour room at an edge (editor-style).
+static void move_cursor(GuiState *g, RoomFile *file, int dx, int dy) {
+    Cur *c = &g->cursors[g->room_id];
+    struct DecompressedRoom *r = &file->rooms[g->room_id].data;
+    int nx = c->x + dx, ny = c->y + dy, nr = -1, ex = c->x, ey = c->y;
+    if (nx < 0)              { nr = r->room_west;  ex = WIDTH_TILES - 1; }
+    else if (nx >= WIDTH_TILES) { nr = r->room_east; ex = 0; }
+    else if (ny < 0)         { nr = r->room_north; ey = HEIGHT_TILES - 1; }
+    else if (ny >= HEIGHT_TILES) { nr = r->room_south; ey = 0; }
+    else { c->x = nx; c->y = ny; return; }
+    if (nr >= 0 && nr < 64 && file->rooms[nr].valid) {   // cross to neighbour
+        g->room_id = nr;
+        g->cursors[nr].x = (dx != 0) ? ex : c->x;
+        g->cursors[nr].y = (dy != 0) ? ey : c->y;
+    }
+}
+
+static void draw_cursor(GuiState *g) {
+    Cur c = g->cursors[g->room_id];
+    float s = 8.0f * g->scale;
+    Rectangle box = { c.x * s, HUD_H + c.y * s, s, s };
+    DrawRectangleLinesEx(box, 2, (Color){255, 255, 255, 230});
+    DrawRectangleLinesEx((Rectangle){box.x - 1, box.y - 1, box.width + 2, box.height + 2}, 1, BLACK);
 }
 
 static void draw_overlay(GuiState *g, RoomFile *file) {
@@ -110,11 +156,11 @@ static void draw_overlay(GuiState *g, RoomFile *file) {
         Vector2 p = tile_pt(g, o->x, o->y);
         if (o->type == BLOCK) {
             DrawRectangleLinesEx((Rectangle){p.x, p.y, o->block.width * s, o->block.height * s}, 1, C_BLK);
-            DrawText(TextFormat("B%d", i), p.x + 2, p.y + 1, 10, C_BLK);
+            gtext(g, TextFormat("B%d", i), p.x + 2, p.y + 1, 12, C_BLK);
         } else {
             DrawRectangleLinesEx((Rectangle){p.x, p.y, s, s}, 1, C_SPR);
-            DrawText(TextFormat("%s d%d", creature_name(o->sprite.type, o->sprite.damage), o->sprite.damage),
-                     p.x + 2, p.y - 11, 10, C_SPR);
+            gtext(g, TextFormat("%s d%d", creature_name(o->sprite.type, o->sprite.damage), o->sprite.damage),
+                     p.x + 2, p.y - 13, 12, C_SPR);
         }
     }
 
@@ -124,7 +170,7 @@ static void draw_overlay(GuiState *g, RoomFile *file) {
         if (sw->chunks.length == 0) continue;
         Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
         DrawCircleV(o, 4, C_SW);
-        DrawText(TextFormat("S%d", i), o.x + 5, o.y - 5, 10, C_SW);
+        gtext(g, TextFormat("S%d", i), o.x + 5, o.y - 6, 12, C_SW);
         for (size_t c = 1; c < sw->chunks.length; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
             if (ch->type == TOGGLE_BLOCK) {
@@ -147,7 +193,7 @@ static void draw_overlay(GuiState *g, RoomFile *file) {
                 else if (rid == r->room_east) e = tile_pt(g, WIDTH_TILES, sw->chunks.data[0].y + 0.5f);
                 if (e.x != o.x || e.y != o.y) {
                     DrawLineV(o, e, C_BIT);
-                    DrawText(TextFormat("R%d", rid), e.x - 8, e.y - 6, 10, C_BIT);
+                    gtext(g, TextFormat("R%d", rid), e.x - 8, e.y - 7, 12, C_BIT);
                 }
             }
         }
@@ -181,6 +227,16 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
     }
     g->drawn_room = -1;   // force a texture refresh on (re)entry
 
+    if (!g->font_loaded) {                 // load a nicer TTF (per (re)entry)
+        for (size_t i = 0; i < sizeof FONT_CANDIDATES / sizeof FONT_CANDIDATES[0]; i++)
+            if (FileExists(FONT_CANDIDATES[i])) {
+                g->font = LoadFontEx(FONT_CANDIDATES[i], 32, NULL, 0);
+                SetTextureFilter(g->font.texture, TEXTURE_FILTER_BILINEAR);
+                g->font_loaded = g->font.texture.id != 0;
+                break;
+            }
+    }
+
     while (!WindowShouldClose()) {
         if (sources_changed(last_build)) {
             fprintf(stderr, "gui: source changed, rebuilding\n");
@@ -189,10 +245,12 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
             last_build = GetFileModTime(library);          // avoid rebuild loop
         }
 
-        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_L) || IsKeyPressed(KEY_PERIOD))
-            g->room_id = next_valid(file, g->room_id, +1);
-        if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_H) || IsKeyPressed(KEY_COMMA))
-            g->room_id = next_valid(file, g->room_id, -1);
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_L)) move_cursor(g, file, +1, 0);
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_H)) move_cursor(g, file, -1, 0);
+        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_K)) move_cursor(g, file, 0, -1);
+        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_J)) move_cursor(g, file, 0, +1);
+        if (IsKeyPressed(KEY_LEFT_BRACKET))  g->room_id = next_valid(file, g->room_id, -1);
+        if (IsKeyPressed(KEY_RIGHT_BRACKET)) g->room_id = next_valid(file, g->room_id, +1);
         if (IsKeyPressed(KEY_D)) g->debug = !g->debug;
 
         if (g->drawn_room != g->room_id) {
@@ -216,11 +274,13 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
                        (Rectangle){0, HUD_H, ROOM_PX_W * g->scale, ROOM_PX_H * g->scale},
                        (Vector2){0, 0}, 0, WHITE);
         if (g->debug) draw_overlay(g, file);
+        draw_cursor(g);
         draw_hud(g, file);
         EndDrawing();
     }
 
     if (g->tex_loaded) UnloadTexture(g->tex);
+    if (g->font_loaded) UnloadFont(g->font);
     render_close(g->rctx);
     free(g);
     CloseWindow();
