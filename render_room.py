@@ -199,11 +199,13 @@ def render_room(rid, phase=0, out=None):
     # foreground: BLOCKS. Tile index = (raw & 0x3f) within the 64-tile set
     # selected by tile_offset (one unit = 16 tiles); high bits of raw are
     # attributes (solid/magnetic/slippery), not part of the tile index.
+    # Foreground tiles are opaque (no colour key) — the game does no alpha
+    # blending; only tile index 0 ("invisible") shows the background through.
     for ty, row in enumerate(grid):
         for tx, raw in enumerate(row):
             v = raw & 0x3f
             if v:
-                canvas.alpha_composite(decode_tile(blocks, v + tile_offset * 16, 0),
+                canvas.alpha_composite(decode_tile(blocks, v + tile_offset * 16, None),
                                        (tx * TILE, ty * TILE))
     # sprites + player; `phase` cycles each creature through its frame range.
     # blit at a *feet tile* (fx, fy): left edge at column fx, feet resting on
