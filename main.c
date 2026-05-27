@@ -1227,14 +1227,18 @@ int main(int argc, char **argv) {
         } else if (strcasecmp(argv[0], "render") == 0) {
             argv ++; argc --;
             if (argc < 2) {
-                fprintf(stderr, "Usage: render ROOMID OUT.png [--debug] [--scale N] [--data-dir DIR]\n");
+                fprintf(stderr, "Usage: render ROOMID|all OUT.png|DIR [--debug] [--scale N] [--data-dir DIR]\n");
                 defer_return(1);
             }
-            char *rend;
-            long rid = strtol(argv[0], &rend, 0);
-            if (*rend != '\0' || rid < 0 || rid >= 64) {
-                fprintf(stderr, "render: invalid room id '%s'\n", argv[0]);
-                defer_return(1);
+            bool render_all = (strcasecmp(argv[0], "all") == 0);
+            long rid = 0;
+            if (!render_all) {
+                char *rend;
+                rid = strtol(argv[0], &rend, 0);
+                if (*rend != '\0' || rid < 0 || rid >= 64) {
+                    fprintf(stderr, "render: invalid room id '%s'\n", argv[0]);
+                    defer_return(1);
+                }
             }
             const char *out = argv[1];
             argv += 2; argc -= 2;
@@ -1251,8 +1255,12 @@ int main(int argc, char **argv) {
                     defer_return(1);
                 }
             }
-            if (!render_room_png(&file, (int)rid, out, opts)) defer_return(1);
-            fprintf(stderr, "Wrote %s\n", out);
+            if (render_all) {
+                if (!render_all_png(&file, out, opts)) defer_return(1);
+            } else {
+                if (!render_room_png(&file, (int)rid, out, opts)) defer_return(1);
+                fprintf(stderr, "Wrote %s\n", out);
+            }
             defer_return(0);
         } else if (strcasecmp(argv[0], "rooms") == 0) {
             list = true;

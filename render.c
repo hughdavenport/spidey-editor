@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "array.h"
 #include "spl.h"
@@ -145,6 +146,31 @@ static void creature_frame(SpriteType type, uint8_t dmg, int *use_spids2, int *f
 
 /* --------------------------------------------------------------- overlay */
 
+// 3x5 bitmap digit font (low 3 bits per row), for debug labels.
+static const uint8_t FONT3x5[10][5] = {
+    {7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7},
+    {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1},
+    {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7},
+};
+static const uint8_t BLACK[3] = {0, 0, 0};
+
+static void draw_digit(uint8_t *cv, int d, int x, int y, const uint8_t rgb[3]) {
+    for (int ry = 0; ry < 5; ry++)
+        for (int rx = 0; rx < 3; rx++)
+            if (FONT3x5[d][ry] & (4 >> rx)) put_px(cv, x + rx, y + ry, rgb);
+}
+
+// Draw a non-negative integer with a 1px black backing for legibility.
+static void draw_number(uint8_t *cv, int n, int x, int y, const uint8_t rgb[3]) {
+    char buf[8];
+    int len = snprintf(buf, sizeof buf, "%d", n);
+    for (int dy = -1; dy <= 5; dy++)
+        for (int dx = -1; dx <= len * 4; dx++)
+            put_px(cv, x + dx, y + dy, BLACK);
+    for (int i = 0; i < len; i++)
+        draw_digit(cv, buf[i] - '0', x + i * 4, y, rgb);
+}
+
 static void draw_box(uint8_t *cv, int x0, int y0, int x1, int y1, const uint8_t rgb[3]) {
     for (int x = x0; x <= x1; x++) { put_px(cv, x, y0, rgb); put_px(cv, x, y1, rgb); }
     for (int y = y0; y <= y1; y++) { put_px(cv, x0, y, rgb); put_px(cv, x1, y, rgb); }
@@ -178,14 +204,16 @@ static void draw_overlay(uint8_t *cv, struct DecompressedRoom *room) {
     for (int gy = 0; gy <= HEIGHT_TILES; gy++)
         for (int x = 0; x < BW; x++) put_px(cv, x, gy * 8, COL_GRID);
 
-    // objects / sprites
+    // objects / sprites, labelled with their index
     for (int i = 0; i < room->num_objects; i++) {
         struct RoomObject *o = room->objects + i;
+        const uint8_t *col = (o->type == BLOCK) ? COL_BLOCK : COL_SPRITE;
         if (o->type == BLOCK)
             draw_box(cv, o->x * 8, o->y * 8,
-                     (o->x + o->block.width) * 8 - 1, (o->y + o->block.height) * 8 - 1, COL_BLOCK);
+                     (o->x + o->block.width) * 8 - 1, (o->y + o->block.height) * 8 - 1, col);
         else
-            draw_box(cv, o->x * 8, o->y * 8, o->x * 8 + 7, o->y * 8 + 7, COL_SPRITE);
+            draw_box(cv, o->x * 8, o->y * 8, o->x * 8 + 7, o->y * 8 + 7, col);
+        draw_number(cv, i, o->x * 8 + 1, o->y * 8 + 1, col);
     }
 
     // switches: marker at origin, line to each toggle target, coloured by type
@@ -194,6 +222,7 @@ static void draw_overlay(uint8_t *cv, struct DecompressedRoom *room) {
         if (sw->chunks.length == 0) continue;
         int ox = sw->chunks.data[0].x * 8 + 4, oy = sw->chunks.data[0].y * 8 + 4;
         draw_box(cv, ox - 3, oy - 3, ox + 3, oy + 3, COL_SW);
+        draw_number(cv, i, ox + 5, oy - 2, COL_SW);
         for (size_t c = 0; c < sw->chunks.length; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
             const uint8_t *col;
@@ -362,4 +391,21 @@ bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOp
 
     free(cv); free(blocks); free(scenery); free(spids1); free(spids2);
     return ok;
+}
+
+bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
+    if (mkdir(out_dir, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "render: cannot create '%s': %s\n", out_dir, strerror(errno));
+        return false;
+    }
+    int n = 0;
+    for (int rid = 0; rid < 64; rid++) {
+        if (!file->rooms[rid].valid) continue;
+        char path[1024];
+        snprintf(path, sizeof path, "%s/room%02d.png", out_dir, rid);
+        if (!render_room_png(file, rid, path, opts)) return false;
+        n++;
+    }
+    fprintf(stderr, "Wrote %d rooms to %s\n", n, out_dir);
+    return true;
 }
