@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
 
 #define C_ARRAY_LEN(a) (sizeof((a)) / sizeof((a)[0]))
 
@@ -37,4 +39,6 @@
     (a).capacity = 0; \
     (a).length = 0; \
 } while (false)
+
+typedef ARRAY(uint8_t) uint8_array;
 #endif /* ARRAY_H */

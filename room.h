@@ -220,7 +220,6 @@ struct __attribute__((__packed__)) DecompressedRoom {
 };
 _Static_assert(offsetof(struct DecompressedRoom, end_marker) == 742, "Size of room is unexpected");
 
-typedef ARRAY(uint8_t) uint8_array;
 typedef struct {
     uint8_t index;
     uint16_t address;

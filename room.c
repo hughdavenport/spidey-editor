@@ -23,6 +23,7 @@ long filesize(FILE *fp) {
 
 #define BOOL_S(b) ((b) ? "true" : "false")
 
+#include "spl.h"
 #include "room.h"
 
 // header of ROOMS.SPL (and BACKS.SPL also)
@@ -373,121 +374,10 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
         read_next(markers[i], fp);
     }
 
-    while (size) {
-        uint8_t val;
-        read_next(val, fp);
-        if (val == markers[1]) {
-            // RLE
-            uint8_t next;
-            read_next(next, fp);
-            if (next < 0x80) {
-                // get last byte, store that byte (next + 2) times)
-                if (tmp.decompressed.length < 1) {
-                    log("%s:%d: Corrupt RLE state @ 0x%lx4x\n",
-                            __FILE__, __LINE__, ftell(fp));
-                    freeRoom(&tmp);
-                    return false;
-                }
-                uint8_t copy = tmp.decompressed.data[tmp.decompressed.length - 1];
-                log("%s:%d: Copying 0x%02x %d times\n",
-                        __FILE__, __LINE__, copy, next + 2);
-                for (int i = 0; i < next + 2; i ++) {
-                    ARRAY_ADD(tmp.decompressed, copy);
-                }
-            } else if (next != 0x80) {
-                // copy abs(next) bytes from dst - 0x20 to dst
-                if (tmp.decompressed.length < 0x20) {
-                    log("%s:%d: Corrupt RLE state @ 0x%lx4x\n",
-                            __FILE__, __LINE__, ftell(fp));
-                    freeRoom(&tmp);
-                    return false;
-                }
-                log("%s:%d: Copying from behind 0x%02x, %d times\n",
-                        __FILE__, __LINE__, 0x20, -(int8_t)next);
-                for (int i = 0; i < -(int8_t)next; i ++) {
-                    uint8_t copy = tmp.decompressed.data[tmp.decompressed.length - 0x20];
-                    ARRAY_ADD(tmp.decompressed, copy);
-                }
-            } else {
-                log("%s:%d: Output 0x%02x as is @ %lu\n", __FILE__, __LINE__, val, tmp.decompressed.length);
-                ARRAY_ADD(tmp.decompressed, val);
-            }
-        } else if (val == markers[2]) {
-            // LZ
-            uint8_t next;
-            read_next(next, fp);
-            if (next < 0x80) {
-                // Store start of room marker next + 2 times
-                log("%s:%d: Copying 0x%02x %d times\n",
-                        __FILE__, __LINE__, markers[0], next + 2);
-                for (int i = 0; i < next + 2; i ++) {
-                    ARRAY_ADD(tmp.decompressed, markers[0]);
-                }
-            } else if (next != 0x80) {
-                // copy abs(next) + 1 bytes from dst - read() to dst
-                uint8_t back;
-                read_next(back, fp);
-                if (tmp.decompressed.length < back) {
-                    log("%s:%d: Corrupt RLE state @ 0x%lx4x\n",
-                            __FILE__, __LINE__, ftell(fp));
-                    freeRoom(&tmp);
-                    return false;
-                }
-                log("%s:%d: Copying from behind 0x%02x, %d times\n",
-                        __FILE__, __LINE__, back, -(int8_t)next + 1);
-                for (int i = 0; i < -(int8_t)next + 1; i ++) {
-                    uint8_t copy = tmp.decompressed.data[tmp.decompressed.length - back];
-                    ARRAY_ADD(tmp.decompressed, copy);
-                }
-            } else {
-                log("%s:%d: Output 0x%02x as is @ %lu\n", __FILE__, __LINE__, val, tmp.decompressed.length);
-                ARRAY_ADD(tmp.decompressed, val);
-            }
-        } else if (val == markers[3]) {
-            // Larger backindex LZ's
-            uint8_t next;
-            read_next(next, fp);
-            if (next < 0x80) {
-                uint16_t back;
-                read_next(back, fp);
-                back |= 0x200;
-                if (tmp.decompressed.length < back) {
-                    log("%s:%d: Corrupt RLE state @ 0x%lx4x\n",
-                            __FILE__, __LINE__, ftell(fp));
-                    freeRoom(&tmp);
-                    return false;
-                }
-                log("%s:%d: Copying from behind 0x%02x, %d times\n",
-                        __FILE__, __LINE__, back, next + 2);
-                for (int i = 0; i < next + 2; i ++) {
-                    uint8_t copy = tmp.decompressed.data[tmp.decompressed.length - back];
-                    ARRAY_ADD(tmp.decompressed, copy);
-                }
-            } else if (next != 0x80) {
-                uint16_t back;
-                read_next(back, fp);
-                back |= 0x100;
-                if (tmp.decompressed.length < back) {
-                    log("%s:%d: Corrupt RLE state @ 0x%lx4x\n",
-                            __FILE__, __LINE__, ftell(fp));
-                    freeRoom(&tmp);
-                    return false;
-                }
-                log("%s:%d: Copying from behind 0x%02x, %d times\n",
-                        __FILE__, __LINE__, back, -(int8_t)next + 1);
-                for (int i = 0; i < -(int8_t)next + 1; i ++) {
-                    uint8_t copy = tmp.decompressed.data[tmp.decompressed.length - back];
-                    ARRAY_ADD(tmp.decompressed, copy);
-                }
-            } else {
-                log("%s:%d: Output 0x%02x as is @ %lu\n", __FILE__, __LINE__, val, tmp.decompressed.length);
-                ARRAY_ADD(tmp.decompressed, val);
-            }
-        } else {
-            // Just add it as is then get next
-            log("%s:%d: Output 0x%02x as is @ %lu\n", __FILE__, __LINE__, val, tmp.decompressed.length);
-            ARRAY_ADD(tmp.decompressed, val);
-        }
+    if (!spl_decompress(fp, (size_t)size, markers, &tmp.decompressed, &tmp.compressed)) {
+        log("%s:%d: Decompression failed\n", __FILE__, __LINE__);
+        freeRoom(&tmp);
+        return false;
     }
     log("%s:%d: Finishing read at 0x%lx\n", __FILE__, __LINE__, ftell(fp));
 #undef read_next
@@ -1451,7 +1341,13 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
             else if (strcmp(stype, "DINOSAUR")     == 0) obj->sprite.type = DINOSAUR;
             else if (strcmp(stype, "RAT")          == 0) obj->sprite.type = RAT;
             else if (strcmp(stype, "SHOTGUN_LADY") == 0) obj->sprite.type = SHOTGUN_LADY;
-            else {
+            else if (strcmp(stype, "MYSTERIO") == 0) {
+                obj->sprite.type = SHARK;
+                obj->sprite.damage = 3;
+            } else if (strcmp(stype, "MARY_JANE") == 0) {
+                obj->sprite.type = SHARK;
+                obj->sprite.damage = 3;
+            } else {
                 fprintf(stderr, "import: unknown sprite type '%s'\n", stype);
                 return false;
             }
