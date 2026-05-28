@@ -46,6 +46,8 @@ typedef struct {
     int mode;               // 0=NORMAL, 1=GOTO_ROOM, 2=GOTO_SWITCH, 3=GOTO_OBJECT
     uint8_t goto_acc;       // accumulator for goto digit entry
     uint8_t goto_n;         // digit count entered so far
+    uint8_t clip_tile;      // yanked tile byte ('y' copies, 'p' pastes)
+    bool clip_set;
     int undo_n, redo_n;     // tile-snapshot undo/redo stacks
     struct { uint8_t room; uint8_t tiles[WIDTH_TILES * HEIGHT_TILES]; } undo[24], redo[24];
 } GuiState;
@@ -133,9 +135,9 @@ static void draw_hud(GuiState *g, RoomFile *file) {
         snprintf(buf, sizeof buf, n == 0 ? "_" : n == 1 ? "%X_" : "%02X", g->goto_acc);
         gtext(g, TextFormat("%s: %s  [enter/digits commit, esc cancel]", mode_lbl, buf), 8, 47, 13, YELLOW);
     } else {
-        gtext(g, TextFormat("up:%d dn:%d l:%d r:%d  [hjkl]cur [S+hjkl]move-tile [0-f]write [r/s/o]goto [u/U]undo [^D]dbg:%s",
-                            r->room_north, r->room_south, r->room_west, r->room_east,
-                            g->debug ? "on" : "off"), 8, 47, 12, GRAY);
+        const char *clip = g->clip_set ? TextFormat("  [Y:%02X]", g->clip_tile) : "";
+        gtext(g, TextFormat("[hjkl]cur [S+hjkl]move [0-f]write [y/p]yank/paste [r/s/o]goto [u/U]undo [^D]dbg:%s%s",
+                            g->debug ? "on" : "off", clip), 8, 47, 12, GRAY);
     }
 }
 
@@ -449,6 +451,17 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
         }
         if (IsKeyPressed(KEY_ESCAPE)) {
             g->partial = 0; g->mode = MODE_NORMAL; g->goto_acc = 0; g->goto_n = 0;
+        }
+        if (g->mode == MODE_NORMAL && !ctrl && !shift && IsKeyPressed(KEY_Y)) {
+            Cur c = g->cursors[g->room_id];
+            g->clip_tile = file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x];
+            g->clip_set = true;
+        }
+        if (g->mode == MODE_NORMAL && !ctrl && !shift && IsKeyPressed(KEY_P) && g->clip_set) {
+            Cur c = g->cursors[g->room_id];
+            snapshot(g, file);
+            file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x] = g->clip_tile;
+            mark_edited(g);
         }
         if (g->mode == MODE_NORMAL && !ctrl && IsKeyPressed(KEY_U)) {
             bool redo = shift;
