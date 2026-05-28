@@ -43,10 +43,14 @@ typedef struct {
     int pal_offset;         // tile_offset the palette texture was built for
     uint8_t sel_tile;       // currently selected palette tile (0..63)
     bool painting;          // left-mouse drag painting into the room
+    int mode;               // 0=NORMAL, 1=GOTO_ROOM, 2=GOTO_SWITCH, 3=GOTO_OBJECT
+    uint8_t goto_acc;       // accumulator for goto digit entry
+    uint8_t goto_n;         // digit count entered so far
     int undo_n, redo_n;     // tile-snapshot undo/redo stacks
     struct { uint8_t room; uint8_t tiles[WIDTH_TILES * HEIGHT_TILES]; } undo[24], redo[24];
 } GuiState;
 #define UNDO_MAX 24
+enum { MODE_NORMAL, MODE_GOTO_ROOM, MODE_GOTO_SWITCH, MODE_GOTO_OBJECT };
 
 static const char *FONT_CANDIDATES[] = {
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
@@ -120,9 +124,19 @@ static void draw_hud(GuiState *g, RoomFile *file) {
                         r->background, r->tile_offset, r->room_damage,
                         r->gravity_vertical, r->gravity_horizontal,
                         cur.x, cur.y, r->tiles[cur.y * WIDTH_TILES + cur.x], entry), 8, 30, 14, LIGHTGRAY);
-    gtext(g, TextFormat("up:%d dn:%d l:%d r:%d  [hjkl]move [0-f]tile [bksp]clear [u/U]undo [^D]dbg:%s",
-                        r->room_north, r->room_south, r->room_west, r->room_east,
-                        g->debug ? "on" : "off"), 8, 47, 13, GRAY);
+    const char *mode_lbl =
+        g->mode == MODE_GOTO_ROOM   ? "GOTO ROOM"   :
+        g->mode == MODE_GOTO_SWITCH ? "GOTO SWITCH" :
+        g->mode == MODE_GOTO_OBJECT ? "GOTO OBJECT" : "";
+    if (g->mode != MODE_NORMAL) {
+        char buf[16]; int n = g->goto_n;
+        snprintf(buf, sizeof buf, n == 0 ? "_" : n == 1 ? "%X_" : "%02X", g->goto_acc);
+        gtext(g, TextFormat("%s: %s  [enter/digits commit, esc cancel]", mode_lbl, buf), 8, 47, 13, YELLOW);
+    } else {
+        gtext(g, TextFormat("up:%d dn:%d l:%d r:%d  [hjkl]cur [S+hjkl]move-tile [0-f]write [r/s/o]goto [u/U]undo [^D]dbg:%s",
+                            r->room_north, r->room_south, r->room_west, r->room_east,
+                            g->debug ? "on" : "off"), 8, 47, 12, GRAY);
+    }
 }
 
 // Move the cursor; wrap to the linked neighbour room at an edge (editor-style).
@@ -268,6 +282,41 @@ static void mark_edited(GuiState *g) {
     g->drawn_room = -1;                               // re-render the room texture
 }
 
+// Move the tile under the cursor one cell in (dx,dy) (Shift+arrow). Stays
+// within the room (no neighbour-room transfer yet — that's a follow-up).
+static void move_tile(GuiState *g, RoomFile *file, int dx, int dy) {
+    Cur c = g->cursors[g->room_id];
+    int nx = c.x + dx, ny = c.y + dy;
+    if (nx < 0 || nx >= WIDTH_TILES || ny < 0 || ny >= HEIGHT_TILES) return;
+    uint8_t *t = file->rooms[g->room_id].data.tiles;
+    snapshot(g, file);
+    uint8_t v = t[c.y * WIDTH_TILES + c.x];
+    t[c.y * WIDTH_TILES + c.x] = 0;
+    t[ny * WIDTH_TILES + nx] = v;
+    g->cursors[g->room_id] = (Cur){nx, ny};
+    mark_edited(g);
+}
+
+static void commit_goto(GuiState *g, RoomFile *file) {
+    int idx = g->goto_acc;
+    if (g->mode == MODE_GOTO_ROOM) {
+        if (idx >= 0 && idx < 64 && file->rooms[idx].valid) g->room_id = idx;
+    } else if (g->mode == MODE_GOTO_SWITCH) {
+        struct DecompressedRoom *r = &file->rooms[g->room_id].data;
+        if (idx < r->num_switches && r->switches[idx].chunks.length > 0) {
+            g->cursors[g->room_id] = (Cur){ r->switches[idx].chunks.data[0].x,
+                                            r->switches[idx].chunks.data[0].y };
+        }
+    } else if (g->mode == MODE_GOTO_OBJECT) {
+        struct DecompressedRoom *r = &file->rooms[g->room_id].data;
+        if (idx < r->num_objects)
+            g->cursors[g->room_id] = (Cur){ r->objects[idx].x, r->objects[idx].y };
+    }
+    g->mode = MODE_NORMAL;
+    g->goto_acc = 0;
+    g->goto_n = 0;
+}
+
 // Restore from src stack into the room, saving current tiles to dst stack first.
 static bool restore(GuiState *g, RoomFile *file, int *src_n, void *src_v, int *dst_n, void *dst_v) {
     typedef struct { uint8_t room; uint8_t tiles[WIDTH_TILES * HEIGHT_TILES]; } Snap;
@@ -338,36 +387,59 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
             }
         }
 
-        bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_L)) move_cursor(g, file, +1, 0);
-        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_H)) move_cursor(g, file, -1, 0);
-        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_K)) move_cursor(g, file, 0, -1);
-        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_J)) move_cursor(g, file, 0, +1);
+        bool ctrl  = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+        bool shift = IsKeyDown(KEY_LEFT_SHIFT)   || IsKeyDown(KEY_RIGHT_SHIFT);
+
+        // movement: plain = move cursor (neighbour wrap); shift = move tile in-room
+        int dx = 0, dy = 0;
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_L)) dx =  1;
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_H)) dx = -1;
+        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_K)) dy = -1;
+        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_J)) dy =  1;
+        if (dx || dy) { if (shift) move_tile(g, file, dx, dy); else move_cursor(g, file, dx, dy); }
+
         if (IsKeyPressed(KEY_LEFT_BRACKET))  g->room_id = next_valid(file, g->room_id, -1);
         if (IsKeyPressed(KEY_RIGHT_BRACKET)) g->room_id = next_valid(file, g->room_id, +1);
         if (ctrl && IsKeyPressed(KEY_D)) g->debug = !g->debug;   // Ctrl-D (editor-style)
 
-        // hex tile entry via the char queue (catches every typed key, even if a
-        // frame was slow). Two nibbles -> one byte written under the cursor.
+        // Mode entry: r=goto room, s=goto switch, o=goto object (NORMAL, no mods).
+        if (g->mode == MODE_NORMAL && !ctrl && !shift) {
+            if (IsKeyPressed(KEY_R)) { g->mode = MODE_GOTO_ROOM;   g->goto_acc = 0; g->goto_n = 0; g->partial = 0; }
+            if (IsKeyPressed(KEY_S)) { g->mode = MODE_GOTO_SWITCH; g->goto_acc = 0; g->goto_n = 0; g->partial = 0; }
+            if (IsKeyPressed(KEY_O)) { g->mode = MODE_GOTO_OBJECT; g->goto_acc = 0; g->goto_n = 0; g->partial = 0; }
+        }
+        if (g->mode != MODE_NORMAL && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)))
+            commit_goto(g, file);
+
+        // Hex digits via the char queue. Branch on mode: NORMAL = tile entry;
+        // GOTO_* = accumulate index, commit after enough digits.
         for (int ch = GetCharPressed(); ch != 0; ch = GetCharPressed()) {
             int nib = -1;
             if (ch >= '0' && ch <= '9') nib = ch - '0';
             else if (ch >= 'a' && ch <= 'f') nib = 10 + ch - 'a';
             else if (ch >= 'A' && ch <= 'F') nib = 10 + ch - 'A';
             if (nib < 0) continue;
-            if (g->partial == 0) {
-                g->partial = 0xFF00 | nib;             // first nibble
+            if (g->mode == MODE_NORMAL) {
+                if (g->partial == 0) {
+                    g->partial = 0xFF00 | nib;             // first nibble
+                } else {
+                    uint8_t byte = ((g->partial & 0x0f) << 4) | nib;
+                    Cur c = g->cursors[g->room_id];
+                    snapshot(g, file);
+                    file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x] = byte;
+                    g->partial = 0;
+                    mark_edited(g);
+                }
             } else {
-                uint8_t byte = ((g->partial & 0x0f) << 4) | nib;
-                Cur c = g->cursors[g->room_id];
-                snapshot(g, file);
-                file->rooms[g->room_id].data.tiles[c.y * WIDTH_TILES + c.x] = byte;
-                g->partial = 0;
-                mark_edited(g);
+                g->goto_acc = (uint8_t)((g->goto_acc << 4) | nib);
+                g->goto_n++;
+                int need = (g->mode == MODE_GOTO_ROOM) ? 2 : 1;
+                if (g->goto_n >= need) commit_goto(g, file);
             }
         }
         if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressed(KEY_DELETE)) {
-            if (g->partial) { g->partial = 0; }        // cancel partial first
+            if (g->mode != MODE_NORMAL) { g->goto_acc = 0; g->goto_n = 0; }
+            else if (g->partial) { g->partial = 0; }
             else {
                 Cur c = g->cursors[g->room_id];
                 snapshot(g, file);
@@ -375,9 +447,11 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, void *
                 mark_edited(g);
             }
         }
-        if (IsKeyPressed(KEY_ESCAPE)) g->partial = 0;
-        if (!ctrl && IsKeyPressed(KEY_U)) {            // u = undo, Shift+U = redo
-            bool redo = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            g->partial = 0; g->mode = MODE_NORMAL; g->goto_acc = 0; g->goto_n = 0;
+        }
+        if (g->mode == MODE_NORMAL && !ctrl && IsKeyPressed(KEY_U)) {
+            bool redo = shift;
             bool ok = redo ? restore(g, file, &g->redo_n, g->redo, &g->undo_n, g->undo)
                            : restore(g, file, &g->undo_n, g->undo, &g->redo_n, g->redo);
             if (ok) mark_edited(g);
