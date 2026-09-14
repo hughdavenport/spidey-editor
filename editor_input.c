@@ -1533,17 +1533,22 @@ static bool handle_edit_switchdetails_select_chunk(Key key) {
     return true;
 }
 
+void clipboard_clear(void) {
+    switch (state->clipboard.type) {
+        case CLIP_OBJECT: free(state->clipboard.object.tiles); state->clipboard.object.tiles = NULL; break;
+        case CLIP_SWITCH: ARRAY_FREE(state->clipboard.sw.chunks); break;
+        case CLIP_ROOM:   room_snapshot_free(&state->clipboard.room.data); ARRAY_FREE(state->clipboard.room.rest); break;
+        case CLIP_CHUNK: case CLIP_TILE: case CLIP_NONE: break;
+    }
+    state->clipboard.type = CLIP_NONE;
+}
+
 static void yank_chunk(void) {
     if (!state->current_switch || !state->current_chunk) return;
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     struct SwitchObject *sw = room->switches + state->current_switch - 1;
     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
-    if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
-        free(state->clipboard.object.tiles);
-        state->clipboard.object.tiles = NULL;
-    } else if (state->clipboard.type == CLIP_SWITCH) {
-        ARRAY_FREE(state->clipboard.sw.chunks);
-    }
+    clipboard_clear();
     state->clipboard.type = CLIP_CHUNK;
     state->clipboard.chunk = *chunk;
 }
@@ -1552,12 +1557,7 @@ static void yank_at_cursor(void) {
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;
-    if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
-        free(state->clipboard.object.tiles);
-        state->clipboard.object.tiles = NULL;
-    } else if (state->clipboard.type == CLIP_SWITCH) {
-        ARRAY_FREE(state->clipboard.sw.chunks);
-    }
+    clipboard_clear();
     state->clipboard.type = CLIP_NONE;
     for (size_t j = 0; j < room->num_objects; j++) {
         struct RoomObject *obj = room->objects + j;
@@ -1617,18 +1617,23 @@ static void yank_at_cursor(void) {
             state->clipboard.tile = tile;
         }
     }
+    if (state->clipboard.type == CLIP_NONE) {          // an empty cell: yank the whole room
+        Room *r = &state->rooms.rooms[state->current_level];
+        state->clipboard.type = CLIP_ROOM;
+        room_snapshot_copy(&state->clipboard.room.data, room);
+        state->clipboard.room.rest = (uint8_array){0};
+        for (size_t i = 0; i < r->rest.length; i++) ARRAY_ADD(state->clipboard.room.rest, r->rest.data[i]);
+        state->clipboard.room.index = (uint8_t)state->current_level;
+        snprintf(state->status_message, sizeof(state->status_message),
+                 "Yanked whole room %02zx: p in a room replaces it", state->current_level);
+    }
 }
 
 static void yank_current_switch(void) {
     if (!state->current_switch) return;
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     struct SwitchObject *sw = room->switches + state->current_switch - 1;
-    if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
-        free(state->clipboard.object.tiles);
-        state->clipboard.object.tiles = NULL;
-    } else if (state->clipboard.type == CLIP_SWITCH) {
-        ARRAY_FREE(state->clipboard.sw.chunks);
-    }
+    clipboard_clear();
     state->clipboard.type = CLIP_SWITCH;
     state->clipboard.sw.chunks.length = sw->chunks.length;
     state->clipboard.sw.chunks.capacity = sw->chunks.length;
@@ -3301,6 +3306,24 @@ static bool handle_tile_edit(Key key) {
                 room->tiles[TILE_IDX(x, y)] = state->clipboard.tile;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 editor_save();
+            } else if (state->clipboard.type == CLIP_ROOM) {
+                /* Replace this room with the yanked one: tiles, objects, switches,
+                 * settings and name. This room's exits are kept, so its place on
+                 * the map does not change. */
+                Room *r = &state->rooms.rooms[state->current_level];
+                uint8_t n = room->room_north, e = room->room_east, s = room->room_south, w = room->room_west;
+                push_undo((uint8_t)state->current_level, false);
+                room_snapshot_free(room);
+                room_snapshot_copy(room, &state->clipboard.room.data);
+                room->room_north = n; room->room_east = e; room->room_south = s; room->room_west = w;
+                r->rest.length = 0;
+                for (size_t i = 0; i < state->clipboard.room.rest.length; i++) ARRAY_ADD(r->rest, state->clipboard.room.rest.data[i]);
+                state->current_switch = 0;
+                state->current_chunk = 0;
+                ARRAY_FREE(r->compressed);
+                if (editor_save())
+                    snprintf(state->status_message, sizeof(state->status_message),
+                             "Room %02x pasted over this room (exits kept)", state->clipboard.room.index);
             } else {
                 snprintf(state->status_message, sizeof(state->status_message), "Nothing to paste");
             }

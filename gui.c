@@ -413,7 +413,7 @@ static void focus_move(GuiState *g, int dx, int dy) {
 static void focus_apply(GuiState *g) {
     ged_new_input_batch();
     if (g->focus == FOCUS_WORLD) {
-        ged_map_click(g->world_sel, false);
+        if (ged_map_click(g->world_sel, false)) g->focus = FOCUS_ROOM;   // answered a room prompt: back to the editor for the next one
     } else if (g->focus == FOCUS_BUTTONS) {
         if (g->btn_row && !g->sprites_view && !g->backs_view) g->sel_attr = ATTRS[g->btn_sel % 4].bits;
         else pixed_button_press(g, g->btn_sel % pixed_button_count(g));
@@ -789,8 +789,9 @@ static bool feed_mouse(GuiState *g) {
     g->hover_room = world_room_at(g, m);
     if (g->hover_room >= 0 && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
         ged_new_input_batch();
-        ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
-        g->focus = FOCUS_WORLD; g->world_sel = g->hover_room;
+        bool answered = ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
+        g->focus = answered ? FOCUS_ROOM : FOCUS_WORLD;   // a neighbour / goto answer: the editor keeps the keys
+        g->world_sel = g->hover_room;
         return true;
     }
 
@@ -1183,19 +1184,15 @@ static void draw_palette(GuiState *g) {
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, cellh * 16 + 4}, 2, GOLD);
     }
     int ly = labels_y(g), lh = ch(g);
-    int link = ged_linking();
     const char *lines[] = {
         g->backs_view    ? TextFormat("background %d  scenery tile 0x%02x", cur_backs(), g->sel_img[GFX_SCENERY])
         : !g->sprites_view ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
                          : TextFormat("%s  frame 0x%02x", render_gfx_name(g->pix_src), g->sel_img[g->pix_src]),
         g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs())) : "",
-        link ? TextFormat("switch %d open: right-click an object", link - 1) : "Ctrl-? help (mouse and GUI keys too)",
-        link ? "or switch links it; right-drag tiles" : "",
-        link ? "makes a block chunk (Esc closes)" : "",
+        "Ctrl-? help (mouse and GUI keys too)",
     };
     for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
-        gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs,
-              i == 0 ? RAYWHITE : link ? ORANGE : GRAY);
+        gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
 
     if (g->err_flash > 0)
         gtext(&g->font, g->font_loaded, g->err, x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, RED);

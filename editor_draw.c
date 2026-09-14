@@ -52,8 +52,8 @@ help_keys help[][100] = {
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble / delete / clear tile"},
         {"x/DEL/BS", "cut (yank + delete)"},
-        {"y", "yank (object/switch/block)"},
-        {"p", "paste at cursor"},
+        {"y", "yank (object/switch/block; empty cell: whole room)"},
+        {"p", "paste at cursor (a yanked room replaces this room)"},
         {"+", "increase id"},
         {"-", "decrease id"},
         {"Ctrl-p", "play (play.sh)"},
@@ -565,6 +565,7 @@ void redraw() {
         case CLIP_SWITCH: scr_printf(" \033[1m[Y:sw]\033[m"); break;
         case CLIP_CHUNK:  scr_printf(" \033[1m[Y:chk]\033[m"); break;
         case CLIP_TILE:   scr_printf(" \033[1m[Y:tile]\033[m"); break;
+        case CLIP_ROOM:   scr_printf(" \033[1m[Y:room]\033[m"); break;
         case CLIP_NONE: break;
     }
     if (state->macro_recording) {

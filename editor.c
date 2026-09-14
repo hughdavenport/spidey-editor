@@ -54,11 +54,7 @@ void end() {
     if (state != NULL) {
         if (!screen_headless && isatty(STDIN_FILENO))
             assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
-        if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
-            free(state->clipboard.object.tiles);
-        } else if (state->clipboard.type == CLIP_SWITCH) {
-            ARRAY_FREE(state->clipboard.sw.chunks);
-        }
+        clipboard_clear();
         free_undo_stacks();
         ARRAY_FREE(state->macro_buf);
         for (size_t mi = 0; mi < 26; mi++)

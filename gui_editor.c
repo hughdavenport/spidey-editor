@@ -233,11 +233,11 @@ int ged_item_at(int tx, int ty, int *idx) {
     return 0;
 }
 
-void ged_map_click(int room, bool right) {
-    if (room < 0 || room >= 64) return;
+bool ged_map_click(int room, bool right) {
+    if (room < 0 || room >= 64) return false;
     if (!state->rooms.rooms[room].valid) {
-        if (right) return;                          // nothing to move into a room that does not exist
-        if (!room_create((size_t)room)) return;     // going to an empty slot on the map creates the room (unless the file is full)
+        if (right) return false;                    // nothing to move into a room that does not exist
+        if (!room_create((size_t)room)) return false;   // going to an empty slot on the map creates the room (unless the file is full)
     }
     if (right) {
         if (state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS && state->current_switch) {
@@ -253,14 +253,14 @@ void ged_map_click(int room, bool right) {
             if (!transfer_item_to_room((size_t)room))
                 snprintf(state->status_message, sizeof(state->status_message), "Nothing under the cursor to move");
         }
-        return;
+        return false;
     }
     // choosing a room (goto room, a room link, a chunk's room): this is the choice;
     // otherwise drop whatever was in progress and go there
     if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM ||
             state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM) {
         editor_feed_room_number(room);
-        return;
+        return true;
     }
     editor_cancel_to_plain();
     state->current_level = (size_t)room;
@@ -268,6 +268,7 @@ void ged_map_click(int room, bool right) {
     state->current_switch = 0;
     state->switch_on = false;
     state->current_chunk = 0;
+    return false;
 }
 
 void ged_oob_rows(int *r0, int *r1) { *r0 = panel_oob_row0; *r1 = panel_oob_row1; }

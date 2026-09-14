@@ -78,10 +78,13 @@ int   ged_current_switch(void);    // the editor's selected switch (Ctrl-S / s#)
 int   ged_goto_kind(void);         // 1 = choosing an object (o), 2 = a switch (s), else 0
 bool  ged_map_is_text(void);       // the editor has replaced the hex map with text (room list)
 
-// World map. Left click: go to that room (in the plain editing states).
+// World map. Left click: go to that room (in the plain editing states), or,
+// while the editor asks for a room (goto room, a neighbour in room details, a
+// chunk's room), answer with it: then true is returned so the GUI can hand
+// keyboard focus back to the room for the next question.
 // Right click: move the switch/object under the cursor into that room, or, while
 // a switch-link chunk is selected, point the chunk at that room.
-void  ged_map_click(int room, bool right);
+bool  ged_map_click(int room, bool right);
 // Out-of-bounds switch list: its text rows and the switch listed on a row (-1
 // if none); clicking a row goes through the editor's own click handling.
 void  ged_oob_rows(int *r0, int *r1);

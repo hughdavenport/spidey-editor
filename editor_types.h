@@ -152,6 +152,7 @@ typedef enum {
     CLIP_SWITCH,
     CLIP_CHUNK,
     CLIP_TILE,
+    CLIP_ROOM,
 } ClipType;
 
 typedef struct {
@@ -161,6 +162,11 @@ typedef struct {
         struct RoomObject object; /* tiles malloc'd, must free before overwrite */
         struct SwitchObject sw;  /* chunks.data malloc'd, must free before overwrite */
         struct SwitchChunk chunk; /* plain copy, no pointers */
+        struct {                  /* a whole room: deep copy (room_snapshot_copy), free with room_snapshot_free */
+            struct DecompressedRoom data;
+            uint8_array rest;     /* the room's trailing bytes */
+            uint8_t index;        /* where it was yanked from */
+        } room;
     };
 } Clipboard;
 
@@ -270,6 +276,9 @@ extern size_t panel_oob_switch_n;
 bool transfer_item_to_room(size_t room_idx);
 bool room_create(size_t room_idx);   // make an absent room exist, entirely blank (tiles and settings all 0); false if it already does
 bool editor_save(void);              // writeRooms(); a refused write (game limits) undoes the change and says so in the status line
+void clipboard_clear(void);          // free whatever the clipboard holds; type becomes CLIP_NONE
+void room_snapshot_copy(struct DecompressedRoom *dst, const struct DecompressedRoom *src);   // deep copy (objects, switches)
+void room_snapshot_free(struct DecompressedRoom *snap);
 int  switch_add_chunk(size_t sw_idx, struct SwitchChunk chunk);
 
 /* Forward declarations for cross-module calls */

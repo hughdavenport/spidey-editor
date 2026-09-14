@@ -4,8 +4,8 @@
 
 /* ── Undo/redo helpers ─────────────────────────────────────────────────── */
 
-static void room_snapshot_copy(struct DecompressedRoom *dst,
-                               const struct DecompressedRoom *src) {
+void room_snapshot_copy(struct DecompressedRoom *dst,
+                        const struct DecompressedRoom *src) {
     *dst = *src;  /* copies all inline fields (tiles[], name, metadata, etc.) */
 
     /* Deep-copy objects */
@@ -51,7 +51,7 @@ static void room_snapshot_copy(struct DecompressedRoom *dst,
     }
 }
 
-static void room_snapshot_free(struct DecompressedRoom *snap) {
+void room_snapshot_free(struct DecompressedRoom *snap) {
     if (snap->objects) {
         for (uint8_t i = 0; i < snap->num_objects; i++)
             free(snap->objects[i].tiles);
