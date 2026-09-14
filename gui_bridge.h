@@ -68,11 +68,15 @@ const GCell *ged_cells(int *stride);
 // Queries for the picture layer.
 int   ged_room(void);
 void  ged_cursor(int *x, int *y);
+void  ged_set_cursor(int x, int y);
 bool  ged_show_objects(void);
 bool  ged_show_switches(void);
 RoomFile *ged_rooms(void);
 bool  ged_help_shown(void);
 int   ged_goto_kind(void);         // 1 = choosing an object (o), 2 = a switch (s), else 0
+bool  ged_map_is_text(void);       // the editor has replaced the hex map with text (room list)
+int   ged_item_row(void);          // first text row of the thing-under-cursor details, or -1
+void  ged_item_left_rows(int *r0, int *r1);   // rows in that panel that stay with the room text
 
 // GUI-side tile painting (palette + drag): one undo entry per stroke, room
 // written after the stroke (ged_flush) rather than per cell.

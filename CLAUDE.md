@@ -90,7 +90,11 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   `IsKeyPressed`: a room save takes ~50 ms and polled state drops taps. Modifier presses are
   latched for a few frames (`mod_latch`) because a fast Ctrl-X can straddle a frame boundary.
 - Text cells are 4*scale x 8*scale px so the 64x22 hex map is exactly the picture; the
-  scale follows the window size unless `--scale` pins it. Help is drawn as an overlay.
+  scale follows the window size unless `--scale` pins it. Help is drawn as an overlay. The
+  editor's redraw() records `panel_item_row` (and the out-of-bounds switch rows) so the GUI
+  can move the thing-under-cursor details right of the picture, under the palette.
+- Plain left press is held until release: a click moves the cursor, a drag moves the item
+  and leaves the cursor (and Spider-Man) where it was.
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the
   picture (click selects, Shift+drag / middle-drag paints; one undo entry per stroke,
   written 0.4 s after the stroke). Left/right click go to the editor's mouse handling.

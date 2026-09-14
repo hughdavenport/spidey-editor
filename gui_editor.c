@@ -185,7 +185,18 @@ void ged_cursor(int *x, int *y) {
 bool ged_show_objects(void) { return state->debug.objects; }
 bool ged_show_switches(void) { return state->debug.switches; }
 RoomFile *ged_rooms(void) { return &state->rooms; }
+void ged_set_cursor(int x, int y) {
+    if (x < 0 || x >= WIDTH_TILES || y < 0 || y >= HEIGHT_TILES) return;
+    state->cursors[state->current_level].x = x;
+    state->cursors[state->current_level].y = y;
+}
 bool ged_help_shown(void) { return state->help; }
+int ged_item_row(void) { return panel_item_row; }
+void ged_item_left_rows(int *r0, int *r1) { *r0 = panel_left_row0; *r1 = panel_left_row1; }
+bool ged_map_is_text(void) {
+    return state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM ||
+           state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM;
+}
 int ged_goto_kind(void) {
     return state->current_state == GOTO_OBJECT ? 1 : state->current_state == GOTO_SWITCH ? 2 : 0;
 }

@@ -25,7 +25,7 @@ snap() { import -window root "$T/$1.png"; }
 sleep 4; snap s1-start
 xdotool key ctrl+shift+slash; sleep 0.5; snap s2-nohelp
 xdotool key l l l j j; sleep 0.5; snap s3-moved
-xdotool key r; sleep 0.3; xdotool type 02; sleep 0.6; snap s4-room2
+xdotool key r; sleep 0.4; snap s4a-gotoroom-list; xdotool type 02; sleep 0.6; snap s4-room2
 xdotool key ctrl+r; sleep 0.5; snap s5-roomdetails
 xdotool key Escape; sleep 0.3
 xdotool key F2; sleep 0.5; snap s6-hexmap
@@ -37,11 +37,18 @@ xdotool key ctrl+shift+slash; sleep 0.5; snap s8c-help-overlay; xdotool key ctrl
 # window is at the Xvfb origin? find it
 eval $(xdotool search --name "Spidey Editor" getwindowgeometry --shell | head -5)
 echo "window at $X,$Y size ${WIDTH}x${HEIGHT}"
-# picture scale 3: tile = 24 px, picture origin (0,16). left click on tile (10,5)
-xdotool mousemove $((X + 10*24 + 12)) $((Y + 16 + 5*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s9-click
+# picture scale 3: tile = 24 px, picture origin (0,24). left click on tile (10,5)
+xdotool mousemove $((X + 10*24 + 12)) $((Y + 24 + 5*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s9-click
+# drag: room 1, pull the helicopter block (9,15) two tiles right; the cursor must stay put
+xdotool key r; sleep 0.2; xdotool type 01; sleep 0.5
+xdotool mousemove $((X + 9*24 + 12)) $((Y + 24 + 15*24 + 12)) mousedown 1; sleep 0.1
+xdotool mousemove_relative 24 0; sleep 0.1; xdotool mousemove_relative 24 0; sleep 0.2; snap s9b-dragging
+xdotool mouseup 1; sleep 0.6; snap s9c-dragged
+xdotool key u; sleep 0.5
+xdotool key r; sleep 0.2; xdotool type 02; sleep 0.5
 # palette right of the picture: (768+8, 16); pick tile 0x12 (row 2, col 2)
-xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 16 + 2*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
-xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 16 + 3*24 + 12)) mousedown 1; sleep 0.1
+xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 24 + 2*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
+xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1
 for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done
 xdotool mouseup 1; xdotool keyup shift; sleep 1.0; snap s10-painted
 # hot reload: touch a watched source and wait for the rebuild

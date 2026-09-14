@@ -32,9 +32,10 @@
 #define MAX_REPLAY_PER_FRAME 32
 #define DEFAULT_SCALE 3
 #define MIN_PANEL_ROWS 12       // text rows kept visible under the picture when auto-scaling
-#define SIDE_COLS 36            // palette panel width right of the picture, in text cells
+#define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
+#define PALETTE_LINES 6         // text lines under the palette before the item panel
 #define MAP_COLS (2 * WIDTH_TILES)
-#define INIT_ROWS (1 + HEIGHT_TILES + 14)   // rows shown by the initial window (i3 resizes anyway)
+#define INIT_ROWS (1 + HEIGHT_TILES + 18)   // rows shown by the initial window (i3 resizes anyway)
 
 // Files whose change triggers a hot rebuild of gui.so.
 static const char *WATCHED[] = {
@@ -70,8 +71,9 @@ typedef struct {
     float saved_flash;      // seconds left to show "saved"
     float src_check;        // seconds until the next hot-reload source check
     bool text_map;          // F2: show the editor's hex map instead of the picture
-    bool mouse_down;        // left/right button held over the text grid
-    int mouse_btn;
+    bool mouse_down;        // right button held over the text grid
+    bool lpress;            // plain left press waiting to become a click or a drag
+    int lpress_col, lpress_row;
     int mod_latch[3];       // frames a Shift/Alt/Ctrl press still counts as held (see feed_keys)
     Font help_font;         // the help overlay shrunk to fit the window, if it must
     bool help_font_loaded;
@@ -318,22 +320,45 @@ static bool feed_mouse(GuiState *g) {
         }
     }
 
-    for (int b = 0; b < 3; b += 2) {              // left and right; middle = paint only
-        int btn = b == 0 ? MOUSE_BUTTON_LEFT : MOUSE_BUTTON_RIGHT;
-        if (IsMouseButtonPressed(btn) && in_text) {
-            GKey k = { .code = GK_MOUSE, .col = col, .row = row, .button = b,
-                       .mod = (uint8_t)(mod & (GK_MOD_ALT | GK_MOD_CTRL)) };
-            ged_new_input_batch();
-            ged_key(k);
-            g->mouse_down = true; g->mouse_btn = b;
-            any = true;
-        } else if (IsMouseButtonReleased(btn) && g->mouse_down && g->mouse_btn == b) {
-            GKey k = { .code = GK_MOUSE, .col = col, .row = row, .button = b,
-                       .release = true, .mod = (uint8_t)(mod & (GK_MOD_ALT | GK_MOD_CTRL)) };
-            ged_key(k);
-            g->mouse_down = false;
-            any = true;
-        }
+    // Right click (and Ctrl+left): the editor acts on the press, as in the terminal.
+    bool ctrl_left = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (mod & GK_MOD_CTRL);
+    if ((IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) || ctrl_left) && in_text) {
+        GKey k = { .code = GK_MOUSE, .col = col, .row = row, .button = ctrl_left ? 0 : 2,
+                   .mod = (uint8_t)(mod & (GK_MOD_ALT | GK_MOD_CTRL)) };
+        ged_new_input_batch();
+        ged_key(k);
+        g->mouse_down = true;
+        return true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT) && g->mouse_down) {
+        GKey k = { .code = GK_MOUSE, .col = col, .row = row, .button = 2, .release = true };
+        ged_key(k);
+        g->mouse_down = false;
+        return true;
+    }
+
+    // Plain left: the editor moves the cursor on the press and drags the item
+    // under it on release. With Spider-Man drawn at the cursor that yanks him
+    // onto whatever is being dragged, so the press is held back until release:
+    // a click moves the cursor there; a drag moves the item and leaves the
+    // cursor where it was.
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && in_text) {
+        g->lpress = true; g->lpress_col = col; g->lpress_row = row;
+        return false;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && g->lpress) {
+        g->lpress = false;
+        int cx, cy, room = ged_room();
+        ged_cursor(&cx, &cy);
+        bool drag = in_text && (col != g->lpress_col || row != g->lpress_row);
+        GKey press = { .code = GK_MOUSE, .col = g->lpress_col, .row = g->lpress_row, .button = 0 };
+        GKey release = { .code = GK_MOUSE, .col = drag ? col : g->lpress_col,
+                         .row = drag ? row : g->lpress_row, .button = 0, .release = true };
+        ged_new_input_batch();
+        ged_key(press);
+        ged_key(release);
+        if (drag && ged_room() == room) ged_set_cursor(cx, cy);   // (a drag into a neighbour room follows the item)
+        return true;
     }
     return any;
 }
@@ -366,18 +391,35 @@ static void draw_cell(const GCell *c, int px, int py, int cw, int ch, Font *font
     }
 }
 
+// Top-left of the panel for the thing under the cursor: right of the picture,
+// under the palette and its labels.
+static int item_panel_y(GuiState *g) { return palette_y(g) + TILESET_PX * g->scale + PAD + PALETTE_LINES * ch(g); }
+
 // Everything the editor drew except the help box (right of the hex map; it
 // can run below the map band too — draw_help shows it as an overlay) and,
-// unless F2, the hex map itself.
+// unless F2, the hex map itself. Rows from the editor's item panel onwards
+// (details of the switch/object/chunk under the cursor) are moved to the
+// right of the picture; the room-level lines stay under it.
 static void draw_text_screen(GuiState *g) {
     int stride;
     const GCell *cells = ged_cells(&stride);
-    bool help = ged_help_shown();
+    bool help = ged_help_shown(), text = g->text_map || ged_map_is_text();
+    int item_row = ged_item_row(), left0, left1;
+    ged_item_left_rows(&left0, &left1);
+    if (item_row < GED_MAP_Y + HEIGHT_TILES) item_row = -1;
+    int skipped = 0;                                   // rows kept left, so later moved rows close up
+    int left_y = item_row;                             // next free row under the picture
     for (int y = 0; y < GED_ROWS; y++) {
+        bool moved = item_row >= 0 && y >= item_row && y < GED_ROWS - 1;   // last row: macro overlay
+        bool keep_left = moved && y >= left0 && y < left1;
+        if (keep_left) { moved = false; skipped++; }
         for (int x = 0; x < GED_COLS; x++) {
             if (x >= GED_MAP_X + MAP_COLS && (help || in_map_band(y))) continue;
-            if (in_map_band(y) && !g->text_map) continue;
-            draw_cell(&cells[y * stride + x], x * cw(g), y * ch(g), cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
+            if (in_map_band(y) && !text) continue;
+            int px = x * cw(g), py = y * ch(g);
+            if (moved) { px += palette_x(g); py = item_panel_y(g) + (y - item_row - skipped) * ch(g); }
+            else if (keep_left) { py = (left_y + (y - left0)) * ch(g); }
+            draw_cell(&cells[y * stride + x], px, py, cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
         }
     }
     if (g->text_map) {                       // faint tile grid over the hex map
@@ -476,6 +518,21 @@ static void draw_palette(GuiState *g) {
         gtext(&g->font, g->font_loaded, "saved", x0, ly + 6 * lh, fs, GREEN);
 }
 
+// While a left drag is in progress: outline the tile it started on and point
+// at the tile it would end on.
+static void draw_drag(GuiState *g) {
+    if (!g->lpress || !IsMouseButtonDown(MOUSE_BUTTON_LEFT)) return;
+    int tx, ty;
+    if (!in_map_band(g->lpress_row) || !mouse_tile(g, &tx, &ty)) return;
+    int sx = (g->lpress_col - GED_MAP_X) / 2, sy = g->lpress_row - GED_MAP_Y;
+    if (tx == sx && ty == sy) return;
+    float s = 8.0f * g->scale;
+    Vector2 a = tile_pt(g, sx, sy), b = tile_pt(g, tx, ty);
+    DrawRectangleLinesEx((Rectangle){a.x, a.y, s, s}, 2, (Color){255, 255, 255, 120});
+    DrawLineEx((Vector2){a.x + s / 2, a.y + s / 2}, (Vector2){b.x + s / 2, b.y + s / 2}, 2, (Color){255, 255, 255, 160});
+    DrawRectangleLinesEx((Rectangle){b.x, b.y, s, s}, 2, (Color){255, 255, 255, 200});
+}
+
 // Ghost of the selected tile at the hovered cell while the paint modifier is held.
 static void draw_hover_preview(GuiState *g) {
     int tx, ty;
@@ -515,10 +572,10 @@ static void draw_overlay(GuiState *g) {
             float thick = emph_obj ? 3 : 1;
             if (o->type == BLOCK) {
                 DrawRectangleLinesEx((Rectangle){p.x, p.y, o->block.width * s, o->block.height * s}, thick, emph_obj ? YELLOW : C_BLK);
-                label(g, TextFormat("B%d", i), p.x + 2, p.y + 1, C_BLK, emph_obj);
+                label(g, TextFormat("O%d", i), p.x + 2, p.y + 1, C_BLK, emph_obj);
             } else {
                 DrawRectangleLinesEx((Rectangle){p.x, p.y, s, s}, thick, C_SPR);
-                label(g, TextFormat("%d %s d%d", i, creature_name(o->sprite.type, o->sprite.damage), o->sprite.damage),
+                label(g, TextFormat("O%d %s d%d", i, creature_name(o->sprite.type, o->sprite.damage), o->sprite.damage),
                       p.x + 2, p.y - fs - 3, C_SPR, emph_obj);
             }
         }
@@ -675,7 +732,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         BeginDrawing();
         ClearBackground(BLACK);
         draw_text_screen(g);
-        if (!g->text_map) {
+        if (!g->text_map && !ged_map_is_text()) {   // room-list states show the editor's text instead
             DrawTexturePro(g->tex, (Rectangle){0, 0, ROOM_PX_W, ROOM_PX_H},
                            (Rectangle){pic_x(g), pic_y(g), pic_w(g), pic_h(g)},
                            (Vector2){0, 0}, 0, WHITE);
@@ -684,6 +741,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             BeginScissorMode(pic_x(g), pic_y(g), pic_w(g), pic_h(g));
             draw_overlay(g);
             draw_hover_preview(g);
+            draw_drag(g);
             draw_cursor(g);
             EndScissorMode();
         }
