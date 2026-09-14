@@ -183,7 +183,8 @@ game_state *loop_main(char *library, game_state *call_state) {
     while (true) {
         bool dirty = false;
 
-        if (any_source_newer(test_time)) {
+        /* --release / SPIDEY_NO_HOTRELOAD: never watch or rebuild the sources */
+        if (getenv("SPIDEY_NO_HOTRELOAD") == NULL && any_source_newer(test_time)) {
             // rebuild
             char *build_cmd = NULL;
             assert(asprintf(&build_cmd, "%s %s %s", LIBRARY_BUILD_CMD, library, __FILE__) > 0);

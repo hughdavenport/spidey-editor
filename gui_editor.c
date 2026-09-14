@@ -190,11 +190,17 @@ void ged_set_cursor(int x, int y) {
     state->cursors[state->current_level].x = x;
     state->cursors[state->current_level].y = y;
 }
+void ged_clear_selection(void) {
+    state->current_switch = 0;
+    state->switch_on = false;
+    state->current_chunk = 0;
+}
 bool ged_help_shown(void) { return state->help; }
 bool ged_map_is_text(void) {
     return state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM ||
            state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM;
 }
+int ged_current_switch(void) { return state->current_switch ? (int)state->current_switch - 1 : -1; }
 int ged_goto_kind(void) {
     return state->current_state == GOTO_OBJECT ? 1 : state->current_state == GOTO_SWITCH ? 2 : 0;
 }
@@ -326,9 +332,89 @@ void ged_link_switch(int switch_idx) {
 
 /* --- painting ------------------------------------------------------------- */
 
+static struct RoomObject *block_covering(int tx, int ty) {
+    struct DecompressedRoom *room = cur_room();
+    for (size_t i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        if (o->type == BLOCK && o->tiles && tx >= o->x && tx < o->x + o->block.width &&
+                ty >= o->y && ty < o->y + o->block.height) return o;
+    }
+    return NULL;
+}
+
 int ged_tile_at(int tx, int ty) {
     if (tx < 0 || tx >= WIDTH_TILES || ty < 0 || ty >= HEIGHT_TILES) return 0;
+    struct RoomObject *o = block_covering(tx, ty);
+    if (o) return o->tiles[(ty - o->y) * o->block.width + (tx - o->x)];
     return cur_room()->tiles[TILE_IDX(tx, ty)];
+}
+
+bool ged_place_sprite(int sprite_type, int damage) {
+    if (!plain_state()) return false;
+    struct DecompressedRoom *room = cur_room();
+    int x = state->cursors[state->current_level].x, y = state->cursors[state->current_level].y;
+    struct RoomObject *o = NULL;
+    for (size_t i = 0; i < room->num_objects && !o; i++) {
+        struct RoomObject *c = room->objects + i;
+        bool hit = c->type == SPRITE ? (x == c->x && y == c->y)
+                 : (x >= c->x && x < c->x + c->block.width && y >= c->y && y < c->y + c->block.height);
+        if (hit) o = c;
+    }
+    push_undo((uint8_t)state->current_level, false);
+    if (o == NULL) {
+        if (room->num_objects >= 7) {
+            snprintf(state->status_message, sizeof(state->status_message), "Max 7 objects");
+            return false;
+        }
+        room->objects = realloc(room->objects, (room->num_objects + 1) * sizeof(struct RoomObject));
+        assert(room->objects != NULL);
+        o = room->objects + room->num_objects++;
+        memset(o, 0, sizeof *o);
+        o->x = (uint8_t)x; o->y = (uint8_t)y;
+    } else if (o->type == BLOCK) {
+        free(o->tiles);
+        o->tiles = NULL;
+    }
+    o->type = SPRITE;
+    o->sprite.type = (SpriteType)sprite_type;
+    o->sprite.damage = (uint8_t)damage;
+    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+    snprintf(state->status_message, sizeof(state->status_message), "Writing room");
+    assert(writeRooms(&state->rooms));
+    return true;
+}
+
+bool ged_block_at_cursor(int *idx, int *x, int *y, int *w, int *h) {
+    struct DecompressedRoom *room = cur_room();
+    int cx = state->cursors[state->current_level].x, cy = state->cursors[state->current_level].y;
+    struct RoomObject *o = block_covering(cx, cy);
+    if (o == NULL) return false;
+    *idx = (int)(o - room->objects);
+    *x = o->x; *y = o->y; *w = o->block.width; *h = o->block.height;
+    return true;
+}
+
+int ged_block_tile(int idx, int bx, int by) {
+    struct DecompressedRoom *room = cur_room();
+    if (idx < 0 || idx >= room->num_objects) return 0;
+    struct RoomObject *o = room->objects + idx;
+    if (o->type != BLOCK || !o->tiles || bx < 0 || by < 0 || bx >= o->block.width || by >= o->block.height) return 0;
+    return o->tiles[by * o->block.width + bx];
+}
+
+void ged_block_set_tile(int idx, int bx, int by, uint8_t tile) {
+    struct DecompressedRoom *room = cur_room();
+    if (idx < 0 || idx >= room->num_objects) return;
+    struct RoomObject *o = room->objects + idx;
+    if (o->type != BLOCK || !o->tiles || bx < 0 || by < 0 || bx >= o->block.width || by >= o->block.height) return;
+    o->tiles[by * o->block.width + bx] = tile;
+    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+    paint_pending = true;
+}
+
+void ged_block_resize(int dx, int dy, bool grow) {
+    if (!plain_state()) return;
+    if (grow) stretch(dx, dy); else shrink(dx, dy);
 }
 
 void ged_paint_begin(void) { push_undo((uint8_t)state->current_level, false); }

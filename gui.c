@@ -38,8 +38,13 @@
 #define DEFAULT_SCALE 3
 #define MIN_PANEL_ROWS 12       // text rows kept visible under the picture when auto-scaling
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
-#define PALETTE_LINES 9         // text lines under the palette before the world map
+#define PALETTE_LINES 4         // text lines under the palette before the world map
 #define SWATCH_ROWS 2
+enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_WORLD, FOCUS_COUNT };
+#define ATTR_SOLID 0x40
+static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
+    {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
+};
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
@@ -72,12 +77,20 @@ typedef struct {
     bool pal_loaded;
     int pal_offset;
     uint8_t sel_tile;       // selected palette tile (0..63)
+    uint8_t sel_attr;       // attribute bits painted with it (0x00 pass, 0x40 solid, 0x80 magnetic, 0xc0 slippery)
+    bool block_painting;    // stroke in the block editor
     bool painting;          // paint stroke in progress (Shift+left / middle drag)
     int paint_x, paint_y;
     bool paint_dirty;       // painted cells not yet written to disk
     float save_timer;       // seconds until the pending paint write
     float saved_flash;      // seconds left to show "saved"
     float src_check;        // seconds until the next hot-reload source check
+    bool pix_op;            // this frame's mouse event went to the pixel editor (for `u` routing)
+    int focus;              // which panel arrows / hjkl move: the room, the picker, or the world map
+    int block_hidden;       // block object whose panel was closed with "gfx" (-1 none)
+    int ecx, ecy;           // keyboard cursor in the pixel / block editor grid
+    bool eyedrop;           // next click anywhere picks that colour
+    int world_sel;          // world map: room the keyboard selection is on
     bool text_map;          // F2: show the editor's hex map instead of the picture
     bool mouse_down;        // right button held over the text grid
     bool lpress;            // plain left press waiting to become a click or a drag
@@ -93,8 +106,12 @@ typedef struct {
     bool help_font_loaded;
     int help_font_cw;
     int help_font_px;
-    // pixel editor: one image of one graphics source (tiles or a sprite sheet)
+    // pixel editor: one image of one graphics source. The UI has two views:
+    // tiles, or "sprites" = SPIDS1 stacked over SPIDS2 (sel_sprite 0..127);
+    // pix_src / sel_img are derived from the view and kept as the effective source.
     GfxSource pix_src;
+    bool sprites_view;
+    int sel_sprite;
     int sel_img[GFX_SOURCES];   // selected image per source (tiles: index within the current tileset)
     int sel_colour;             // colour to paint with
     bool pix_painting;          // pixel stroke in progress
@@ -130,6 +147,38 @@ static int  oob_rows(int *r0);
 static int  world_room_at(GuiState *g, Vector2 m);
 static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
 static Rectangle pixed_button(GuiState *g, int i);
+static Rectangle attr_button(GuiState *g, int i);
+static Rectangle pick_button(GuiState *g);
+static int colour_under_mouse(void);
+static void focus_move(GuiState *g, int dx, int dy);
+static void focus_apply(GuiState *g);
+static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh);
+static void sync_sprite_sel(GuiState *g);
+
+// Which creature a sprite frame belongs to (frame ranges verified against the
+// game), and the editor object that places it (SHARK's damage picks Mysterio
+// / Mary Jane). Spider-Man's own frames place nothing.
+static const struct { GfxSource src; int lo, hi; const char *name; int type, dmg; } CREATURES[] = {
+    { GFX_SPIDS1,  0, 31, "Spider-Man",   -1, 0 },
+    { GFX_SPIDS1, 32, 37, "mummy",        MUMMY, 1 },
+    { GFX_SPIDS1, 38, 42, "blue man",     BLUE_MAN, 1 },
+    { GFX_SPIDS1, 43, 45, "shark",        SHARK, 1 },
+    { GFX_SPIDS1, 46, 49, "wolf",         WOLF, 1 },
+    { GFX_SPIDS1, 50, 52, "R2D2",         R2D2, 1 },
+    { GFX_SPIDS1, 53, 57, "dinosaur",     DINOSAUR, 1 },
+    { GFX_SPIDS1, 58, 61, "rat",          RAT, 1 },
+    { GFX_SPIDS1, 62, 63, "Mary Jane",    SHARK, 4 },
+    { GFX_SPIDS2,  0,  5, "shotgun lady", SHOTGUN_LADY, 1 },
+    { GFX_SPIDS2,  6, 10, "Mysterio",     SHARK, 3 },
+    { GFX_SPIDS2, 32, 63, "Spider-Man (rotated)", -1, 0 },
+};
+static int creature_of(GfxSource src, int frame) {
+    for (size_t i = 0; i < sizeof CREATURES / sizeof CREATURES[0]; i++)
+        if (CREATURES[i].src == src && frame >= CREATURES[i].lo && frame <= CREATURES[i].hi) return (int)i;
+    return -1;
+}
+static int block_zoom(GuiState *g, int w, int h);
+static Rectangle block_button(GuiState *g, int i, int h, int z);
 static void pix_undo_push(GuiState *g, GfxSource src, int idx);
 static bool pix_undo_pop(GuiState *g);
 static bool gfx_save_all(GuiState *g);
@@ -155,8 +204,8 @@ static int pixed_h(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return h * pi
 static int swatch_px(GuiState *g) { return pixed_w(g) / 8; }
 static int swatch_y(GuiState *g) { return palette_y(g) + pixed_h(g) + PAD; }
 static int pixed_text_y(GuiState *g) { return swatch_y(g) + SWATCH_ROWS * swatch_px(g) + PAD; }
-static int pixed_buttons_y(GuiState *g) { return pixed_text_y(g) + 3 * ch(g) + 2; }
-static int pixed_bottom(GuiState *g) { return pixed_buttons_y(g) + ch(g) + 4; }
+static int pixed_buttons_y(GuiState *g) { return pixed_text_y(g) + 4 * ch(g) + 2; }
+static int pixed_bottom(GuiState *g) { return pixed_buttons_y(g) + 2 * ch(g) + 16; }
 // the picker's labels (and the world map) start below picker and editor alike
 static int labels_y(GuiState *g) {
     int a = palette_y(g) + TILESET_PX * g->scale, b = pixed_bottom(g);
@@ -200,7 +249,7 @@ static bool mouse_cell(GuiState *g, int *col, int *row) {
     Vector2 m = GetMousePosition();
     if (m.x < 0 || m.y < 0) return false;
     int px = (int)m.x, py = (int)m.y;
-    if (py < panel_top(g)) {
+    if (py < panel_top(g) || ged_map_is_text()) {
         *col = px / cw(g);
         *row = py / ch(g);
         if (in_map_band(*row) && *col >= GED_MAP_X + MAP_COLS) return false;
@@ -288,6 +337,72 @@ static uint8_t mods(void) {
     return m;
 }
 
+// Keep pix_src / sel_img in step with the sprites view's selection.
+static void sync_sprite_sel(GuiState *g) {
+    g->sel_sprite = ((g->sel_sprite % 128) + 128) % 128;
+    g->pix_src = g->sel_sprite < 64 ? GFX_SPIDS1 : GFX_SPIDS2;
+    g->sel_img[g->pix_src] = g->sel_sprite % 64;
+}
+
+// Is the block panel (rather than the pixel editor) showing right now?
+static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh) {
+    return ged_block_at_cursor(bi, bx, by, bw, bh) && *bi != g->block_hidden;
+}
+
+// Arrow / hjkl movement for the panel that has keyboard focus.
+static void focus_move(GuiState *g, int dx, int dy) {
+    if (g->focus == FOCUS_PICKER) {
+        if (!g->sprites_view) g->sel_tile = (uint8_t)((g->sel_tile + dx + 8 * dy + 64) % 64);
+        else { g->sel_sprite += dx + 8 * dy; sync_sprite_sel(g); }
+    } else if (g->focus == FOCUS_WORLD) {
+        g->world_sel = ((g->world_sel + dx + 8 * dy) % 64 + 64) % 64;
+    } else if (g->focus == FOCUS_EDITOR) {
+        int bi, bx, by, w, h;
+        if (!block_panel(g, &bi, &bx, &by, &w, &h)) pixed_dims(g, &w, &h);
+        g->ecx = ((g->ecx + dx) % w + w) % w;
+        g->ecy = ((g->ecy + dy) % h + h) % h;
+    }
+}
+
+// Enter / Space on the focused panel: world map = go to the selected room;
+// picker = put the selected tile (or the selected frame's creature) at the
+// room cursor. Focus stays on the panel.
+static void focus_apply(GuiState *g) {
+    ged_new_input_batch();
+    if (g->focus == FOCUS_WORLD) {
+        ged_map_click(g->world_sel, false);
+    } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
+        int bi, bx, by, bw, bh;
+        if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
+            if (ged_block_tile(bi, g->ecx, g->ecy) != (g->sel_tile | g->sel_attr)) {
+                ged_paint_begin();
+                ged_block_set_tile(bi, g->ecx, g->ecy, (uint8_t)(g->sel_tile | g->sel_attr));
+                g->paint_dirty = true; g->save_timer = 0.4f;
+            }
+        } else {
+            int idx = pixed_index(g);
+            if (render_gfx_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy) != g->sel_colour) {
+                pix_undo_push(g, g->pix_src, idx);
+                render_gfx_set_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy, g->sel_colour);
+                gfx_touched(g, g->pix_src);
+                g->pix_op = true;
+            }
+        }
+    } else if (g->focus == FOCUS_PICKER) {
+        int cx, cy;
+        ged_cursor(&cx, &cy);
+        if (g->pix_src == GFX_TILES) {
+            ged_paint_begin();
+            ged_paint(cx, cy, (uint8_t)(g->sel_tile | g->sel_attr));
+            ged_flush();
+        } else {
+            int c = creature_of(g->pix_src, g->sel_img[g->pix_src]);
+            if (c >= 0 && CREATURES[c].type >= 0) ged_place_sprite(CREATURES[c].type, CREATURES[c].dmg);
+        }
+    }
+    g->room_dirty = true;
+}
+
 static bool is_mod_key(int rk, uint8_t *bit) {
     switch (rk) {
         case KEY_LEFT_SHIFT: case KEY_RIGHT_SHIFT:     *bit = GK_MOD_SHIFT; return true;
@@ -318,6 +433,12 @@ static bool feed_keys(GuiState *g) {
     // printable characters: shift is already applied; Alt rides along as a modifier
     for (int c = GetCharPressed(); c != 0; c = GetCharPressed()) {
         if (c < 0x20 || c > 0x7e) continue;
+        if (g->focus != FOCUS_ROOM && (c == 'h' || c == 'j' || c == 'k' || c == 'l')) {
+            focus_move(g, c == 'h' ? -1 : c == 'l' ? 1 : 0, c == 'k' ? -1 : c == 'j' ? 1 : 0);
+            any = true;
+            continue;
+        }
+        if (g->focus != FOCUS_ROOM && c == ' ') { focus_apply(g); any = true; continue; }
         // `u` undoes the last pixel stroke when that was the most recent edit
         if (c == 'u' && g->pix_undo_n && g->pix_seq > g->key_seq && ged_linking() == 0) { pix_undo_pop(g); any = true; continue; }
         g->key_seq = ++g->seq;
@@ -333,6 +454,18 @@ static bool feed_keys(GuiState *g) {
         GKey k = { .mod = m };
         bool ok = true;
         if (rk == KEY_F2) { g->text_map = !g->text_map; continue; }   // GUI-only: hex map toggle
+        if (rk == KEY_TAB && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {      // GUI-only: cycle keyboard focus
+            g->focus = (g->focus + ((m & GK_MOD_SHIFT) ? FOCUS_COUNT - 1 : 1)) % FOCUS_COUNT;
+            any = true; continue;
+        }
+        if (g->focus != FOCUS_ROOM && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {   // the focused panel takes these
+            if (rk == KEY_LEFT || rk == KEY_RIGHT || rk == KEY_UP || rk == KEY_DOWN) {
+                focus_move(g, rk == KEY_LEFT ? -1 : rk == KEY_RIGHT ? 1 : 0, rk == KEY_UP ? -1 : rk == KEY_DOWN ? 1 : 0);
+                any = true; continue;
+            }
+            if (rk == KEY_ESCAPE) g->focus = FOCUS_ROOM;   // and the editor gets it too
+            if (rk == KEY_ENTER || rk == KEY_KP_ENTER) { focus_apply(g); any = true; continue; }
+        }
         if (rk >= KEY_A && rk <= KEY_Z) {
             if (!(m & GK_MOD_CTRL)) continue;                          // plain letters arrived as chars
             k.code = GK_CTRL; k.ch = (char)('A' + rk - KEY_A); k.mod = (uint8_t)(m & GK_MOD_ALT);
@@ -375,24 +508,33 @@ static bool feed_keys(GuiState *g) {
 static bool feed_mouse(GuiState *g) {
     bool any = false;
     Vector2 m = GetMousePosition();
-    int col = 0, row = 0;
+    int col = 0, row = 0, tx, ty;
     bool in_text = mouse_cell(g, &col, &row);
     uint8_t mod = mods();
     bool paint_btn = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (mod & GK_MOD_SHIFT);
-    int tx, ty;
 
     // middle click on the room: pick that tile into the palette (reverse picker)
     if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) && mouse_tile(g, &tx, &ty)) {
         g->sel_tile = (uint8_t)(ged_tile_at(tx, ty) & 0x3f);
-        g->pix_src = GFX_TILES;
+        g->sel_attr = (uint8_t)(ged_tile_at(tx, ty) & 0xc0);
+        g->pix_src = GFX_TILES; g->sprites_view = false;
         return true;
     }
 
+    if (paint_btn && g->pix_src != GFX_TILES && mouse_tile(g, &tx, &ty)) {   // a sprite sheet is up: place its creature
+        int c = creature_of(g->pix_src, g->sel_img[g->pix_src]);
+        if (c >= 0 && CREATURES[c].type >= 0) {
+            ged_new_input_batch();
+            ged_set_cursor(tx, ty);
+            ged_place_sprite(CREATURES[c].type, CREATURES[c].dmg);
+        }
+        return true;
+    }
     if (paint_btn && mouse_tile(g, &tx, &ty)) {
         ged_paint_begin();                        // one undo entry per stroke
         g->painting = true;
         g->paint_x = tx; g->paint_y = ty;
-        ged_paint(tx, ty, g->sel_tile);
+        ged_paint(tx, ty, (uint8_t)(g->sel_tile | g->sel_attr));
         g->paint_dirty = true; g->save_timer = 0.4f;
         return true;
     }
@@ -401,7 +543,7 @@ static bool feed_mouse(GuiState *g) {
         if (!held) { g->painting = false; }
         else if (mouse_tile(g, &tx, &ty) && (tx != g->paint_x || ty != g->paint_y)) {
             g->paint_x = tx; g->paint_y = ty;
-            ged_paint(tx, ty, g->sel_tile);
+            ged_paint(tx, ty, (uint8_t)(g->sel_tile | g->sel_attr));
             g->paint_dirty = true; g->save_timer = 0.4f;
             any = true;
         }
@@ -411,19 +553,21 @@ static bool feed_mouse(GuiState *g) {
     // picker: pick a tile, or a sprite frame
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int side = TILESET_PX * g->scale, px0 = palette_x(g), py0 = palette_y(g);
-        if (g->pix_src == GFX_TILES) {
+        if (!g->sprites_view) {
             int s = 8 * g->scale;
             if (m.x >= px0 && m.x < px0 + 8 * s && m.y >= py0 && m.y < py0 + 8 * s) {
                 g->sel_tile = (uint8_t)(((int)(m.y - py0) / s) * 8 + (int)(m.x - px0) / s);
+                g->focus = FOCUS_PICKER;
                 return true;
             }
         } else {
-            int w, h, n = render_gfx_count(g->pix_src);
-            render_gfx_size(g->pix_src, &w, &h);
+            int w, h;
+            render_gfx_size(GFX_SPIDS1, &w, &h);
             float cellw = side / 8.0f, cellh = cellw * h / w;
-            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + cellh * ((n + 7) / 8)) {
-                int i = (int)((m.y - py0) / cellh) * 8 + (int)((m.x - px0) / cellw);
-                if (i < n) g->sel_img[g->pix_src] = i;
+            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + cellh * 16) {
+                g->sel_sprite = (int)((m.y - py0) / cellh) * 8 + (int)((m.x - px0) / cellw);
+                sync_sprite_sel(g);
+                g->focus = FOCUS_PICKER;
                 return true;
             }
         }
@@ -435,7 +579,7 @@ static bool feed_mouse(GuiState *g) {
     bool over_pal = m.x >= palette_x(g) && m.x < palette_x(g) + TILESET_PX * g->scale &&
                     m.y >= palette_y(g) && m.y < palette_y(g) + TILESET_PX * g->scale;
     if ((wv.x != 0 || wv.y != 0) && (over_pic || over_pal)) {
-        int dt = (int)wv.x, db = (int)wv.y;
+        int dt = wv.x > 0 ? 1 : wv.x < 0 ? -1 : 0, db = wv.y > 0 ? 1 : wv.y < 0 ? -1 : 0;
         if (mod & GK_MOD_SHIFT) { dt = db; db = 0; }
         ged_new_input_batch();
         ged_adjust_room(db, dt);
@@ -449,6 +593,65 @@ static bool feed_mouse(GuiState *g) {
         return true;
     }
 
+    // eyedropper: the click after "pick" reads the colour under the mouse, anywhere
+    if (g->eyedrop && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        int c = colour_under_mouse();
+        if (c >= 0) g->sel_colour = c;
+        g->eyedrop = false;
+        g->pix_op = true;
+        return true;
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, pick_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
+        g->eyedrop = !g->eyedrop;
+        g->pix_op = true;
+        return true;
+    }
+
+    // attribute buttons under the source buttons (tiles view)
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !g->sprites_view)
+        for (int i = 0; i < 4; i++)
+            if (CheckCollisionPointRec(m, attr_button(g, i))) { g->sel_attr = ATTRS[i].bits; return true; }
+
+    // block editor (while the cursor is on a block object it replaces the pixel editor)
+    {
+        int bi, bx, by, bw, bh;
+        if (ged_block_at_cursor(&bi, &bx, &by, &bw, &bh) && bi != g->block_hidden) {
+            int z = block_zoom(g, bw, bh), x0 = pixed_x(g), y0 = palette_y(g);
+            bool in_grid = m.x >= x0 && m.x < x0 + bw * z && m.y >= y0 && m.y < y0 + bh * z;
+            if (in_grid) {
+                int cx = (int)(m.x - x0) / z, cy = (int)(m.y - y0) / z;
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+                    g->focus = FOCUS_EDITOR; g->ecx = cx; g->ecy = cy;
+                }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+                    int t = ged_block_tile(bi, cx, cy);
+                    g->sel_tile = (uint8_t)(t & 0x3f); g->sel_attr = (uint8_t)(t & 0xc0); g->pix_src = GFX_TILES; g->sprites_view = false;
+                    return true;
+                }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->block_painting = true; ged_paint_begin(); }
+                if (g->block_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+                        ged_block_tile(bi, cx, cy) != (g->sel_tile | g->sel_attr)) {
+                    ged_block_set_tile(bi, cx, cy, (uint8_t)(g->sel_tile | g->sel_attr));
+                    g->paint_dirty = true; g->save_timer = 0.4f;
+                    return true;
+                }
+            }
+            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->block_painting = false;
+            if (g->block_painting) return false;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                static const int dxy[4][3] = { {1, 0, 1}, {1, 0, 0}, {0, 1, 1}, {0, 1, 0} };   // w+ w- h+ h-
+                for (int i = 0; i < 5; i++)
+                    if (CheckCollisionPointRec(m, block_button(g, i, bh, z))) {
+                        if (i == 4) { g->block_hidden = bi; return true; }          // gfx: back to the pixel editor
+                        ged_new_input_batch();
+                        ged_block_resize(dxy[i][0], dxy[i][1], dxy[i][2]);
+                        return true;
+                    }
+            }
+            if (in_grid) return false;
+        }
+    }
+
     // pixel editor: grid, swatches, buttons
     {
         int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g), w, h;
@@ -457,11 +660,16 @@ static bool feed_mouse(GuiState *g) {
         bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             g->sel_colour = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
+            g->pix_op = true;
             return true;
         }
         int idx = pixed_index(g);
         if (in_grid) {
+            g->pix_op = true;
             int tx = (int)(m.x - x0) / px, ty = (int)(m.y - y0) / px;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+                g->focus = FOCUS_EDITOR; g->ecx = tx; g->ecy = ty;
+            }
             if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty); return true; }
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->pix_painting = true; pix_undo_push(g, g->pix_src, idx); }
             if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
@@ -473,9 +681,14 @@ static bool feed_mouse(GuiState *g) {
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
         if (g->pix_painting) return false;
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && g->block_hidden >= 0 && CheckCollisionPointRec(m, pixed_button(g, 3))) {
+            g->block_hidden = -1;                                        // block: show its panel again
+            return true;
+        }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < 3; i++) {
                 if (!CheckCollisionPointRec(m, pixed_button(g, i))) continue;
+                g->pix_op = true;
                 if (i == 0) {                                   // reset: the image as shipped
                     uint8_t orig[GFX_MAX_BYTES];
                     if (render_gfx_original(g->rctx, g->pix_src, idx, orig)) {
@@ -483,7 +696,8 @@ static bool feed_mouse(GuiState *g) {
                         render_gfx_put(g->rctx, g->pix_src, idx, orig);
                         gfx_touched(g, g->pix_src);
                     }
-                } else g->pix_src = (GfxSource)(i - 1);
+                } else if (i == 1) { g->sprites_view = false; g->pix_src = GFX_TILES; }
+                else { g->sprites_view = true; sync_sprite_sel(g); }
                 return true;
             }
         }
@@ -494,6 +708,7 @@ static bool feed_mouse(GuiState *g) {
     if (g->hover_room >= 0 && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
         ged_new_input_batch();
         ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
+        g->focus = FOCUS_WORLD; g->world_sel = g->hover_room;
         return true;
     }
 
@@ -545,6 +760,7 @@ static bool feed_mouse(GuiState *g) {
     // cursor where it was.
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && in_text) {
         g->lpress = true; g->lpress_col = col; g->lpress_row = row;
+        g->focus = FOCUS_ROOM;
         return false;
     }
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && g->lpress) {
@@ -558,7 +774,7 @@ static bool feed_mouse(GuiState *g) {
         ged_new_input_batch();
         ged_key(press);
         ged_key(release);
-        if (drag && ged_room() == room) ged_set_cursor(cx, cy);   // (a drag into a neighbour room follows the item)
+        if (drag && ged_room() == room) { ged_set_cursor(cx, cy); ged_clear_selection(); }   // (a drag into a neighbour room follows the item)
         return true;
     }
     return any;
@@ -642,6 +858,15 @@ static void draw_text_screen(GuiState *g) {
     int stride;
     const GCell *cells = ged_cells(&stride);
     bool help = ged_help_shown(), text = g->text_map || ged_map_is_text();
+    if (ged_map_is_text()) {                    // room list: one continuous text screen, one font
+        for (int y = 0; y < GED_ROWS; y++)
+            for (int x = 0; x < GED_COLS; x++) {
+                if (x >= GED_MAP_X + MAP_COLS && (help || in_map_band(y))) continue;
+                if (y * ch(g) >= GetScreenHeight()) break;
+                draw_cell(&cells[y * stride + x], x * cw(g), y * ch(g), cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
+            }
+        return;
+    }
     int first_panel = GED_MAP_Y + HEIGHT_TILES;
     int max_scroll = panel_max_scroll(g);
     if (g->scroll > max_scroll) g->scroll = max_scroll;
@@ -716,8 +941,26 @@ static void draw_help(GuiState *g) {
         }
     if (x1 < 0) return;
     int cols = x1 - x0 + 1, rows = y1 - y0 + 1;
+    static const char *gui_help[] = {
+        "GUI  (mouse and keys on top of the editor's)",
+        "F2 hex map               q quit             wheel over text: scroll",
+        "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
+        "        that creature); middle-click on the room picks the tile",
+        "wheel over room or picker: background; Shift+wheel / horizontal wheel: tileset",
+        "world map: click = go there; right-click = move the thing under the cursor there",
+        "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
+        "focus: Tab cycles room / picker / editor / world map (or click one); arrows, hjkl move it; Enter or Space",
+        "       applies (picker: put tile or creature at the room cursor; editor: paint); Esc = back to the room",
+        "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
+        "        pick = then click any colour on screen (room, picker, world map)",
+        "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize",
+        "info text: click a switch / chunk / object / room field line to edit it",
+    };
+    int nextra = (int)(sizeof gui_help / sizeof gui_help[0]);
+    for (int i = 0; i < nextra; i++) { int l = (int)strlen(gui_help[i]) + 2; if (l > cols) cols = l; }
+    int total = rows + nextra + 1;
     int hch = ch(g);
-    if (rows * hch > GetScreenHeight() - 2 * PAD) hch = (GetScreenHeight() - 2 * PAD) / rows;
+    if (total * hch > GetScreenHeight() - 2 * PAD) hch = (GetScreenHeight() - 2 * PAD) / total;
     if (cols * hch / 2 > GetScreenWidth() - 2 * PAD) hch = 2 * (GetScreenWidth() - 2 * PAD) / cols;
     if (hch < 8) hch = 8;
     int hcw = hch / 2;
@@ -732,7 +975,7 @@ static void draw_help(GuiState *g) {
         }
         font = &g->help_font; have = g->help_font_loaded; fpx = g->help_font_px;
     }
-    int w = cols * hcw, h = rows * hch;
+    int w = cols * hcw, h = total * hch;
     int ox = pic_x(g) + (pic_w(g) - w) / 2, oy = pic_y(g) + (pic_h(g) - h) / 2;
     if (ox < PAD) ox = PAD;
     if (oy < PAD) oy = PAD;
@@ -740,6 +983,11 @@ static void draw_help(GuiState *g) {
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++)
             draw_cell(&cells[y * stride + x], ox + (x - x0) * hcw, oy + (y - y0) * hch, hcw, hch, font, have, fpx);
+    for (int i = 0; i < nextra; i++) {
+        int yy = oy + (rows + 1 + i) * hch;
+        DrawRectangle(ox, yy, w, hch, (Color){40, 40, 48, 255});
+        gtext(font, have, gui_help[i], ox + hcw, yy + (hch - fpx) / 2, fpx, i == 0 ? GOLD : RAYWHITE);
+    }
 }
 
 static void draw_cursor(GuiState *g) {
@@ -800,38 +1048,39 @@ static void draw_palette(GuiState *g) {
             }
         int sx = g->sel_tile % 8, sy = g->sel_tile / 8;
         DrawRectangleLinesEx((Rectangle){x0 + sx * s, y0 + sy * s, s, s}, 2, GOLD);
+        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, side + 4}, 2, GOLD);
     } else {
-        GfxSource src = g->pix_src;
-        int w, h, n = render_gfx_count(src);
-        render_gfx_size(src, &w, &h);
+        int w, h;
+        render_gfx_size(GFX_SPIDS1, &w, &h);
         float cellw = side / 8.0f, cellh = cellw * h / w;
-        DrawRectangle(x0, y0, side, (int)(cellh * ((n + 7) / 8)), (Color){35, 35, 45, 255});
-        DrawTexturePro(g->sheet_tex[src], (Rectangle){0, 0, g->sheet_tex[src].width, g->sheet_tex[src].height},
-                       (Rectangle){x0, y0, side, cellh * ((n + 7) / 8)}, (Vector2){0, 0}, 0, WHITE);
-        for (int i = 0; i <= 8; i++) DrawLine(x0 + (int)(i * cellw), y0, x0 + (int)(i * cellw), y0 + (int)(cellh * ((n + 7) / 8)), (Color){80, 80, 80, 255});
-        for (int i = 0; i <= (n + 7) / 8; i++) DrawLine(x0, y0 + (int)(i * cellh), x0 + side, y0 + (int)(i * cellh), (Color){80, 80, 80, 255});
-        int sel = g->sel_img[src];
+        for (int k = 0; k < 2; k++) {                      // SPIDS1 on top, SPIDS2 below
+            GfxSource src = k == 0 ? GFX_SPIDS1 : GFX_SPIDS2;
+            int rows = (render_gfx_count(src) + 7) / 8, ty = y0 + (int)(k * 8 * cellh);
+            DrawRectangle(x0, ty, side, (int)(cellh * rows), k == 0 ? (Color){35, 35, 45, 255} : (Color){45, 35, 35, 255});
+            if (g->sheet_loaded[src])
+                DrawTexturePro(g->sheet_tex[src], (Rectangle){0, 0, g->sheet_tex[src].width, g->sheet_tex[src].height},
+                               (Rectangle){x0, ty, side, cellh * rows}, (Vector2){0, 0}, 0, WHITE);
+            for (int i = 0; i <= 8; i++) DrawLine(x0 + (int)(i * cellw), ty, x0 + (int)(i * cellw), ty + (int)(cellh * rows), (Color){80, 80, 80, 255});
+            for (int i = 0; i <= rows; i++) DrawLine(x0, ty + (int)(i * cellh), x0 + side, ty + (int)(i * cellh), (Color){80, 80, 80, 255});
+        }
+        int sel = g->sel_sprite;
         DrawRectangleLinesEx((Rectangle){x0 + (sel % 8) * cellw, y0 + (sel / 8) * cellh, cellw, cellh}, 2, GOLD);
+        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, cellh * 16 + 4}, 2, GOLD);
     }
     int ly = labels_y(g), lh = ch(g);
     int link = ged_linking();
     const char *lines[] = {
-        g->pix_src == GFX_TILES ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile)
-                                : TextFormat("%s  frame 0x%02x", render_gfx_name(g->pix_src), g->sel_img[g->pix_src]),
-        "click a tile; Shift+drag in the",
-        "room paints it; middle-click picks",
-        "wheel over room: background;",
-        "Shift+wheel: tileset; text: scroll",
+        !g->sprites_view ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
+                         : TextFormat("%s  frame 0x%02x", render_gfx_name(g->pix_src), g->sel_img[g->pix_src]),
         "",
-        link ? TextFormat("switch %d open: right-click an object", link - 1)
-             : "world map: click = go there",
-        link ? "or switch links it; right-drag tiles"
-             : "right-click = move thing there",
-        link ? "makes a block chunk (Esc closes)" : "Ctrl-? help   F2 hex map",
+        link ? TextFormat("switch %d open: right-click an object", link - 1) : "Ctrl-? help (mouse and GUI keys too)",
+        link ? "or switch links it; right-drag tiles" : "",
+        link ? "makes a block chunk (Esc closes)" : "",
     };
     for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
         gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs,
-              i == 0 ? RAYWHITE : (link && i >= 5) ? ORANGE : GRAY);
+              i == 0 ? RAYWHITE : link ? ORANGE : GRAY);
+
     if (g->saved_flash > 0)
         gtext(&g->font, g->font_loaded, "saved", x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
 }
@@ -881,10 +1130,75 @@ static bool gfx_save_all(GuiState *g) {
     return any;
 }
 
+// "pick" button right of the swatches: eyedropper mode.
+static Rectangle pick_button(GuiState *g) {
+    return (Rectangle){ pixed_x(g) + 8 * swatch_px(g) + PAD, swatch_y(g), 6 * cw(g), SWATCH_ROWS * swatch_px(g) };
+}
+
+// Nearest palette colour to what is on screen under the mouse (previous frame).
+static int colour_under_mouse(void) {
+    Image shot = LoadImageFromScreen();
+    Vector2 m = GetMousePosition();
+    int mx = (int)m.x, my = (int)m.y, best = 0;
+    if (mx < 0 || my < 0 || mx >= shot.width || my >= shot.height) { UnloadImage(shot); return -1; }
+    Color c = GetImageColor(shot, mx, my);
+    UnloadImage(shot);
+    const uint8_t (*pal)[3] = render_palette();
+    long bestd = -1;
+    for (int i = 0; i < 16; i++) {
+        long dr = c.r - pal[i][0], dg = c.g - pal[i][1], db = c.b - pal[i][2], d = dr * dr + dg * dg + db * db;
+        if (bestd < 0 || d < bestd) { bestd = d; best = i; }
+    }
+    return best;
+}
+
+// Block editor geometry: the block's tiles zoomed to about the picker's height.
+static int block_zoom(GuiState *g, int w, int h) {
+    (void)w; (void)h;
+    return 8 * g->scale * 3 / 2;             // fixed: resizing must not rescale the tiles
+}
+static Rectangle block_button(GuiState *g, int i, int h, int z) {
+    int bw = 5 * cw(g);
+    return (Rectangle){ pixed_x(g) + i * (bw + 4), palette_y(g) + h * z + PAD, bw, ch(g) + 4 };
+}
+
+// The block object under the cursor: its tile grid, click paints the picked
+// tile, right click picks; buttons grow / shrink it.
+static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h) {
+    int z = block_zoom(g, w, h), x0 = pixed_x(g), y0 = palette_y(g), fs = g->font_px;
+    Rectangle src_cell = {0, 0, 8, 8};
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int t = ged_block_tile(idx, x, y) & 0x3f;
+            src_cell.x = (t % 8) * 8; src_cell.y = (t / 8) * 8;
+            DrawTexturePro(g->pal_tex, src_cell, (Rectangle){x0 + x * z, y0 + y * z, z, z}, (Vector2){0, 0}, 0, WHITE);
+        }
+    for (int i = 0; i <= w; i++) DrawLine(x0 + i * z, y0, x0 + i * z, y0 + h * z, (Color){90, 90, 90, 255});
+    for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * z, x0 + w * z, y0 + i * z, (Color){90, 90, 90, 255});
+    if (g->focus == FOCUS_EDITOR) {
+        if (g->ecx >= w) g->ecx = w - 1;
+        if (g->ecy >= h) g->ecy = h - 1;
+        DrawRectangleLinesEx((Rectangle){x0 + g->ecx * z, y0 + g->ecy * z, z, z}, 2, WHITE);
+        DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * z + 4, h * z + 4}, 2, GOLD);
+    }
+    const char *names[] = { "w+", "w-", "h+", "h-", "gfx" };
+    for (int i = 0; i < 5; i++) {
+        Rectangle rb = block_button(g, i, h, z);
+        DrawRectangleRec(rb, (Color){50, 50, 60, 255});
+        DrawRectangleLinesEx(rb, 1, GRAY);
+        int tw = text_w(&g->font, g->font_loaded, names[i], fs);
+        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+    }
+    int ty = (int)block_button(g, 0, h, z).y + ch(g) + PAD;
+    gtext(&g->font, g->font_loaded, TextFormat("block O%d at %d,%d  %dx%d", idx, bx, by, w, h), x0, ty, fs, RAYWHITE);
+    gtext(&g->font, g->font_loaded, "click paints the picked tile,", x0, ty + ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded, "right-click picks; w/h resize; gfx = pixel editor", x0, ty + 2 * ch(g), fs, GRAY);
+}
+
 // Zoomed view of the selected image; left click paints sel_colour, right
 // click picks a pixel's colour; the 16 palette swatches sit under it. The
 // transparent colour of sprites is drawn as a checker.
-static void draw_gfx_editor(GuiState *g) {
+static void draw_gfx_editor(GuiState *g, bool block_available) {
     int idx = pixed_index(g), px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), w, h;
     pixed_dims(g, &w, &h);
     int key = render_gfx_key(g->pix_src);
@@ -898,11 +1212,23 @@ static void draw_gfx_editor(GuiState *g) {
         }
     for (int i = 0; i <= w; i++) DrawLine(x0 + i * px, y0, x0 + i * px, y0 + h * px, (Color){70, 70, 70, 255});
     for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * px, x0 + w * px, y0 + i * px, (Color){70, 70, 70, 255});
+    if (g->focus == FOCUS_EDITOR) {
+        if (g->ecx >= w) g->ecx = w - 1;
+        if (g->ecy >= h) g->ecy = h - 1;
+        DrawRectangleLinesEx((Rectangle){x0 + g->ecx * px, y0 + g->ecy * px, px, px}, 2, WHITE);
+        DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * px + 4, h * px + 4}, 2, GOLD);
+    }
     int sp = swatch_px(g), sy = swatch_y(g);
     for (int c = 0; c < 16; c++) {
         int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
-        DrawRectangle(sx, yy, sp, sp, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
-        if (c == key) gtext(&g->font, g->font_loaded, "T", sx + 2, yy, g->font_px, BLACK);
+        if (c == key) {                          // the game draws this colour as transparent in sprites
+            DrawRectangle(sx, yy, sp, sp, (Color){50, 50, 50, 255});
+            DrawRectangle(sx, yy, sp / 2, sp / 2, (Color){70, 70, 70, 255});
+            DrawRectangle(sx + sp / 2, yy + sp / 2, sp - sp / 2, sp - sp / 2, (Color){70, 70, 70, 255});
+            gtext(&g->font, g->font_loaded, "T", sx + 2, yy, g->font_px, RAYWHITE);
+        } else {
+            DrawRectangle(sx, yy, sp, sp, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
+        }
         if (c == g->sel_colour) DrawRectangleLinesEx((Rectangle){sx, yy, sp, sp}, 2, WHITE);
     }
     int ty = pixed_text_y(g), fs = g->font_px;
@@ -910,15 +1236,41 @@ static void draw_gfx_editor(GuiState *g) {
     for (int i = 0; i < GFX_SOURCES; i++) dirty |= g->gfx_dirty[i];
     gtext(&g->font, g->font_loaded,
           g->pix_src == GFX_TILES ? TextFormat("tile 0x%02x  colour %d", idx, g->sel_colour)
+          : g->sel_colour == key  ? TextFormat("%s frame 0x%02x  colour %d = transparent", render_gfx_name(g->pix_src), idx, g->sel_colour)
                                   : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->pix_src), idx, g->sel_colour),
           x0, ty, fs, RAYWHITE);
     gtext(&g->font, g->font_loaded, "click paints, right-click picks", x0, ty + ch(g), fs, GRAY);
     gtext(&g->font, g->font_loaded, dirty ? "u undoes a stroke; saving..." : "u undoes a stroke",
           x0, ty + 2 * ch(g), fs, dirty ? ORANGE : GRAY);
-    const char *names[] = { "reset", "tiles", "SPIDS1", "SPIDS2" };
-    for (int i = 0; i < 4; i++) {
+    {
+        Rectangle rb = pick_button(g);
+        DrawRectangleRec(rb, g->eyedrop ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
+        DrawRectangleLinesEx(rb, 1, g->eyedrop ? GOLD : GRAY);
+        int tw = text_w(&g->font, g->font_loaded, "pick", fs);
+        gtext(&g->font, g->font_loaded, "pick", (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + ((int)rb.height - fs) / 2, fs, RAYWHITE);
+    }
+    if (g->pix_src != GFX_TILES) {                       // whose frame this is
+        int c = creature_of(g->pix_src, idx);
+        if (c >= 0)
+            gtext(&g->font, g->font_loaded,
+                  CREATURES[c].type >= 0
+                      ? TextFormat("%s (frames 0x%02x-0x%02x): Shift+click in the room places one", CREATURES[c].name, CREATURES[c].lo, CREATURES[c].hi)
+                      : TextFormat("%s (frames 0x%02x-0x%02x)", CREATURES[c].name, CREATURES[c].lo, CREATURES[c].hi),
+                  x0, ty + 3 * ch(g), fs, SKYBLUE);
+    }
+    if (!g->sprites_view)
+        for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
+            Rectangle rb = attr_button(g, i);
+            bool on = ATTRS[i].bits == g->sel_attr;
+            DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
+            DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
+            int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
+            gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+        }
+    const char *names[] = { "reset", "tiles", "sprites", "block" };
+    for (int i = 0; i < (block_available ? 4 : 3); i++) {
         Rectangle rb = pixed_button(g, i);
-        bool on = i > 0 && (GfxSource)(i - 1) == g->pix_src;
+        bool on = (i == 1 && !g->sprites_view) || (i == 2 && g->sprites_view);
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
@@ -941,6 +1293,11 @@ static void spidey_build(GuiState *g) {
 /* -------------------------------------------------------------- world map */
 
 static int world_y(GuiState *g) { return labels_y(g) + PALETTE_LINES * ch(g) + PAD; }
+// attribute buttons (what painted tiles are): a row under the source buttons
+static Rectangle attr_button(GuiState *g, int i) {
+    int bw = 7 * cw(g);
+    return (Rectangle){ pixed_x(g) + i * (bw + 4), pixed_buttons_y(g) + ch(g) + 8, bw, ch(g) + 4 };
+}
 
 // Thumbnail size: 8 columns across the space right of the picture, shrunk if
 // 8 rows would not fit the window.
@@ -1003,6 +1360,7 @@ static void draw_world_map(GuiState *g) {
             gtext(&g->font, g->font_loaded, side, (int)d.x + 1, (int)d.y, fs, SKYBLUE);
         }
         if (r == g->hover_room) DrawRectangleLinesEx(d, 2, WHITE);
+        if (g->focus == FOCUS_WORLD && r == g->world_sel) DrawRectangleLinesEx((Rectangle){d.x - 2, d.y - 2, d.width + 4, d.height + 4}, 2, GOLD);
     }
     if (g->hover_room >= 0 && rooms->rooms[g->hover_room].valid) {   // name of the hovered room
         char name[25] = {0};
@@ -1099,25 +1457,38 @@ static void draw_overlay(GuiState *g) {
         }
     }
     if (!ged_show_switches() && !emph_sw) return;
+    // Which links to draw thick: every chunk of the switch under the cursor (or
+    // the one selected, e.g. an out-of-bounds switch chosen with s7), and every
+    // chunk that targets the object or tile under the cursor.
+    int cx, cy, cur_idx, cur_kind, sel_sw = ged_current_switch();
+    ged_cursor(&cx, &cy);
+    cur_kind = ged_item_at(cx, cy, &cur_idx);
+    if (cur_kind == 1) sel_sw = cur_idx;
     for (int i = 0; i < r->num_switches; i++) {
         struct SwitchObject *sw = r->switches + i;
         if (sw->chunks.length == 0) continue;
         Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
-        DrawCircleV(o, emph_sw ? 6 : 4, emph_sw ? YELLOW : C_SW);
-        label(g, TextFormat("S%d", i), o.x + 6, o.y - fs / 2, C_SW, emph_sw);
+        bool hot_sw = i == sel_sw;
+        DrawCircleV(o, emph_sw || hot_sw ? 6 : 4, emph_sw || hot_sw ? YELLOW : C_SW);
+        label(g, TextFormat("S%d", i), o.x + 6, o.y - fs / 2, C_SW, emph_sw || hot_sw);
         for (size_t c = 1; c < sw->chunks.length; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
+            bool hot = hot_sw;
             if (ch->type == TOGGLE_BLOCK) {
                 int w = ch->dir == HORIZONTAL ? ch->size : 1;
                 int h = ch->dir == VERTICAL ? ch->size : 1;
+                if (cx >= ch->x && cx < ch->x + w && cy >= ch->y && cy < ch->y + h) hot = true;
                 Vector2 t = tile_pt(g, ch->x, ch->y);
-                DrawRectangleLinesEx((Rectangle){t.x, t.y, w * s, h * s}, 1, C_TBLK);
-                DrawLineV(o, tile_pt(g, ch->x + 0.5f, ch->y + 0.5f), C_TBLK);
+                DrawRectangleLinesEx((Rectangle){t.x, t.y, w * s, h * s}, hot ? 3 : 1, hot ? YELLOW : C_TBLK);
+                Vector2 e = tile_pt(g, ch->x + 0.5f, ch->y + 0.5f);
+                if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, C_TBLK);
             } else if (ch->type == TOGGLE_OBJECT && ch->index < r->num_objects) {
                 struct RoomObject *t = r->objects + ch->index;
+                if (cur_kind == 2 && cur_idx == ch->index) hot = true;
                 float cw = t->type == BLOCK ? t->block.width / 2.0f : 0.5f;
                 float chh = t->type == BLOCK ? t->block.height / 2.0f : 0.5f;
-                DrawLineV(o, tile_pt(g, t->x + cw, t->y + chh), C_OBJ);
+                Vector2 e = tile_pt(g, t->x + cw, t->y + chh);
+                if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, C_OBJ);
             } else if (ch->type == TOGGLE_BIT) {
                 Vector2 e = o;
                 int rid = ch->room_idx;
@@ -1125,9 +1496,14 @@ static void draw_overlay(GuiState *g) {
                 else if (rid == r->room_south) e = tile_pt(g, sw->chunks.data[0].x + 0.5f, HEIGHT_TILES);
                 else if (rid == r->room_west) e = tile_pt(g, 0, sw->chunks.data[0].y + 0.5f);
                 else if (rid == r->room_east) e = tile_pt(g, WIDTH_TILES, sw->chunks.data[0].y + 0.5f);
+                else if (rid == ged_room() && ch->switch_idx < r->num_switches) {   // a switch in this room
+                    struct SwitchObject *ts = r->switches + ch->switch_idx;
+                    if (ts->chunks.length) e = tile_pt(g, ts->chunks.data[0].x + 0.5f, ts->chunks.data[0].y + 0.5f);
+                    if (cur_kind == 1 && cur_idx == (int)ch->switch_idx) hot = true;
+                }
                 if (e.x != o.x || e.y != o.y) {
-                    DrawLineV(o, e, C_BIT);
-                    label(g, TextFormat("R%d", rid), e.x - 8, e.y - 7, C_BIT, false);
+                    if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, C_BIT);
+                    if (rid != ged_room()) label(g, TextFormat("R%d", rid), e.x - 8, e.y - 7, C_BIT, false);
                 }
             }
         }
@@ -1162,6 +1538,8 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         g->rctx = render_open(data_dir);
         if (g->rctx == NULL) { free(g); return NULL; }
         g->fixed_scale = scale;
+        g->sel_attr = ATTR_SOLID;
+        g->block_hidden = -1;
         g->scale = scale > 0 ? scale : DEFAULT_SCALE;
         SetConfigFlags(FLAG_WINDOW_RESIZABLE);
         InitWindow(window_w(g), window_h(g), "Spidey Editor — GUI");
@@ -1182,7 +1560,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     while (!WindowShouldClose() && !ged_quit_requested()) {
         float dt = GetFrameTime();
         g->src_check -= dt;                                // throttle the hot-reload stat()s
-        if (g->src_check <= 0) {
+        if (g->src_check <= 0 && getenv("SPIDEY_NO_HOTRELOAD") == NULL) {   // --release: never watch / rebuild
             g->src_check = 0.5f;
             if (sources_changed(last_build)) {
                 fprintf(stderr, "gui: source changed, rebuilding\n");
@@ -1201,7 +1579,11 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         }
 
         if (feed_keys(g)) g->room_dirty = true;
-        if (feed_mouse(g)) g->room_dirty = true;
+        g->pix_op = false;
+        if (feed_mouse(g)) {
+            g->room_dirty = true;
+            if (!g->pix_op) g->key_seq = ++g->seq;      // a room edit by mouse: `u` goes to the editor
+        }
 
         bool gfx_dirty = false;
         for (int i = 0; i < GFX_SOURCES; i++) gfx_dirty |= g->gfx_dirty[i];
@@ -1258,8 +1640,9 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         }
 
         // textures must not be (re)built inside BeginDrawing: it corrupts the batch
-        if (g->pix_src != GFX_TILES && (!g->sheet_loaded[g->pix_src] || g->sheet_stale[g->pix_src]))
-            sheet_build(g, g->pix_src);
+        if (g->sprites_view)
+            for (int k = GFX_SPIDS1; k <= GFX_SPIDS2; k++)
+                if (!g->sheet_loaded[k] || g->sheet_stale[k]) sheet_build(g, (GfxSource)k);
 
         if (g->saved_flash > 0) g->saved_flash -= dt;
         BeginDrawing();
@@ -1280,7 +1663,13 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             EndScissorMode();
         }
         draw_palette(g);
-        draw_gfx_editor(g);
+        {
+            int bi, bx, by, bw, bh;
+            bool on_block = ged_block_at_cursor(&bi, &bx, &by, &bw, &bh);
+            if (!on_block) g->block_hidden = -1;
+            if (on_block && bi != g->block_hidden) draw_block_editor(g, bi, bx, by, bw, bh);
+            else draw_gfx_editor(g, on_block);
+        }
         draw_world_map(g);
         if (ged_help_shown()) draw_help(g);
         EndDrawing();

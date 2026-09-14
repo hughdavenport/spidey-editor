@@ -69,10 +69,12 @@ const GCell *ged_cells(int *stride);
 int   ged_room(void);
 void  ged_cursor(int *x, int *y);
 void  ged_set_cursor(int x, int y);
+void  ged_clear_selection(void);   // forget the selected switch/chunk (as moving the cursor does)
 bool  ged_show_objects(void);
 bool  ged_show_switches(void);
 RoomFile *ged_rooms(void);
 bool  ged_help_shown(void);
+int   ged_current_switch(void);    // the editor's selected switch (Ctrl-S / s#), or -1
 int   ged_goto_kind(void);         // 1 = choosing an object (o), 2 = a switch (s), else 0
 bool  ged_map_is_text(void);       // the editor has replaced the hex map with text (room list)
 
@@ -98,9 +100,20 @@ int   ged_item_at(int tx, int ty, int *idx);               // 1 switch preamble,
 
 // GUI-side tile painting (palette + drag): one undo entry per stroke, room
 // written after the stroke (ged_flush) rather than per cell.
-int   ged_tile_at(int tx, int ty);         // foreground tile byte at a room cell
+int   ged_tile_at(int tx, int ty);         // foreground tile byte at a room cell (block objects included)
 void  ged_paint_begin(void);
-void  ged_paint(int tx, int ty, uint8_t tile);
+void  ged_paint(int tx, int ty, uint8_t tile);   // into the room grid, or the block object covering the cell
+
+// Put a sprite of this type/damage at the cursor: retype the object there, or
+// create one (max 7 objects). false if it could not.
+bool  ged_place_sprite(int sprite_type, int damage);
+
+// Block object under the cursor: its bounds and tiles, painting into it, and
+// growing / shrinking it (the editor's stretch / shrink: dx for width, dy for height).
+bool  ged_block_at_cursor(int *idx, int *x, int *y, int *w, int *h);
+int   ged_block_tile(int idx, int bx, int by);
+void  ged_block_set_tile(int idx, int bx, int by, uint8_t tile);
+void  ged_block_resize(int dx, int dy, bool grow);
 bool  ged_flush(void);             // write pending paints; true if it wrote
 
 #endif /* GUI_BRIDGE_H */

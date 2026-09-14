@@ -115,13 +115,27 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Wheel over the picture or the palette: background +-1; horizontal or Shift+wheel: tileset +-4
   (`ged_adjust_room`). Middle-click on a room tile picks it into the palette.
 - Pixel editor right of the picker, for a "graphics source" (`GfxSource` in render.h): the
-  BLOCKS tiles, or the SPIDS1 / SPIDS2 sprite frames (24x21, colour 15 transparent, drawn as
-  a checker). Buttons switch the source; the picker then shows that sheet. Paints into the
-  RenderCtx data (`render_gfx_set_pixel`) and writes the file in the data dir 0.6 s after a
-  stroke, keeping a one-time <file>.orig backup. This edits the game's graphics for every
-  room. `u` undoes the last stroke while a pixel stroke is the most recent edit (GUI-side
-  stack, no redo); "reset" restores the image from the .orig. play.sh copies a newer
-  ./BLOCKS.EGA into Spider/ so the game shows edited tiles.
+  BLOCKS tiles, or the sprite frames (24x21, colour 15 transparent, drawn as a checker; the
+  "sprites" view stacks SPIDS1 over SPIDS2, `sel_sprite` 0..127). Paints into the RenderCtx
+  data (`render_gfx_set_pixel`) and writes the file in the data dir 0.6 s after a stroke,
+  keeping a one-time <file>.orig backup. This edits the game's graphics for every room. `u`
+  undoes the last stroke while a pixel stroke is the most recent edit (GUI-side stack, no
+  redo); "reset" restores the image from the .orig; "pick" is an eyedropper for the next click
+  anywhere on screen. play.sh copies a newer ./BLOCKS.EGA into Spider/ so the game shows edits.
+- Sprite frames map to creatures (`CREATURES[]` in gui.c, ranges verified against the game);
+  with a sprite selected, Shift+click in the room places that creature (`ged_place_sprite`:
+  retypes the object under the cursor or creates one).
+- Block object under the cursor: its tile grid replaces the pixel editor (`ged_block_*`);
+  click paints the picked tile (with the attribute buttons' bits), w+/w-/h+/h- call the
+  editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block.
+- Keyboard focus (`g->focus`): Tab cycles room / picker / editor / world map, or click one;
+  arrows and hjkl move that panel's selection, Enter/Space applies it (world map: go there;
+  picker: put tile / creature at the room cursor; editor: paint), Esc returns to the room
+  (and still reaches the editor). `u` after a mouse-driven room edit goes to the room undo.
+- The hint text lives in the Ctrl-? overlay (GUI lines appended under the editor's box).
+- `--release` (or `SPIDEY_NO_HOTRELOAD=1`) on `editor` / `gui` turns off source watching.
+- `gui_smoke_test.sh` runs in a sandbox copy (sources, binaries, Spider/, ROOMS.SPL) so it
+  never touches the live files or a GUI you have open.
 - Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh swap the current room into
   slot 1 of the copy the game runs from, so you start in the room being edited.
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the
