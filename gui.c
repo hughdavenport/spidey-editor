@@ -477,6 +477,10 @@ static bool feed_keys(GuiState *g) {
             continue;
         }
         if (g->focus != FOCUS_ROOM && c == ' ') { focus_apply(g); any = true; continue; }
+        if (g->focus == FOCUS_EDITOR && c == 'f') {        // pixel editor focused: toggle fill mode
+            int bi, bx, by, bw, bh;
+            if (!block_panel(g, &bi, &bx, &by, &bw, &bh)) { g->fill_armed = !g->fill_armed; g->eyedrop = false; any = true; continue; }
+        }
         // `u` undoes the last pixel stroke when that was the most recent edit
         if (c == 'u' && g->pix_undo_n && g->pix_seq > g->key_seq && ged_linking() == 0) { pix_undo_pop(g); any = true; continue; }
         g->key_seq = ++g->seq;
@@ -1030,7 +1034,8 @@ static void draw_help(GuiState *g) {
         "       key (r, s, o, ...) = back to the room",
         "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
         "        pick = then click any colour on screen (room, picker, world map); fill = a mode: clicks on",
-        "        the image (or Space at the editor cursor) flood that region with the colour; click fill again to leave",
+        "        the image (or Space at the editor cursor) flood that region with the colour; click fill again",
+        "        (or f while the pixel editor has focus) to leave",
         "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize",
         "info text: click a switch / chunk / object / room field line to edit it",
     };
