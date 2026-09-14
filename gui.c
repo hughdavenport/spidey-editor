@@ -63,6 +63,9 @@ typedef struct {
     int fixed_scale;        // --scale N (0 = fit the window)
     int scale;              // current picture pixels per game pixel
     RenderCtx *rctx;
+    bool cga;               // editing the .CGA graphics (F3) rather than the .EGA ones
+    const char *data_dir;   // where the graphics live (main()'s argument, for reopening)
+    bool world_stale;       // rebuild the world-map atlas before the next frame
     Texture2D tex;          // rendered room
     bool tex_loaded;
     bool room_dirty;        // re-render the room texture this frame
@@ -165,7 +168,6 @@ static Rectangle fill_button(GuiState *g);
 static int  pixed_button_count(GuiState *g);
 static void pixed_button_press(GuiState *g, int i);
 static void pix_fill(GuiState *g, int idx, int x, int y);
-static int colour_under_mouse(void);
 static bool pixed_locked(GuiState *g);
 static void focus_move(GuiState *g, int dx, int dy);
 static void focus_apply(GuiState *g);
@@ -206,6 +208,8 @@ static bool pix_undo_pop(GuiState *g);
 static bool gfx_save_all(GuiState *g);
 static void gfx_touched(GuiState *g, GfxSource src);
 static void spidey_build(GuiState *g);
+static void set_gfx_mode(GuiState *g, bool cga);
+static int  colour_under_mouse(GuiState *g);
 
 static int cw(GuiState *g) { return 4 * g->scale; }        // text cell width
 static int ch(GuiState *g) { return 8 * g->scale; }        // text cell height (= one tile)
@@ -391,8 +395,9 @@ static void focus_move(GuiState *g, int dx, int dy) {
         else { g->sel_sprite += dx + 8 * dy; sync_sprite_sel(g); }
     } else if (g->focus == FOCUS_WORLD) {
         g->world_sel = ((g->world_sel + dx + 8 * dy) % 64 + 64) % 64;
-    } else if (g->focus == FOCUS_COLOURS) {           // the 8 x 2 swatches: moving selects
-        g->sel_colour = ((g->sel_colour + dx + 8 * dy) % 16 + 16) % 16;
+    } else if (g->focus == FOCUS_COLOURS) {           // the swatches (8 x 2, or 4 in CGA): moving selects
+        int n = render_colours(g->rctx);
+        g->sel_colour = ((g->sel_colour + dx + (n > 8 ? 8 : 0) * dy) % n + n) % n;
     } else if (g->focus == FOCUS_BUTTONS) {           // two rows of buttons: left / right along a row, up / down between them
         bool attrs = !g->sprites_view && !g->backs_view;  // the attribute row exists in the tiles view only
         if (dy && attrs) g->btn_row = !g->btn_row;
@@ -514,6 +519,7 @@ static bool feed_keys(GuiState *g) {
         GKey k = { .mod = m };
         bool ok = true;
         if (rk == KEY_F2) { g->text_map = !g->text_map; continue; }   // GUI-only: hex map toggle
+        if (rk == KEY_F3) { set_gfx_mode(g, !g->cga); any = true; continue; }   // GUI-only: EGA / CGA files
         if (rk == KEY_TAB && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {      // GUI-only: cycle keyboard focus
             int step = (m & GK_MOD_SHIFT) ? FOCUS_COUNT - 1 : 1, bi, bx, by, bw, bh;
             g->focus = (g->focus + step) % FOCUS_COUNT;
@@ -578,7 +584,7 @@ static bool feed_mouse(GuiState *g) {
 
     // eyedropper: the click after "pick" reads the colour under the mouse, anywhere
     if (g->eyedrop && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        int c = colour_under_mouse();
+        int c = colour_under_mouse(g);
         if (c >= 0) g->sel_colour = c;
         g->eyedrop = false;
         g->pix_op = true;
@@ -756,7 +762,8 @@ static bool feed_mouse(GuiState *g) {
         bool in_grid = m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;
         bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            g->sel_colour = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
+            int c = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
+            if (c < render_colours(g->rctx)) g->sel_colour = c;
             g->pix_op = true;
             return true;
         }
@@ -1026,7 +1033,7 @@ static void draw_help(GuiState *g) {
     int cols = x1 - x0 + 1, rows = y1 - y0 + 1;
     static const char *gui_help[] = {
         "GUI  (mouse and keys on top of the editor's)",
-        "F2 hex map               q quit             wheel over text: scroll",
+        "F2 hex map     F3 edit the .CGA / .EGA graphics     q quit     wheel over text: scroll",
         "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
         "        that creature); middle-click on the room picks the tile",
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
@@ -1187,9 +1194,9 @@ static void draw_palette(GuiState *g) {
     const char *lines[] = {
         g->backs_view    ? TextFormat("background %d  scenery tile 0x%02x", cur_backs(), g->sel_img[GFX_SCENERY])
         : !g->sprites_view ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
-                         : TextFormat("%s  frame 0x%02x", render_gfx_name(g->pix_src), g->sel_img[g->pix_src]),
+                         : TextFormat("%s  frame 0x%02x", render_gfx_name(g->rctx, g->pix_src), g->sel_img[g->pix_src]),
         g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs())) : "",
-        "Ctrl-? help (mouse and GUI keys too)",
+        g->cga ? "CGA graphics (F3: EGA)   Ctrl-? help" : "EGA graphics (F3: CGA)   Ctrl-? help",
     };
     for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
         gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
@@ -1251,6 +1258,26 @@ static void backs_touched(GuiState *g) {
     g->room_dirty = true;
 }
 
+// Switch between the .EGA and .CGA graphics files: pending edits are written,
+// the other set is loaded and every picture built from them is redone.
+static void set_gfx_mode(GuiState *g, bool cga) {
+    if (cga == g->cga) return;
+    gfx_save_all(g);
+    RenderCtx *next = render_open(g->data_dir, cga);
+    if (next == NULL) { gui_error(g, cga ? "no .CGA graphics in the data dir" : "no .EGA graphics in the data dir"); return; }
+    render_close(g->rctx);
+    g->rctx = next;
+    g->cga = cga;
+    render_show_player(g->rctx, false);
+    g->pix_undo_n = 0; g->pix_seq = 0;                   // the undo entries belong to the other files
+    g->pal_offset = -1;                                   // palette texture
+    for (int i = 0; i < GFX_SOURCES; i++) g->sheet_stale[i] = true;
+    spidey_build(g);
+    g->world_stale = true;
+    if (g->sel_colour >= render_colours(g->rctx)) g->sel_colour = render_colours(g->rctx) - 1;
+    g->room_dirty = true;
+}
+
 static void gfx_touched(GuiState *g, GfxSource src) {
     g->gfx_dirty[src] = true; g->gfx_timer = 0.6f;
     if (src == GFX_TILES) g->pal_offset = -1;              // rebuild the palette texture
@@ -1281,7 +1308,7 @@ static bool gfx_save_all(GuiState *g) {
         if (!g->gfx_dirty[i]) continue;
         g->gfx_dirty[i] = false;
         if (render_gfx_save(g->rctx, (GfxSource)i)) any = true;
-        else gui_error(g, TextFormat("could not write %s", render_gfx_name((GfxSource)i)));
+        else gui_error(g, TextFormat("could not write %s", render_gfx_name(g->rctx, (GfxSource)i)));
         if (i == GFX_SPIDS1) spidey_build(g);
     }
     if (g->backs_dirty) {
@@ -1339,16 +1366,16 @@ static void pix_fill(GuiState *g, int idx, int x, int y) {
 }
 
 // Nearest palette colour to what is on screen under the mouse (previous frame).
-static int colour_under_mouse(void) {
+static int colour_under_mouse(GuiState *g) {
     Image shot = LoadImageFromScreen();
     Vector2 m = GetMousePosition();
     int mx = (int)m.x, my = (int)m.y, best = 0;
     if (mx < 0 || my < 0 || mx >= shot.width || my >= shot.height) { UnloadImage(shot); return -1; }
     Color c = GetImageColor(shot, mx, my);
     UnloadImage(shot);
-    const uint8_t (*pal)[3] = render_palette();
+    const uint8_t (*pal)[3] = render_palette(g->rctx);
     long bestd = -1;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < render_colours(g->rctx); i++) {
         long dr = c.r - pal[i][0], dg = c.g - pal[i][1], db = c.b - pal[i][2], d = dr * dr + dg * dg + db * db;
         if (bestd < 0 || d < bestd) { bestd = d; best = i; }
     }
@@ -1410,8 +1437,8 @@ static bool pixed_locked(GuiState *g) {
 static void draw_gfx_editor(GuiState *g, bool block_available) {
     int idx = pixed_index(g), px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), w, h;
     pixed_dims(g, &w, &h);
-    int key = render_gfx_key(g->pix_src);
-    const uint8_t (*pal)[3] = render_palette();
+    int key = render_gfx_key(g->rctx, g->pix_src);
+    const uint8_t (*pal)[3] = render_palette(g->rctx);
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
             int c = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
@@ -1428,7 +1455,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * px + 4, h * px + 4}, 2, GOLD);
     }
     int sp = swatch_px(g), sy = swatch_y(g);
-    for (int c = 0; c < 16; c++) {
+    for (int c = 0; c < render_colours(g->rctx); c++) {
         int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
         if (c == key) {                          // the game draws this colour as transparent in sprites
             DrawRectangle(sx, yy, sp, sp, (Color){50, 50, 50, 255});
@@ -1447,8 +1474,8 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     gtext(&g->font, g->font_loaded,
           g->pix_src == GFX_TILES ? TextFormat("tile 0x%02x  colour %d", idx, g->sel_colour)
           : g->pix_src == GFX_SCENERY ? TextFormat("scenery tile 0x%02x  colour %d", idx, g->sel_colour)
-          : g->sel_colour == key  ? TextFormat("%s frame 0x%02x  colour %d = transparent", render_gfx_name(g->pix_src), idx, g->sel_colour)
-                                  : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->pix_src), idx, g->sel_colour),
+          : g->sel_colour == key  ? TextFormat("%s frame 0x%02x  colour %d = transparent", render_gfx_name(g->rctx, g->pix_src), idx, g->sel_colour)
+                                  : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->rctx, g->pix_src), idx, g->sel_colour),
           x0, ty, fs, RAYWHITE);
     gtext(&g->font, g->font_loaded,
           pixed_locked(g) ? "tile 0 is always blank" : "click paints, right-click picks",
@@ -1781,7 +1808,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     if (g == NULL) {
         g = calloc(1, sizeof *g);
         g->structsize = sizeof *g;
-        g->rctx = render_open(data_dir);
+        g->rctx = render_open(data_dir, false);
         if (g->rctx == NULL) { free(g); return NULL; }
         g->fixed_scale = scale;
         g->sel_attr = ATTR_SOLID;
@@ -1796,6 +1823,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         g->es = ged_open(file, g->es);   // re-adopt (or reset) the editor state after a reload
     }
     render_show_player(g->rctx, false);  // he is drawn at the cursor instead
+    g->data_dir = data_dir;
     g->drawn_room = -1;
     g->room_dirty = true;
     g->hover_room = -1;
@@ -1825,6 +1853,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         }
 
         if (feed_keys(g)) g->room_dirty = true;
+        if (g->world_stale) { world_build(g, ged_rooms(), buf); g->world_stale = false; }
         g->pix_op = false;
         if (feed_mouse(g)) {
             g->room_dirty = true;

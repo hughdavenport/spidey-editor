@@ -29,9 +29,12 @@ bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts);
 
 typedef struct RenderCtx RenderCtx;
 
-// Open a render context, loading the EGA/BACKS assets from data_dir once.
+// Open a render context, loading the graphics and BACKS.SPL from data_dir
+// once: the .EGA files (16 colours), or with `cga` the .CGA files (the same
+// pictures packed 2 bits per pixel, 4 colours: black, cyan, magenta, white).
 // Returns NULL (with a message on stderr) if an asset is missing.
-RenderCtx *render_open(const char *data_dir);
+RenderCtx *render_open(const char *data_dir, bool cga);
+bool render_is_cga(RenderCtx *ctx);
 void render_close(RenderCtx *ctx);
 
 // Fill `out` (ROOM_PX_W*ROOM_PX_H*3 RGB bytes) with the room's pixels:
@@ -50,17 +53,17 @@ void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out);
 int render_player_frame(void);
 
 // Pixel editing of the game's graphics files in the context's data dir.
-// A "source" is one file of fixed-size images: BLOCKS.EGA (512 8x8 tiles),
-// SPIDS1.EGA / SPIDS2.EGA (64 24x21 sprite frames, colour 15 transparent),
-// SCENERY.EGA (256 8x8 background tiles).
-// Colours are palette indices 0..15; render_palette() gives their RGB.
+// A "source" is one file of fixed-size images: BLOCKS (512 8x8 tiles),
+// SPIDS1 / SPIDS2 (64 24x21 sprite frames, the last palette colour transparent:
+// 15 in EGA, 3 in CGA), SCENERY (256 8x8 background tiles); .EGA or .CGA
+// depending on the context's mode. Colours are palette indices, 0..15 or 0..3.
 typedef enum { GFX_TILES, GFX_SPIDS1, GFX_SPIDS2, GFX_SCENERY, GFX_SOURCES } GfxSource;
-#define GFX_MAX_BYTES 256                 // largest per-image record (a SPIDS frame stride)
-const char *render_gfx_name(GfxSource src);
+#define GFX_MAX_BYTES 256                 // largest per-image record (an EGA SPIDS frame stride)
+const char *render_gfx_name(RenderCtx *ctx, GfxSource src);   // file name in this mode, e.g. "BLOCKS.CGA"
 int  render_gfx_count(GfxSource src);      // images in the file
 void render_gfx_size(GfxSource src, int *w, int *h);
-int  render_gfx_bytes(GfxSource src);      // bytes per image record
-int  render_gfx_key(GfxSource src);        // transparent colour, or -1
+int  render_gfx_bytes(RenderCtx *ctx, GfxSource src);     // bytes per image record
+int  render_gfx_key(RenderCtx *ctx, GfxSource src);       // transparent colour, or -1
 int  render_gfx_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y);
 void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, int colour);
 // Raw record (for undo), the record as shipped (<file>.orig, or the unedited
@@ -71,9 +74,9 @@ bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
 bool render_gfx_save(RenderCtx *ctx, GfxSource src);
 // One image as RGBA (transparent key -> alpha 0).
 void render_gfx_rgba(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
-const uint8_t (*render_palette(void))[3];
-#define TILE_BYTES 32
-const uint8_t (*render_palette(void))[3];
+// The mode's palette (16 or 4 RGB triplets) and how many colours it has.
+const uint8_t (*render_palette(RenderCtx *ctx))[3];
+int  render_colours(RenderCtx *ctx);
 
 // Backgrounds: BACKS.SPL holds up to 64 blocks, each a 32x22 map of SCENERY
 // tiles; a room shows block `background` (rooms may share one). Tile 0 is

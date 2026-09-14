@@ -120,14 +120,15 @@ static void check_backs_store(const char *data_dir) {
     char dir[1024];
     snprintf(dir, sizeof dir, "%s/spl_check.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
     if (mkdtemp(dir) == NULL) { CHECK(false, "mkdtemp failed"); return; }
-    const char *files[] = { "BACKS.SPL", "BLOCKS.EGA", "SCENERY.EGA", "SPIDS1.EGA", "SPIDS2.EGA" };
+    const char *files[] = { "BACKS.SPL", "BLOCKS.EGA", "SCENERY.EGA", "SPIDS1.EGA", "SPIDS2.EGA",
+                            "BLOCKS.CGA", "SCENERY.CGA", "SPIDS1.CGA", "SPIDS2.CGA" };
     for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
         char from[1200], to[1200];
         snprintf(from, sizeof from, "%s/%s", data_dir, files[i]);
         snprintf(to, sizeof to, "%s/%s", dir, files[i]);
         if (!copy_file(from, to)) { CHECK(false, "cannot copy %s", from); return; }
     }
-    RenderCtx *ctx = render_open(dir);
+    RenderCtx *ctx = render_open(dir, false);
     CHECK(ctx != NULL, "render_open(%s) failed", dir);
     if (ctx == NULL) return;
 
@@ -140,7 +141,7 @@ static void check_backs_store(const char *data_dir) {
     CHECK(render_backs_save(ctx), "render_backs_save failed");
     render_close(ctx);
 
-    ctx = render_open(dir);
+    ctx = render_open(dir, false);
     CHECK(ctx != NULL, "reopen failed");
     if (ctx == NULL) return;
     CHECK(render_backs_tile(ctx, bid, x, y) == want, "edited tile not read back: %d", render_backs_tile(ctx, bid, x, y));
@@ -171,7 +172,7 @@ static void check_backs_store(const char *data_dir) {
 
     // Over the limit: every block full of incompressible tiles must be
     // refused, and the file on disk left exactly as it was.
-    ctx = render_open(dir);
+    ctx = render_open(dir, false);
     CHECK(ctx != NULL, "reopen for the limit check failed");
     if (ctx != NULL) {
         snprintf(p, sizeof p, "%s/BACKS.SPL", dir);
@@ -193,8 +194,37 @@ static void check_backs_store(const char *data_dir) {
         printf("background store: oversized save refused, file untouched\n");
     }
     // scratch directory is left for inspection when something failed
+    // CGA mode: the packed 2-bpp files decode, edit and save like the EGA ones
+    ctx = render_open(dir, true);
+    CHECK(ctx != NULL, "render_open(cga) failed");
+    if (ctx != NULL) {
+        CHECK(render_is_cga(ctx) && render_colours(ctx) == 4, "cga mode flags");
+        CHECK(render_gfx_bytes(ctx, GFX_TILES) == 16 && render_gfx_bytes(ctx, GFX_SPIDS1) == 128, "cga record sizes");
+        CHECK(render_gfx_key(ctx, GFX_SPIDS1) == 3, "cga sprite key");
+        CHECK(strcmp(render_gfx_name(ctx, GFX_SCENERY), "SCENERY.CGA") == 0, "cga file name: %s", render_gfx_name(ctx, GFX_SCENERY));
+        // a pixel of tile 0x12: set to each colour and read back, the neighbours untouched
+        int t = 0x12;
+        int before_l = render_gfx_pixel(ctx, GFX_TILES, t, 2, 3), before_r = render_gfx_pixel(ctx, GFX_TILES, t, 4, 3);
+        for (int col = 0; col < 4; col++) {
+            render_gfx_set_pixel(ctx, GFX_TILES, t, 3, 3, col);
+            CHECK(render_gfx_pixel(ctx, GFX_TILES, t, 3, 3) == col, "cga set_pixel %d read back %d", col, render_gfx_pixel(ctx, GFX_TILES, t, 3, 3));
+        }
+        CHECK(render_gfx_pixel(ctx, GFX_TILES, t, 2, 3) == before_l && render_gfx_pixel(ctx, GFX_TILES, t, 4, 3) == before_r, "cga set_pixel disturbed a neighbour");
+        render_gfx_set_pixel(ctx, GFX_TILES, t, 3, 3, 5);                  // out of range: ignored
+        CHECK(render_gfx_pixel(ctx, GFX_TILES, t, 3, 3) == 3, "cga colour range not enforced");
+        // a CGA sprite frame: the key colour is white (3) and frame 0 has some drawn pixels
+        int nonkey = 0;
+        for (int y = 0; y < 21; y++) for (int x = 0; x < 24; x++) nonkey += render_gfx_pixel(ctx, GFX_SPIDS1, 0, x, y) != 3;
+        CHECK(nonkey > 50, "cga sprite frame 0 decodes to only %d drawn pixels", nonkey);
+        CHECK(render_gfx_save(ctx, GFX_TILES), "cga save");
+        render_close(ctx);
+        snprintf(p, sizeof p, "%s/BLOCKS.CGA.orig", dir);
+        CHECK(stat(p, &st) == 0, "BLOCKS.CGA.orig not written");
+        printf("cga mode: decode, edit, save OK\n");
+    }
     if (failures == 0) {
-        const char *all[] = { "BACKS.SPL", "BACKS.SPL.orig", "BLOCKS.EGA", "SCENERY.EGA", "SCENERY.EGA.orig", "SPIDS1.EGA", "SPIDS2.EGA" };
+        const char *all[] = { "BACKS.SPL", "BACKS.SPL.orig", "BLOCKS.EGA", "SCENERY.EGA", "SCENERY.EGA.orig", "SPIDS1.EGA", "SPIDS2.EGA",
+                              "BLOCKS.CGA", "BLOCKS.CGA.orig", "SCENERY.CGA", "SPIDS1.CGA", "SPIDS2.CGA" };
         for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) { snprintf(p, sizeof p, "%s/%s", dir, all[i]); unlink(p); }
         rmdir(dir);
     }

@@ -119,8 +119,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   and leaves the cursor (and Spider-Man) where it was.
 - World map right of the picture under the palette: every room rendered into one 8x8 atlas
   texture (refreshed for the room being edited). Left click = go to that room, creating it if the
-  file has no such room (`room_create()` in editor_actions.c: blank tiles and all settings 0;
-  the editor's `r` prompt creates absent rooms too); right click =
+  file has no such room (`room_create()` in editor_actions.c: blank tiles and all settings 0).
+  Only the world map creates rooms: the `r` prompt and exit-walking never do, since exits of 0
+  mean "none" and walking to room 0 must not conjure one; right click =
   `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
   or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
 - Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an
@@ -149,7 +150,7 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   anywhere on screen; "fill" is a mode: while lit, each click on the image flood-fills that region
   (4-connected, one undo entry each); click it again, or press `f` with the pixel editor focused,
   to go back to painting.
-  Right-click in the grid picks a colour without moving the keyboard cursor. play.sh copies newer ./BLOCKS.EGA, SPIDS1/2.EGA, SCENERY.EGA and
+  Right-click in the grid picks a colour without moving the keyboard cursor. play.sh copies newer ./BLOCKS/SPIDS1/SPIDS2/SCENERY .EGA and .CGA and
   BACKS.SPL into Spider/ so the game shows edits.
 - Backgrounds ("backs" button): the picker shows the 256 SCENERY tiles 16 across; Shift+drag in
   the room paints them into the room's background block (`render_backs_set_tile`, BACKS.SPL
@@ -160,6 +161,13 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   `spl_compress` per present block, one-time BACKS.SPL.orig). The game's size limit for BACKS.SPL
   is unknown; growing past the original only warns on stderr. Scenery tile pixels are edited in
   the same pixel editor (`GFX_SCENERY`; tile 0 is locked, it is never drawn).
+- F3 switches the graphics files being shown and edited between .EGA and .CGA (`set_gfx_mode`:
+  pending edits written, `render_open(dir, cga)`, palette / sheets / Spider-Man / atlas rebuilt,
+  pixel undo cleared). The .CGA files are the same pictures packed 2 bpp (16-byte tiles, 128-byte
+  sprite frames, key colour 3) with the 4-colour CGA palette; render.c's `img_pixel` /
+  `img_set_pixel` handle both layouts, `render_palette(ctx)` / `render_colours(ctx)` give the
+  mode's palette, and the swatches show only its colours. BACKS.SPL is shared by both modes.
+  The two sets are separate files: an EGA edit is not mirrored into the CGA file or vice versa.
 - Sprite frames map to creatures (`CREATURES[]` in gui.c, ranges verified against the game);
   with a sprite selected, Shift+click in the room places that creature (`ged_place_sprite`:
   retypes the object under the cursor or creates one).

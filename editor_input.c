@@ -491,7 +491,6 @@ static bool handle_goto_switch(Key key) {
 
 /* Helper macro for goto_room navigation */
 #define GOTO_ROOM_NAVIGATE(dest_level) do { \
-    room_create(dest_level); /* an absent room is created on the way in, so edits there are saved */ \
     *cursorlevel = (dest_level); \
     state->current_state = state->previous_state; \
     state->current_switch = 0; \
