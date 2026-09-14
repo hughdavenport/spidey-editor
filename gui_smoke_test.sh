@@ -63,6 +63,10 @@ xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 24 + 2*24 + 12)) mousedown 1; 
 xdotool mousemove $((X + 776 + 192 + 16 + 2*9 + 4)) $((Y + 24 + 8*9 + 8 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.2
 xdotool mousemove $((X + 776 + 192 + 16 + 1*9 + 4)) $((Y + 24 + 1*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12b-pixel-edit
 xdotool key u; sleep 0.8; snap s12c-pixel-undo   # u undoes the stroke (most recent edit)
+# fill: the button right of "pick" (pick at pixed_x 984 + 192 + 8 = 1184, 72 wide; fill at 1264), then click pixel (6,6): floods its region red; undo
+xdotool mousemove $((X + 1264 + 36)) $((Y + 224 + 24)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
+xdotool mousemove $((X + 776 + 192 + 16 + 6*9 + 4)) $((Y + 24 + 6*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12c2-pixel-fill
+xdotool key u; sleep 0.8
 # sprite editing: SPIDS1 button (2nd button under the editor), pick frame 0x18 (row 3, col 0), paint a pixel, snapshot, undo
 xdotool mousemove $((X + 984 + 2*116 + 30)) $((Y + 402 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4; snap s12d0-spids1-mode
 xdotool mousemove $((X + 776 + 12)) $((Y + 24 + 3*21 + 10)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4

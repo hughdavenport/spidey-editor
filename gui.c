@@ -90,6 +90,7 @@ typedef struct {
     int block_hidden;       // block object whose panel was closed with "gfx" (-1 none)
     int ecx, ecy;           // keyboard cursor in the pixel / block editor grid
     bool eyedrop;           // next click anywhere picks that colour
+    bool fill_armed;        // next click in the pixel editor flood-fills that region with sel_colour
     int world_sel;          // world map: room the keyboard selection is on
     bool text_map;          // F2: show the editor's hex map instead of the picture
     bool mouse_down;        // right button held over the text grid
@@ -156,6 +157,8 @@ static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, 
 static Rectangle pixed_button(GuiState *g, int i);
 static Rectangle attr_button(GuiState *g, int i);
 static Rectangle pick_button(GuiState *g);
+static Rectangle fill_button(GuiState *g);
+static void pix_fill(GuiState *g, int idx, int x, int y);
 static int colour_under_mouse(void);
 static bool pixed_locked(GuiState *g);
 static void focus_move(GuiState *g, int dx, int dy);
@@ -176,9 +179,10 @@ static const struct { GfxSource src; int lo, hi; const char *name; int type, dmg
     { GFX_SPIDS1, 38, 42, "blue man",     BLUE_MAN, 1 },
     { GFX_SPIDS1, 43, 45, "shark",        SHARK, 1 },
     { GFX_SPIDS1, 46, 49, "wolf",         WOLF, 1 },
+    { GFX_SPIDS1, 61, 61, "wolf",         WOLF, 1 },       // one more wolf frame after the rat's
     { GFX_SPIDS1, 50, 52, "R2D2",         R2D2, 1 },
     { GFX_SPIDS1, 53, 57, "dinosaur",     DINOSAUR, 1 },
-    { GFX_SPIDS1, 58, 61, "rat",          RAT, 1 },
+    { GFX_SPIDS1, 58, 60, "rat",          RAT, 1 },
     { GFX_SPIDS1, 62, 63, "Mary Jane",    SHARK, 4 },
     { GFX_SPIDS2,  0,  5, "shotgun lady", SHOTGUN_LADY, 1 },
     { GFX_SPIDS2,  6, 10, "Mysterio",     SHARK, 3 },
@@ -406,7 +410,8 @@ static void focus_apply(GuiState *g) {
             }
         } else if (!pixed_locked(g)) {
             int idx = pixed_index(g);
-            if (render_gfx_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy) != g->sel_colour) {
+            if (g->fill_armed) { g->fill_armed = false; pix_fill(g, idx, g->ecx, g->ecy); g->pix_op = true; }
+            else if (render_gfx_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy) != g->sel_colour) {
                 pix_undo_push(g, g->pix_src, idx);
                 render_gfx_set_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy, g->sel_colour);
                 gfx_touched(g, g->pix_src);
@@ -556,7 +561,12 @@ static bool feed_mouse(GuiState *g) {
         return true;
     }
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, pick_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
-        g->eyedrop = !g->eyedrop;
+        g->eyedrop = !g->eyedrop; g->fill_armed = false;
+        g->pix_op = true;
+        return true;
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, fill_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
+        g->fill_armed = !g->fill_armed; g->eyedrop = false;
         g->pix_op = true;
         return true;
     }
@@ -685,10 +695,8 @@ static bool feed_mouse(GuiState *g) {
             bool in_grid = m.x >= x0 && m.x < x0 + bw * z && m.y >= y0 && m.y < y0 + bh * z;
             if (in_grid) {
                 int cx = (int)(m.x - x0) / z, cy = (int)(m.y - y0) / z;
-                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-                    g->focus = FOCUS_EDITOR; g->ecx = cx; g->ecy = cy;
-                }
-                if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->focus = FOCUS_EDITOR; g->ecx = cx; g->ecy = cy; }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {                       // pick: the cursor stays put
                     int t = ged_block_tile(bi, cx, cy);
                     g->sel_tile = (uint8_t)(t & 0x3f); g->sel_attr = (uint8_t)(t & 0xc0); set_view(g, VIEW_TILES);
                     return true;
@@ -722,6 +730,7 @@ static bool feed_mouse(GuiState *g) {
         int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g), w, h;
         pixed_dims(g, &w, &h);
         bool in_grid = m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;
+        if (g->fill_armed && !in_grid && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) g->fill_armed = false;   // fill wants a click on the grid; anything else cancels it
         bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             g->sel_colour = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
@@ -732,10 +741,13 @@ static bool feed_mouse(GuiState *g) {
         if (in_grid) {
             g->pix_op = true;
             int tx = (int)(m.x - x0) / px, ty = (int)(m.y - y0) / px;
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-                g->focus = FOCUS_EDITOR; g->ecx = tx; g->ecy = ty;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty); return true; }   // pick: the cursor stays put
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->focus = FOCUS_EDITOR; g->ecx = tx; g->ecy = ty; }
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && g->fill_armed) {
+                g->fill_armed = false;
+                if (!pixed_locked(g)) pix_fill(g, idx, tx, ty);
+                return true;
             }
-            if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty); return true; }
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !pixed_locked(g)) { g->pix_painting = true; pix_undo_push(g, g->pix_src, idx); }
             if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
                     render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty) != g->sel_colour) {
@@ -1019,7 +1031,8 @@ static void draw_help(GuiState *g) {
         "       applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
         "       key (r, s, o, ...) = back to the room",
         "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
-        "        pick = then click any colour on screen (room, picker, world map)",
+        "        pick = then click any colour on screen (room, picker, world map); fill = then click a",
+        "        region of the image (or Space at the editor cursor) to flood it with the colour",
         "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize",
         "info text: click a switch / chunk / object / room field line to edit it",
     };
@@ -1249,9 +1262,40 @@ static bool gfx_save_all(GuiState *g) {
     return any;
 }
 
-// "pick" button right of the swatches: eyedropper mode.
+// "pick" button right of the swatches: eyedropper mode; "fill" beside it.
 static Rectangle pick_button(GuiState *g) {
     return (Rectangle){ pixed_x(g) + 8 * swatch_px(g) + PAD, swatch_y(g), 6 * cw(g), SWATCH_ROWS * swatch_px(g) };
+}
+static Rectangle fill_button(GuiState *g) {
+    Rectangle r = pick_button(g);
+    r.x += r.width + PAD;
+    return r;
+}
+
+// Flood-fill the 4-connected run of pixels sharing (x,y)'s colour in image
+// idx of the current source with sel_colour; one undo entry.
+static void pix_fill(GuiState *g, int idx, int x, int y) {
+    int w, h;
+    pixed_dims(g, &w, &h);
+    int from = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
+    if (from == g->sel_colour) return;
+    pix_undo_push(g, g->pix_src, idx);
+    int stack[SPIDS_FRAME_W * SPIDS_FRAME_H][2], n = 0;      // the largest image; each pixel is pushed at most once
+    stack[n][0] = x; stack[n][1] = y; n++;
+    render_gfx_set_pixel(g->rctx, g->pix_src, idx, x, y, g->sel_colour);
+    while (n > 0) {
+        n--;
+        int px = stack[n][0], py = stack[n][1];
+        static const int d[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+        for (int i = 0; i < 4; i++) {
+            int nx = px + d[i][0], ny = py + d[i][1];
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            if (render_gfx_pixel(g->rctx, g->pix_src, idx, nx, ny) != from) continue;
+            render_gfx_set_pixel(g->rctx, g->pix_src, idx, nx, ny, g->sel_colour);
+            stack[n][0] = nx; stack[n][1] = ny; n++;
+        }
+    }
+    gfx_touched(g, g->pix_src);
 }
 
 // Nearest palette colour to what is on screen under the mouse (previous frame).
@@ -1376,6 +1420,11 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         DrawRectangleLinesEx(rb, 1, g->eyedrop ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, "pick", fs);
         gtext(&g->font, g->font_loaded, "pick", (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + ((int)rb.height - fs) / 2, fs, RAYWHITE);
+        rb = fill_button(g);
+        DrawRectangleRec(rb, g->fill_armed ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
+        DrawRectangleLinesEx(rb, 1, g->fill_armed ? GOLD : GRAY);
+        tw = text_w(&g->font, g->font_loaded, "fill", fs);
+        gtext(&g->font, g->font_loaded, "fill", (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + ((int)rb.height - fs) / 2, fs, RAYWHITE);
     }
     if (g->pix_src != GFX_TILES) {                       // whose frame this is, on two lines
         int c = creature_of(g->pix_src, idx);

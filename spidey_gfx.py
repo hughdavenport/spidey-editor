@@ -285,10 +285,10 @@ CREATURE_FRAMES = {
     "MUMMY": ("SPIDS1", 32, 37),
     "BLUE_MAN": ("SPIDS1", 38, 42),
     "SHARK": ("SPIDS1", 43, 45),
-    "WOLF": ("SPIDS1", 46, 49),
+    "WOLF": ("SPIDS1", 46, 49),   # frame 61 (after the rat's) is a wolf frame too
     "R2D2": ("SPIDS1", 50, 52),
     "DINOSAUR": ("SPIDS1", 53, 57),
-    "RAT": ("SPIDS1", 58, 61),
+    "RAT": ("SPIDS1", 58, 60),
     "MARY_JANE": ("SPIDS1", 62, 63),
     "SHOTGUN_LADY": ("SPIDS2", 0, 5),
     "MYSTERIO": ("SPIDS2", 6, 10),
