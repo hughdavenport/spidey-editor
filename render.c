@@ -520,55 +520,104 @@ int render_player_frame(void) { return PLAYER_FRAME; }
 
 const uint8_t (*render_palette(void))[3] { return PAL; }
 
-int render_tile_pixel(RenderCtx *ctx, int tile, int x, int y) {
-    if (ctx == NULL || x < 0 || x > 7 || y < 0 || y > 7 || (size_t)(tile * 32 + 31) >= ctx->a.blocks_len) return 0;
-    const uint8_t *base = ctx->a.blocks + tile * 32;
+/* --- graphic sources -------------------------------------------------- */
+
+static const struct { const char *file; int count, w, h, bytes, plane, key; } GFX[GFX_SOURCES] = {
+    [GFX_TILES]  = { "BLOCKS.EGA", 512, 8, 8, 32, 8, -1 },
+    [GFX_SPIDS1] = { "SPIDS1.EGA", 64, SPIDS_W, SPIDS_H, SPIDS_STRIDE, SPIDS_PLANE, SPRITE_KEY },
+    [GFX_SPIDS2] = { "SPIDS2.EGA", 64, SPIDS_W, SPIDS_H, SPIDS_STRIDE, SPIDS_PLANE, SPRITE_KEY },
+};
+
+const char *render_gfx_name(GfxSource src) { return GFX[src].file; }
+int render_gfx_count(GfxSource src) { return GFX[src].count; }
+void render_gfx_size(GfxSource src, int *w, int *h) { *w = GFX[src].w; *h = GFX[src].h; }
+int render_gfx_bytes(GfxSource src) { return GFX[src].bytes; }
+int render_gfx_key(GfxSource src) { return GFX[src].key; }
+
+static uint8_t *gfx_data(RenderCtx *ctx, GfxSource src, size_t *len) {
+    switch (src) {
+        case GFX_TILES:  *len = ctx->a.blocks_len; return ctx->a.blocks;
+        case GFX_SPIDS1: *len = ctx->a.s1_len;     return ctx->a.spids1;
+        case GFX_SPIDS2: *len = ctx->a.s2_len;     return ctx->a.spids2;
+        default: *len = 0; return NULL;
+    }
+}
+
+// Byte holding pixel (x,y) of plane p in image idx, or -1.
+static long gfx_offset(RenderCtx *ctx, GfxSource src, int idx, int p, int x, int y) {
+    size_t len;
+    uint8_t *d = gfx_data(ctx, src, &len);
+    if (d == NULL || idx < 0 || idx >= GFX[src].count || x < 0 || x >= GFX[src].w || y < 0 || y >= GFX[src].h) return -1;
+    long o = (long)idx * GFX[src].bytes + (long)p * GFX[src].plane + (long)y * (GFX[src].w / 8) + x / 8;
+    return (size_t)o < len ? o : -1;
+}
+
+int render_gfx_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y) {
+    if (ctx == NULL) return 0;
+    size_t len;
+    uint8_t *d = gfx_data(ctx, src, &len);
     int c = 0;
-    for (int p = 0; p < 4; p++) c |= ((base[p * 8 + y] >> (7 - x)) & 1) << PLANE_ORDER[p];
+    for (int p = 0; p < 4; p++) {
+        long o = gfx_offset(ctx, src, idx, p, x, y);
+        if (o < 0) return 0;
+        c |= ((d[o] >> (7 - (x % 8))) & 1) << PLANE_ORDER[p];
+    }
     return c;
 }
 
-void render_tile_set_pixel(RenderCtx *ctx, int tile, int x, int y, int colour) {
-    if (ctx == NULL || x < 0 || x > 7 || y < 0 || y > 7 || (size_t)(tile * 32 + 31) >= ctx->a.blocks_len) return;
-    uint8_t *base = ctx->a.blocks + tile * 32;
+void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, int colour) {
+    if (ctx == NULL) return;
+    size_t len;
+    uint8_t *d = gfx_data(ctx, src, &len);
     for (int p = 0; p < 4; p++) {
-        uint8_t mask = (uint8_t)(1 << (7 - x));
-        if ((colour >> PLANE_ORDER[p]) & 1) base[p * 8 + y] |= mask;
-        else base[p * 8 + y] &= (uint8_t)~mask;
+        long o = gfx_offset(ctx, src, idx, p, x, y);
+        if (o < 0) return;
+        uint8_t mask = (uint8_t)(1 << (7 - (x % 8)));
+        if ((colour >> PLANE_ORDER[p]) & 1) d[o] |= mask; else d[o] &= (uint8_t)~mask;
     }
 }
 
-bool render_tile_get(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]) {
-    if (ctx == NULL || tile < 0 || (size_t)(tile * TILE_BYTES + TILE_BYTES) > ctx->a.blocks_len) return false;
-    memcpy(out, ctx->a.blocks + tile * TILE_BYTES, TILE_BYTES);
+bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    size_t len;
+    uint8_t *d = ctx ? gfx_data(ctx, src, &len) : NULL;
+    size_t n = (size_t)GFX[src].bytes;
+    if (d == NULL || idx < 0 || (size_t)(idx + 1) * n > len) return false;
+    memcpy(out, d + (size_t)idx * n, n);
     return true;
 }
 
-void render_tile_put(RenderCtx *ctx, int tile, const uint8_t in[TILE_BYTES]) {
-    if (ctx == NULL || tile < 0 || (size_t)(tile * TILE_BYTES + TILE_BYTES) > ctx->a.blocks_len) return;
-    memcpy(ctx->a.blocks + tile * TILE_BYTES, in, TILE_BYTES);
+void render_gfx_put(RenderCtx *ctx, GfxSource src, int idx, const uint8_t *in) {
+    size_t len;
+    uint8_t *d = ctx ? gfx_data(ctx, src, &len) : NULL;
+    size_t n = (size_t)GFX[src].bytes;
+    if (d == NULL || idx < 0 || (size_t)(idx + 1) * n > len) return;
+    memcpy(d + (size_t)idx * n, in, n);
 }
 
-bool render_tile_original(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]) {
-    if (ctx == NULL || tile < 0) return false;
-    char path[1100];
-    snprintf(path, sizeof path, "%s/BLOCKS.EGA.orig", ctx->dir);
+bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    if (ctx == NULL || idx < 0) return false;
+    char path[1200];
+    snprintf(path, sizeof path, "%s/%s.orig", ctx->dir, GFX[src].file);
     FILE *f = fopen(path, "rb");
     if (f == NULL) {                                // nothing saved yet: the file on disk is original
-        snprintf(path, sizeof path, "%s/BLOCKS.EGA", ctx->dir);
+        snprintf(path, sizeof path, "%s/%s", ctx->dir, GFX[src].file);
         f = fopen(path, "rb");
     }
     if (f == NULL) return false;
-    bool ok = fseek(f, (long)tile * TILE_BYTES, SEEK_SET) == 0 && fread(out, 1, TILE_BYTES, f) == TILE_BYTES;
+    size_t n = (size_t)GFX[src].bytes;
+    bool ok = fseek(f, (long)idx * (long)n, SEEK_SET) == 0 && fread(out, 1, n, f) == n;
     fclose(f);
     return ok;
 }
 
-bool render_save_blocks(RenderCtx *ctx) {
+bool render_gfx_save(RenderCtx *ctx, GfxSource src) {
     if (ctx == NULL) return false;
-    char path[1100], orig[1100];
-    snprintf(path, sizeof path, "%s/BLOCKS.EGA", ctx->dir);
-    snprintf(orig, sizeof orig, "%s/BLOCKS.EGA.orig", ctx->dir);
+    size_t len;
+    uint8_t *d = gfx_data(ctx, src, &len);
+    if (d == NULL) return false;
+    char path[1200], orig[1200];
+    snprintf(path, sizeof path, "%s/%s", ctx->dir, GFX[src].file);
+    snprintf(orig, sizeof orig, "%s/%s.orig", ctx->dir, GFX[src].file);
     struct stat st;
     if (stat(orig, &st) != 0) {                     // keep the untouched original once
         FILE *in = fopen(path, "rb"), *out = in ? fopen(orig, "wb") : NULL;
@@ -582,10 +631,24 @@ bool render_save_blocks(RenderCtx *ctx) {
     }
     FILE *f = fopen(path, "wb");
     if (f == NULL) { fprintf(stderr, "render: cannot write %s: %s\n", path, strerror(errno)); return false; }
-    bool ok = fwrite(ctx->a.blocks, 1, ctx->a.blocks_len, f) == ctx->a.blocks_len;
+    bool ok = fwrite(d, 1, len, f) == len;
     fclose(f);
     return ok;
 }
+
+void render_gfx_rgba(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    int w = GFX[src].w, h = GFX[src].h;
+    memset(out, 0, (size_t)w * h * 4);
+    if (ctx == NULL) return;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int c = render_gfx_pixel(ctx, src, idx, x, y);
+            if (c == GFX[src].key) continue;
+            uint8_t *px = out + (y * w + x) * 4;
+            px[0] = PAL[c][0]; px[1] = PAL[c][1]; px[2] = PAL[c][2]; px[3] = 255;
+        }
+}
+
 
 void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out) {
     memset(out, 0, (size_t)SPIDS_FRAME_W * SPIDS_FRAME_H * 4);

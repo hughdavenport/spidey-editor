@@ -49,18 +49,29 @@ void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out);
 // The frame the game shows for the standing player.
 int render_player_frame(void);
 
-// Tile pixel editing (BLOCKS.EGA in the context's data dir). Colours are
-// palette indices 0..15; render_palette() gives their RGB.
-int  render_tile_pixel(RenderCtx *ctx, int tile, int x, int y);
-void render_tile_set_pixel(RenderCtx *ctx, int tile, int x, int y, int colour);
-// Write BLOCKS.EGA back (a one-time BLOCKS.EGA.orig backup is kept beside it).
-bool render_save_blocks(RenderCtx *ctx);
+// Pixel editing of the game's graphics files in the context's data dir.
+// A "source" is one file of fixed-size images: BLOCKS.EGA (512 8x8 tiles),
+// SPIDS1.EGA / SPIDS2.EGA (64 24x21 sprite frames, colour 15 transparent).
+// Colours are palette indices 0..15; render_palette() gives their RGB.
+typedef enum { GFX_TILES, GFX_SPIDS1, GFX_SPIDS2, GFX_SOURCES } GfxSource;
+#define GFX_MAX_BYTES 256                 // largest per-image record (a SPIDS frame stride)
+const char *render_gfx_name(GfxSource src);
+int  render_gfx_count(GfxSource src);      // images in the file
+void render_gfx_size(GfxSource src, int *w, int *h);
+int  render_gfx_bytes(GfxSource src);      // bytes per image record
+int  render_gfx_key(GfxSource src);        // transparent colour, or -1
+int  render_gfx_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y);
+void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, int colour);
+// Raw record (for undo), the record as shipped (<file>.orig, or the unedited
+// file on disk) for "reset", and writing the file back (one-time .orig backup).
+bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
+void render_gfx_put(RenderCtx *ctx, GfxSource src, int idx, const uint8_t *in);
+bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
+bool render_gfx_save(RenderCtx *ctx, GfxSource src);
+// One image as RGBA (transparent key -> alpha 0).
+void render_gfx_rgba(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
+const uint8_t (*render_palette(void))[3];
 #define TILE_BYTES 32
-// Raw 32-byte tile data (for undo), and the tile as it is in BLOCKS.EGA.orig
-// (or the unedited file on disk) for "reset tile".
-bool render_tile_get(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]);
-void render_tile_put(RenderCtx *ctx, int tile, const uint8_t in[TILE_BYTES]);
-bool render_tile_original(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]);
 const uint8_t (*render_palette(void))[3];
 
 #define TILESET_PX 64   // 8x8 grid of 8x8 tiles = the 64 tiles of one tileset

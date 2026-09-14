@@ -114,12 +114,14 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   records its rows in `panel_oob_*`); the editor's own out-of-bounds map markers are hidden.
 - Wheel over the picture or the palette: background +-1; horizontal or Shift+wheel: tileset +-4
   (`ged_adjust_room`). Middle-click on a room tile picks it into the palette.
-- Tile pixel editor right of the palette: paints into the RenderCtx's BLOCKS data
-  (`render_tile_set_pixel`) and writes BLOCKS.EGA in the data dir 0.6 s after a stroke, keeping
-  a one-time BLOCKS.EGA.orig backup. This edits the game's graphics for every room. `u` undoes
-  the last stroke while a pixel stroke is the most recent edit (GUI-side stack, no redo);
-  "reset tile" restores the tile from the .orig. play.sh copies a newer ./BLOCKS.EGA into
-  Spider/ so the game shows edited tiles.
+- Pixel editor right of the picker, for a "graphics source" (`GfxSource` in render.h): the
+  BLOCKS tiles, or the SPIDS1 / SPIDS2 sprite frames (24x21, colour 15 transparent, drawn as
+  a checker). Buttons switch the source; the picker then shows that sheet. Paints into the
+  RenderCtx data (`render_gfx_set_pixel`) and writes the file in the data dir 0.6 s after a
+  stroke, keeping a one-time <file>.orig backup. This edits the game's graphics for every
+  room. `u` undoes the last stroke while a pixel stroke is the most recent edit (GUI-side
+  stack, no redo); "reset" restores the image from the .orig. play.sh copies a newer
+  ./BLOCKS.EGA into Spider/ so the game shows edited tiles.
 - Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh swap the current room into
   slot 1 of the copy the game runs from, so you start in the room being edited.
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the

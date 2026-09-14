@@ -39,7 +39,7 @@
 #define MIN_PANEL_ROWS 12       // text rows kept visible under the picture when auto-scaling
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
 #define PALETTE_LINES 9         // text lines under the palette before the world map
-#define PIXEL_ZOOM 3            // tile editor pixel = PIXEL_ZOOM * scale px (a 24x24 tile at scale 3)
+#define SWATCH_ROWS 2
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
@@ -93,11 +93,17 @@ typedef struct {
     bool help_font_loaded;
     int help_font_cw;
     int help_font_px;
-    int sel_colour;         // tile pixel editor: colour to paint with
-    bool pix_painting;      // pixel stroke in progress
-    bool blocks_dirty;      // edited BLOCKS.EGA not yet written
-    float blocks_timer;
-    struct { int tile; uint8_t data[TILE_BYTES]; } pix_undo[64];   // tile before each pixel stroke / reset
+    // pixel editor: one image of one graphics source (tiles or a sprite sheet)
+    GfxSource pix_src;
+    int sel_img[GFX_SOURCES];   // selected image per source (tiles: index within the current tileset)
+    int sel_colour;             // colour to paint with
+    bool pix_painting;          // pixel stroke in progress
+    bool gfx_dirty[GFX_SOURCES];    // edited file not yet written
+    float gfx_timer;
+    Texture2D sheet_tex[GFX_SOURCES];   // sprite sheets as 8-across pickers (tiles use pal_tex)
+    bool sheet_loaded[GFX_SOURCES];
+    bool sheet_stale[GFX_SOURCES];
+    struct { GfxSource src; int idx; uint8_t data[GFX_MAX_BYTES]; } pix_undo[64];   // image before each stroke / reset
     int pix_undo_n;
     unsigned seq, pix_seq, key_seq;   // ordering of pixel strokes vs editor keys, for `u`
     Font panel_font;        // text under the picture: a touch smaller so PANEL_COLS fit its width
@@ -123,9 +129,12 @@ static int  pcw(GuiState *g);
 static int  oob_rows(int *r0);
 static int  world_room_at(GuiState *g, Vector2 m);
 static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
-static Rectangle reset_button(GuiState *g);
-static void pix_undo_push(GuiState *g, int tile);
+static Rectangle pixed_button(GuiState *g, int i);
+static void pix_undo_push(GuiState *g, GfxSource src, int idx);
 static bool pix_undo_pop(GuiState *g);
+static bool gfx_save_all(GuiState *g);
+static void gfx_touched(GuiState *g, GfxSource src);
+static void spidey_build(GuiState *g);
 
 static int cw(GuiState *g) { return 4 * g->scale; }        // text cell width
 static int ch(GuiState *g) { return 8 * g->scale; }        // text cell height (= one tile)
@@ -136,11 +145,27 @@ static int pic_y(GuiState *g) { return GED_MAP_Y * ch(g); }
 static bool in_map_band(int y) { return y >= GED_MAP_Y && y < GED_MAP_Y + HEIGHT_TILES; }
 static int palette_x(GuiState *g) { return pic_x(g) + pic_w(g) + PAD; }
 static int palette_y(GuiState *g) { return pic_y(g); }
-// tile pixel editor: 8x8 zoomed pixels right of the palette, colour swatches under it
+// pixel editor: the selected image zoomed to about the picker's height, right
+// of the picker; colour swatches, labels and buttons under it
 static int pixed_x(GuiState *g) { return palette_x(g) + TILESET_PX * g->scale + 2 * PAD; }
-static int pixed_px(GuiState *g) { return PIXEL_ZOOM * g->scale; }
-static int swatch_px(GuiState *g) { return pixed_px(g); }
-static int swatch_y(GuiState *g) { return palette_y(g) + 8 * pixed_px(g) + PAD; }
+static void pixed_dims(GuiState *g, int *w, int *h) { render_gfx_size(g->pix_src, w, h); }
+static int pixed_px(GuiState *g) { int w, h; pixed_dims(g, &w, &h); int p = TILESET_PX * g->scale / h; return p < 2 ? 2 : p; }
+static int pixed_w(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return w * pixed_px(g); }
+static int pixed_h(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return h * pixed_px(g); }
+static int swatch_px(GuiState *g) { return pixed_w(g) / 8; }
+static int swatch_y(GuiState *g) { return palette_y(g) + pixed_h(g) + PAD; }
+static int pixed_text_y(GuiState *g) { return swatch_y(g) + SWATCH_ROWS * swatch_px(g) + PAD; }
+static int pixed_buttons_y(GuiState *g) { return pixed_text_y(g) + 3 * ch(g) + 2; }
+static int pixed_bottom(GuiState *g) { return pixed_buttons_y(g) + ch(g) + 4; }
+// the picker's labels (and the world map) start below picker and editor alike
+static int labels_y(GuiState *g) {
+    int a = palette_y(g) + TILESET_PX * g->scale, b = pixed_bottom(g);
+    return (a > b ? a : b) + PAD;
+}
+// the image being edited: tiles are picked within the current tileset
+static int pixed_index(GuiState *g) {
+    return g->pix_src == GFX_TILES ? g->sel_tile + g->pal_offset * 16 : g->sel_img[g->pix_src];
+}
 static int window_w(GuiState *g) { return palette_x(g) + SIDE_COLS * cw(g) + PAD; }
 static int window_h(GuiState *g) { return INIT_ROWS * ch(g); }
 
@@ -311,9 +336,7 @@ static bool feed_keys(GuiState *g) {
         if (rk >= KEY_A && rk <= KEY_Z) {
             if (!(m & GK_MOD_CTRL)) continue;                          // plain letters arrived as chars
             k.code = GK_CTRL; k.ch = (char)('A' + rk - KEY_A); k.mod = (uint8_t)(m & GK_MOD_ALT);
-            if (k.ch == 'P' && g->blocks_dirty) {                      // play: the game must see the edited tiles
-                render_save_blocks(g->rctx); g->blocks_dirty = false;
-            }
+            if (k.ch == 'P') gfx_save_all(g);                          // play: the game must see the edits
             g->key_seq = ++g->seq;
         } else if ((rk == KEY_SLASH || rk == KEY_MINUS) && (m & GK_MOD_CTRL)) {
             k.code = GK_CTRL; k.ch = '_'; k.mod = 0;                   // Ctrl-? / Ctrl-_ : help
@@ -361,6 +384,7 @@ static bool feed_mouse(GuiState *g) {
     // middle click on the room: pick that tile into the palette (reverse picker)
     if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) && mouse_tile(g, &tx, &ty)) {
         g->sel_tile = (uint8_t)(ged_tile_at(tx, ty) & 0x3f);
+        g->pix_src = GFX_TILES;
         return true;
     }
 
@@ -384,12 +408,24 @@ static bool feed_mouse(GuiState *g) {
         return any;
     }
 
-    // palette: pick a tile
+    // picker: pick a tile, or a sprite frame
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        int s = 8 * g->scale, px0 = palette_x(g), py0 = palette_y(g);
-        if (m.x >= px0 && m.x < px0 + 8 * s && m.y >= py0 && m.y < py0 + 8 * s) {
-            g->sel_tile = (uint8_t)(((int)(m.y - py0) / s) * 8 + (int)(m.x - px0) / s);
-            return true;
+        int side = TILESET_PX * g->scale, px0 = palette_x(g), py0 = palette_y(g);
+        if (g->pix_src == GFX_TILES) {
+            int s = 8 * g->scale;
+            if (m.x >= px0 && m.x < px0 + 8 * s && m.y >= py0 && m.y < py0 + 8 * s) {
+                g->sel_tile = (uint8_t)(((int)(m.y - py0) / s) * 8 + (int)(m.x - px0) / s);
+                return true;
+            }
+        } else {
+            int w, h, n = render_gfx_count(g->pix_src);
+            render_gfx_size(g->pix_src, &w, &h);
+            float cellw = side / 8.0f, cellh = cellw * h / w;
+            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + cellh * ((n + 7) / 8)) {
+                int i = (int)((m.y - py0) / cellh) * 8 + (int)((m.x - px0) / cellw);
+                if (i < n) g->sel_img[g->pix_src] = i;
+                return true;
+            }
         }
     }
 
@@ -413,41 +449,43 @@ static bool feed_mouse(GuiState *g) {
         return true;
     }
 
-    // tile pixel editor
+    // pixel editor: grid, swatches, buttons
     {
-        int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g);
-        bool in_grid = m.x >= x0 && m.x < x0 + 8 * px && m.y >= y0 && m.y < y0 + 8 * px;
-        bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + 2 * sp;
+        int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g), w, h;
+        pixed_dims(g, &w, &h);
+        bool in_grid = m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;
+        bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             g->sel_colour = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
             return true;
         }
+        int idx = pixed_index(g);
         if (in_grid) {
-            int tx = (int)(m.x - x0) / px, ty = (int)(m.y - y0) / px, tile = g->sel_tile + g->pal_offset * 16;
-            if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_tile_pixel(g->rctx, tile, tx, ty); return true; }
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->pix_painting = true; pix_undo_push(g, tile); }
+            int tx = (int)(m.x - x0) / px, ty = (int)(m.y - y0) / px;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty); return true; }
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->pix_painting = true; pix_undo_push(g, g->pix_src, idx); }
             if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
-                    render_tile_pixel(g->rctx, tile, tx, ty) != g->sel_colour) {
-                render_tile_set_pixel(g->rctx, tile, tx, ty, g->sel_colour);
-                g->blocks_dirty = true; g->blocks_timer = 0.6f;
-                g->pal_offset = -1;                       // rebuild the palette texture
+                    render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty) != g->sel_colour) {
+                render_gfx_set_pixel(g->rctx, g->pix_src, idx, tx, ty, g->sel_colour);
+                gfx_touched(g, g->pix_src);
                 return true;
             }
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
         if (g->pix_painting) return false;
-        // "reset tile" button: back to the tile as shipped (BLOCKS.EGA.orig)
-        Rectangle rb = reset_button(g);
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, rb)) {
-            int tile = g->sel_tile + g->pal_offset * 16;
-            uint8_t orig[TILE_BYTES];
-            if (render_tile_original(g->rctx, tile, orig)) {
-                pix_undo_push(g, tile);
-                render_tile_put(g->rctx, tile, orig);
-                g->blocks_dirty = true; g->blocks_timer = 0.6f;
-                g->pal_offset = -1;
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            for (int i = 0; i < 4; i++) {
+                if (!CheckCollisionPointRec(m, pixed_button(g, i))) continue;
+                if (i == 0) {                                   // reset: the image as shipped
+                    uint8_t orig[GFX_MAX_BYTES];
+                    if (render_gfx_original(g->rctx, g->pix_src, idx, orig)) {
+                        pix_undo_push(g, g->pix_src, idx);
+                        render_gfx_put(g->rctx, g->pix_src, idx, orig);
+                        gfx_touched(g, g->pix_src);
+                    }
+                } else g->pix_src = (GfxSource)(i - 1);
+                return true;
             }
-            return true;
         }
     }
 
@@ -724,27 +762,63 @@ static void draw_cursor(GuiState *g) {
     DrawRectangleLinesEx((Rectangle){box.x - 1, box.y - 1, box.width + 2, box.height + 2}, 1, BLACK);
 }
 
-static void draw_palette(GuiState *g) {
-    int s = 8 * g->scale, x0 = palette_x(g), y0 = palette_y(g), fs = g->font_px;
-    DrawTexturePro(g->pal_tex, (Rectangle){0, 0, TILESET_PX, TILESET_PX},
-                   (Rectangle){x0, y0, TILESET_PX * g->scale, TILESET_PX * g->scale},
-                   (Vector2){0, 0}, 0, WHITE);
-    for (int i = 0; i <= 8; i++) {
-        DrawLine(x0 + i * s, y0, x0 + i * s, y0 + 8 * s, (Color){80, 80, 80, 255});
-        DrawLine(x0, y0 + i * s, x0 + 8 * s, y0 + i * s, (Color){80, 80, 80, 255});
+// Build the 8-across picker texture of a sprite sheet (RGBA, key transparent).
+static void sheet_build(GuiState *g, GfxSource src) {
+    int w, h, n = render_gfx_count(src);
+    render_gfx_size(src, &w, &h);
+    int cols = 8, rows = (n + cols - 1) / cols;
+    Image img = GenImageColor(cols * w, rows * h, BLANK);
+    static uint8_t one[SPIDS_FRAME_W * SPIDS_FRAME_H * 4];
+    for (int i = 0; i < n; i++) {
+        render_gfx_rgba(g->rctx, src, i, one);
+        Image f = { .data = one, .width = w, .height = h, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+        ImageDraw(&img, f, (Rectangle){0, 0, w, h}, (Rectangle){(i % cols) * w, (i / cols) * h, w, h}, WHITE);
     }
-    if (g->text_map)                             // F2: the tile ids, as on the hex map
-        for (int t = 0; t < 64; t++) {
-            int tx = x0 + (t % 8) * s, ty = y0 + (t / 8) * s;
-            DrawRectangle(tx, ty, s, ch(g), (Color){0, 0, 0, 150});
-            gtext(&g->font, g->font_loaded, TextFormat("%02x", t), tx, ty, fs, RAYWHITE);
+    if (g->sheet_loaded[src]) UnloadTexture(g->sheet_tex[src]);
+    g->sheet_tex[src] = LoadTextureFromImage(img);
+    SetTextureFilter(g->sheet_tex[src], TEXTURE_FILTER_POINT);
+    g->sheet_loaded[src] = true;
+    g->sheet_stale[src] = false;
+    UnloadImage(img);
+}
+
+// The picker: the current tileset, or the selected sprite sheet, 8 across.
+static void draw_palette(GuiState *g) {
+    int s = 8 * g->scale, x0 = palette_x(g), y0 = palette_y(g), fs = g->font_px, side = TILESET_PX * g->scale;
+    if (g->pix_src == GFX_TILES) {
+        DrawTexturePro(g->pal_tex, (Rectangle){0, 0, TILESET_PX, TILESET_PX},
+                       (Rectangle){x0, y0, side, side}, (Vector2){0, 0}, 0, WHITE);
+        for (int i = 0; i <= 8; i++) {
+            DrawLine(x0 + i * s, y0, x0 + i * s, y0 + 8 * s, (Color){80, 80, 80, 255});
+            DrawLine(x0, y0 + i * s, x0 + 8 * s, y0 + i * s, (Color){80, 80, 80, 255});
         }
-    int sx = g->sel_tile % 8, sy = g->sel_tile / 8;
-    DrawRectangleLinesEx((Rectangle){x0 + sx * s, y0 + sy * s, s, s}, 2, GOLD);
-    int ly = y0 + TILESET_PX * g->scale + PAD, lh = ch(g);
+        if (g->text_map)                             // F2: the tile ids, as on the hex map
+            for (int t = 0; t < 64; t++) {
+                int tx = x0 + (t % 8) * s, ty = y0 + (t / 8) * s;
+                DrawRectangle(tx, ty, s, ch(g), (Color){0, 0, 0, 150});
+                gtext(&g->font, g->font_loaded, TextFormat("%02x", t), tx, ty, fs, RAYWHITE);
+            }
+        int sx = g->sel_tile % 8, sy = g->sel_tile / 8;
+        DrawRectangleLinesEx((Rectangle){x0 + sx * s, y0 + sy * s, s, s}, 2, GOLD);
+    } else {
+        GfxSource src = g->pix_src;
+        if (!g->sheet_loaded[src] || g->sheet_stale[src]) sheet_build(g, src);
+        int w, h, n = render_gfx_count(src);
+        render_gfx_size(src, &w, &h);
+        float cellw = side / 8.0f, cellh = cellw * h / w;
+        DrawRectangle(x0, y0, side, (int)(cellh * ((n + 7) / 8)), (Color){35, 35, 45, 255});
+        DrawTexturePro(g->sheet_tex[src], (Rectangle){0, 0, g->sheet_tex[src].width, g->sheet_tex[src].height},
+                       (Rectangle){x0, y0, side, cellh * ((n + 7) / 8)}, (Vector2){0, 0}, 0, WHITE);
+        for (int i = 0; i <= 8; i++) DrawLine(x0 + (int)(i * cellw), y0, x0 + (int)(i * cellw), y0 + (int)(cellh * ((n + 7) / 8)), (Color){80, 80, 80, 255});
+        for (int i = 0; i <= (n + 7) / 8; i++) DrawLine(x0, y0 + (int)(i * cellh), x0 + side, y0 + (int)(i * cellh), (Color){80, 80, 80, 255});
+        int sel = g->sel_img[src];
+        DrawRectangleLinesEx((Rectangle){x0 + (sel % 8) * cellw, y0 + (sel / 8) * cellh, cellw, cellh}, 2, GOLD);
+    }
+    int ly = labels_y(g), lh = ch(g);
     int link = ged_linking();
     const char *lines[] = {
-        TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile),
+        g->pix_src == GFX_TILES ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile)
+                                : TextFormat("%s  frame 0x%02x", render_gfx_name(g->pix_src), g->sel_img[g->pix_src]),
         "click a tile; Shift+drag in the",
         "room paints it; middle-click picks",
         "wheel over room: background;",
@@ -763,63 +837,112 @@ static void draw_palette(GuiState *g) {
         gtext(&g->font, g->font_loaded, "saved", x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
 }
 
-static Rectangle reset_button(GuiState *g) {
-    int sp = swatch_px(g);
-    return (Rectangle){ pixed_x(g), swatch_y(g) + 2 * sp + 4 + 3 * ch(g), 12 * cw(g), ch(g) + 4 };
+// Buttons under the editor: reset, then one per source.
+static Rectangle pixed_button(GuiState *g, int i) {
+    int bw = 9 * cw(g), gap = PAD;
+    return (Rectangle){ pixed_x(g) + i * (bw + gap), pixed_buttons_y(g), bw, ch(g) + 4 };
 }
 
-// Remember the tile as it is now, so the coming stroke (or reset) can be undone.
-static void pix_undo_push(GuiState *g, int tile) {
+// Remember the image as it is now, so the coming stroke (or reset) can be undone.
+static void pix_undo_push(GuiState *g, GfxSource src, int idx) {
     if (g->pix_undo_n == 64) { memmove(g->pix_undo, g->pix_undo + 1, 63 * sizeof g->pix_undo[0]); g->pix_undo_n--; }
-    g->pix_undo[g->pix_undo_n].tile = tile;
-    if (render_tile_get(g->rctx, tile, g->pix_undo[g->pix_undo_n].data)) g->pix_undo_n++;
+    g->pix_undo[g->pix_undo_n].src = src;
+    g->pix_undo[g->pix_undo_n].idx = idx;
+    if (render_gfx_get(g->rctx, src, idx, g->pix_undo[g->pix_undo_n].data)) g->pix_undo_n++;
     g->pix_seq = ++g->seq;
+}
+
+static void gfx_touched(GuiState *g, GfxSource src) {
+    g->gfx_dirty[src] = true; g->gfx_timer = 0.6f;
+    if (src == GFX_TILES) g->pal_offset = -1;              // rebuild the palette texture
+    else g->sheet_stale[src] = true;
+    g->room_dirty = true;
 }
 
 static bool pix_undo_pop(GuiState *g) {
     if (g->pix_undo_n == 0) return false;
     g->pix_undo_n--;
-    render_tile_put(g->rctx, g->pix_undo[g->pix_undo_n].tile, g->pix_undo[g->pix_undo_n].data);
-    g->blocks_dirty = true; g->blocks_timer = 0.6f;
-    g->pal_offset = -1;
+    GfxSource src = g->pix_undo[g->pix_undo_n].src;
+    render_gfx_put(g->rctx, src, g->pix_undo[g->pix_undo_n].idx, g->pix_undo[g->pix_undo_n].data);
+    gfx_touched(g, src);
     g->pix_seq = g->pix_undo_n ? ++g->seq : 0;
     return true;
 }
 
-// Zoomed view of the selected tile; left click paints sel_colour, right click
-// picks a pixel's colour; the 16 palette swatches sit under it.
-static void draw_tile_editor(GuiState *g) {
-    int tile = g->sel_tile + g->pal_offset * 16, px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g);
-    const uint8_t (*pal)[3] = render_palette();
-    for (int y = 0; y < 8; y++)
-        for (int x = 0; x < 8; x++) {
-            int c = render_tile_pixel(g->rctx, tile, x, y);
-            DrawRectangle(x0 + x * px, y0 + y * px, px, px, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
-        }
-    for (int i = 0; i <= 8; i++) {
-        DrawLine(x0 + i * px, y0, x0 + i * px, y0 + 8 * px, (Color){70, 70, 70, 255});
-        DrawLine(x0, y0 + i * px, x0 + 8 * px, y0 + i * px, (Color){70, 70, 70, 255});
+// Write every edited graphics file; the Spider-Man marker is rebuilt in case
+// his frame changed. true if anything was written.
+static bool gfx_save_all(GuiState *g) {
+    bool any = false;
+    for (int i = 0; i < GFX_SOURCES; i++) {
+        if (!g->gfx_dirty[i]) continue;
+        g->gfx_dirty[i] = false;
+        any |= render_gfx_save(g->rctx, (GfxSource)i);
+        if (i == GFX_SPIDS1) spidey_build(g);
     }
+    return any;
+}
+
+// Zoomed view of the selected image; left click paints sel_colour, right
+// click picks a pixel's colour; the 16 palette swatches sit under it. The
+// transparent colour of sprites is drawn as a checker.
+static void draw_gfx_editor(GuiState *g) {
+    int idx = pixed_index(g), px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), w, h;
+    pixed_dims(g, &w, &h);
+    int key = render_gfx_key(g->pix_src);
+    const uint8_t (*pal)[3] = render_palette();
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int c = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
+            Color col = c == key ? ((x + y) & 1 ? (Color){70, 70, 70, 255} : (Color){50, 50, 50, 255})
+                                 : (Color){pal[c][0], pal[c][1], pal[c][2], 255};
+            DrawRectangle(x0 + x * px, y0 + y * px, px, px, col);
+        }
+    for (int i = 0; i <= w; i++) DrawLine(x0 + i * px, y0, x0 + i * px, y0 + h * px, (Color){70, 70, 70, 255});
+    for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * px, x0 + w * px, y0 + i * px, (Color){70, 70, 70, 255});
     int sp = swatch_px(g), sy = swatch_y(g);
     for (int c = 0; c < 16; c++) {
         int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
         DrawRectangle(sx, yy, sp, sp, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
+        if (c == key) gtext(&g->font, g->font_loaded, "T", sx + 2, yy, g->font_px, BLACK);
         if (c == g->sel_colour) DrawRectangleLinesEx((Rectangle){sx, yy, sp, sp}, 2, WHITE);
     }
-    gtext(&g->font, g->font_loaded, TextFormat("tile 0x%02x  colour %d", tile, g->sel_colour),
-          x0, sy + 2 * sp + 4, g->font_px, RAYWHITE);
-    gtext(&g->font, g->font_loaded, "click paints, right-click picks", x0, sy + 2 * sp + 4 + ch(g), g->font_px, GRAY);
-    gtext(&g->font, g->font_loaded, g->blocks_dirty ? "u undoes a stroke; BLOCKS.EGA..." : "u undoes a stroke",
-          x0, sy + 2 * sp + 4 + 2 * ch(g), g->font_px, g->blocks_dirty ? ORANGE : GRAY);
-    Rectangle rb = reset_button(g);
-    DrawRectangleRec(rb, (Color){50, 50, 60, 255});
-    DrawRectangleLinesEx(rb, 1, GRAY);
-    gtext(&g->font, g->font_loaded, " reset tile", (int)rb.x, (int)rb.y + 2, g->font_px, RAYWHITE);
+    int ty = pixed_text_y(g), fs = g->font_px;
+    bool dirty = false;
+    for (int i = 0; i < GFX_SOURCES; i++) dirty |= g->gfx_dirty[i];
+    gtext(&g->font, g->font_loaded,
+          g->pix_src == GFX_TILES ? TextFormat("tile 0x%02x  colour %d", idx, g->sel_colour)
+                                  : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->pix_src), idx, g->sel_colour),
+          x0, ty, fs, RAYWHITE);
+    gtext(&g->font, g->font_loaded, "click paints, right-click picks", x0, ty + ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded, dirty ? "u undoes a stroke; saving..." : "u undoes a stroke",
+          x0, ty + 2 * ch(g), fs, dirty ? ORANGE : GRAY);
+    const char *names[] = { "reset", "tiles", "SPIDS1", "SPIDS2" };
+    for (int i = 0; i < 4; i++) {
+        Rectangle rb = pixed_button(g, i);
+        bool on = i > 0 && (GfxSource)(i - 1) == g->pix_src;
+        DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
+        DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
+        int tw = text_w(&g->font, g->font_loaded, names[i], fs);
+        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+    }
+}
+
+// Standing Spider-Man texture (drawn at the cursor), from SPIDS1 as it is now.
+static void spidey_build(GuiState *g) {
+    static uint8_t sbuf[SPIDS_FRAME_W * SPIDS_FRAME_H * 4];
+    render_gfx_rgba(g->rctx, GFX_SPIDS1, render_player_frame(), sbuf);
+    Image img = { .data = sbuf, .width = SPIDS_FRAME_W, .height = SPIDS_FRAME_H,
+                  .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    if (g->spidey_loaded) UnloadTexture(g->spidey);
+    for (int i = 0; i < GFX_SOURCES; i++) if (g->sheet_loaded[i]) UnloadTexture(g->sheet_tex[i]);
+    g->spidey = LoadTextureFromImage(img);
+    SetTextureFilter(g->spidey, TEXTURE_FILTER_POINT);
+    g->spidey_loaded = true;
 }
 
 /* -------------------------------------------------------------- world map */
 
-static int world_y(GuiState *g) { return palette_y(g) + TILESET_PX * g->scale + PAD + PALETTE_LINES * ch(g) + PAD; }
+static int world_y(GuiState *g) { return labels_y(g) + PALETTE_LINES * ch(g) + PAD; }
 
 // Thumbnail size: 8 columns across the space right of the picture, shrunk if
 // 8 rows would not fit the window.
@@ -1025,6 +1148,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->tex_loaded) UnloadTexture(g->tex);
         if (g->pal_loaded) UnloadTexture(g->pal_tex);
         if (g->spidey_loaded) UnloadTexture(g->spidey);
+        for (int i = 0; i < GFX_SOURCES; i++) if (g->sheet_loaded[i]) UnloadTexture(g->sheet_tex[i]);
         if (g->atlas_loaded) UnloadTexture(g->atlas);
         if (g->font_loaded) UnloadFont(g->font);
         if (g->help_font_loaded) UnloadFont(g->help_font);
@@ -1055,15 +1179,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     g->hover_room = -1;
     load_fonts(g);
     world_build(g, ged_rooms(), buf);
-    if (!g->spidey_loaded) {
-        static uint8_t sbuf[SPIDS_FRAME_W * SPIDS_FRAME_H * 4];
-        render_spids_rgba(g->rctx, render_player_frame(), sbuf);
-        Image img = { .data = sbuf, .width = SPIDS_FRAME_W, .height = SPIDS_FRAME_H,
-                      .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
-        g->spidey = LoadTextureFromImage(img);
-        SetTextureFilter(g->spidey, TEXTURE_FILTER_POINT);
-        g->spidey_loaded = true;
-    }
+    if (!g->spidey_loaded) spidey_build(g);
 
     while (!WindowShouldClose() && !ged_quit_requested()) {
         float dt = GetFrameTime();
@@ -1073,7 +1189,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             if (sources_changed(last_build)) {
                 fprintf(stderr, "gui: source changed, rebuilding\n");
                 ged_flush();                               // don't lose painted tiles
-                if (g->blocks_dirty) { render_save_blocks(g->rctx); g->blocks_dirty = false; }
+                gfx_save_all(g);
                 if (system(GUI_BUILD_CMD) == 0) return g;  // host reloads
                 fprintf(stderr, "gui: rebuild failed, not reloading\n");
                 last_build = GetFileModTime(library);
@@ -1089,12 +1205,13 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (feed_keys(g)) g->room_dirty = true;
         if (feed_mouse(g)) g->room_dirty = true;
 
-        if (g->blocks_dirty && !g->pix_painting) {         // debounced write of tile pixel edits
-            g->blocks_timer -= dt;
-            if (g->blocks_timer <= 0) {
-                if (render_save_blocks(g->rctx)) g->saved_flash = 1.2f;
-                g->blocks_dirty = false;
-                world_build(g, ged_rooms(), buf);          // every room may use the edited tile
+        bool gfx_dirty = false;
+        for (int i = 0; i < GFX_SOURCES; i++) gfx_dirty |= g->gfx_dirty[i];
+        if (gfx_dirty && !g->pix_painting) {              // debounced write of pixel edits
+            g->gfx_timer -= dt;
+            if (g->gfx_timer <= 0) {
+                if (gfx_save_all(g)) g->saved_flash = 1.2f;
+                world_build(g, ged_rooms(), buf);          // every room may use the edited image
                 g->room_dirty = true;
             }
         }
@@ -1161,17 +1278,18 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             EndScissorMode();
         }
         draw_palette(g);
-        draw_tile_editor(g);
+        draw_gfx_editor(g);
         draw_world_map(g);
         if (ged_help_shown()) draw_help(g);
         EndDrawing();
     }
 
-    if (g->blocks_dirty) render_save_blocks(g->rctx);
+    gfx_save_all(g);
     ged_close(g->es, file);          // writes pending paints, hands the rooms back to main()
     if (g->tex_loaded) UnloadTexture(g->tex);
     if (g->pal_loaded) UnloadTexture(g->pal_tex);
     if (g->spidey_loaded) UnloadTexture(g->spidey);
+    for (int i = 0; i < GFX_SOURCES; i++) if (g->sheet_loaded[i]) UnloadTexture(g->sheet_tex[i]);
     if (g->atlas_loaded) UnloadTexture(g->atlas);
     if (g->font_loaded) UnloadFont(g->font);
     if (g->help_font_loaded) UnloadFont(g->help_font);

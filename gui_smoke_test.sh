@@ -13,6 +13,7 @@ R=$(cd "$(dirname "$0")" && pwd)
 cd $R
 cp ROOMS.SPL $T/ROOMS.SPL.bak
 cp Spider/BLOCKS.EGA $T/BLOCKS.EGA.bak; had_orig=0; [ -e Spider/BLOCKS.EGA.orig ] && had_orig=1
+cp Spider/SPIDS1.EGA $T/SPIDS1.EGA.bak; had_sorig=0; [ -e Spider/SPIDS1.EGA.orig ] && had_sorig=1
 pkill -f "^Xvfb :97" 2>/dev/null; sleep 0.3
 Xvfb :97 -screen 0 1600x1200x24 -nolisten tcp >/dev/null 2>&1 &
 XV=$!
@@ -53,6 +54,12 @@ xdotool key r; sleep 0.2; xdotool type 02; sleep 0.5
 xdotool mousemove $((X + 776 + 192 + 16 + 2*9 + 4)) $((Y + 24 + 8*9 + 8 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.2
 xdotool mousemove $((X + 776 + 192 + 16 + 1*9 + 4)) $((Y + 24 + 1*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12b-pixel-edit
 xdotool key u; sleep 0.8; snap s12c-pixel-undo   # u undoes the stroke (most recent edit)
+# sprite editing: SPIDS1 button (2nd button under the editor), pick frame 0x18 (row 3, col 0), paint a pixel, snapshot, undo
+xdotool mousemove $((X + 984 + 2*116 + 30)) $((Y + 354 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4; snap s12d0-spids1-mode
+xdotool mousemove $((X + 776 + 12)) $((Y + 24 + 3*21 + 10)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4
+xdotool mousemove $((X + 776 + 192 + 16 + 5*9 + 4)) $((Y + 24 + 5*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12d-sprite-edit
+xdotool key u; sleep 0.8
+xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 357 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
 # thumbs start at y = 24 + 192 + 8 + 8*24 + 8 = 424, 8 across the remaining width
 xdotool mousemove $((X + 776 + 1*97 + 40)) $((Y + 424 + 30)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
@@ -83,4 +90,6 @@ if cmp -s ROOMS.SPL $T/ROOMS.SPL.bak; then echo "ROOMS unchanged (paint did not 
 cp $T/ROOMS.SPL.bak ROOMS.SPL && echo restored
 if [ $had_orig = 0 ] && [ -e Spider/BLOCKS.EGA.orig ]; then echo "BLOCKS.EGA was written by the pixel edit (expected)"; else echo "BLOCKS.EGA never written (pixel edit did not save!)"; fi
 cp $T/BLOCKS.EGA.bak Spider/BLOCKS.EGA; [ $had_orig = 0 ] && rm -f Spider/BLOCKS.EGA.orig
+if [ $had_sorig = 0 ] && [ -e Spider/SPIDS1.EGA.orig ]; then echo "SPIDS1.EGA was written by the sprite edit (expected)"; else echo "SPIDS1.EGA never written (sprite edit did not save!)"; fi
+cp $T/SPIDS1.EGA.bak Spider/SPIDS1.EGA; [ $had_sorig = 0 ] && rm -f Spider/SPIDS1.EGA.orig
 tail -8 $T/gui.log
