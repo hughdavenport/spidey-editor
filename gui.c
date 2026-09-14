@@ -933,7 +933,6 @@ static void spidey_build(GuiState *g) {
     Image img = { .data = sbuf, .width = SPIDS_FRAME_W, .height = SPIDS_FRAME_H,
                   .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
     if (g->spidey_loaded) UnloadTexture(g->spidey);
-    for (int i = 0; i < GFX_SOURCES; i++) if (g->sheet_loaded[i]) UnloadTexture(g->sheet_tex[i]);
     g->spidey = LoadTextureFromImage(img);
     SetTextureFilter(g->spidey, TEXTURE_FILTER_POINT);
     g->spidey_loaded = true;
