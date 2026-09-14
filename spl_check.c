@@ -88,6 +88,18 @@ static void check_random(void) {
     printf("random buffers round-tripped\n");
 }
 
+static uint8_t *read_whole(const char *path, size_t *len) {
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *buf = malloc(n > 0 ? (size_t)n : 1);
+    *len = buf && n > 0 ? fread(buf, 1, (size_t)n, f) : 0;
+    fclose(f);
+    return buf;
+}
+
 static bool copy_file(const char *from, const char *to) {
     FILE *in = fopen(from, "rb"), *out = in ? fopen(to, "wb") : NULL;
     bool ok = in && out;
@@ -156,6 +168,30 @@ static void check_backs_store(const char *data_dir) {
     snprintf(p, sizeof p, "%s/SCENERY.EGA.orig", dir);
     CHECK(stat(p, &st) == 0, "SCENERY.EGA.orig not written");
     printf("background store: edit, save, reload OK (%s)\n", dir);
+
+    // Over the limit: every block full of incompressible tiles must be
+    // refused, and the file on disk left exactly as it was.
+    ctx = render_open(dir);
+    CHECK(ctx != NULL, "reopen for the limit check failed");
+    if (ctx != NULL) {
+        snprintf(p, sizeof p, "%s/BACKS.SPL", dir);
+        size_t before_len = 0;
+        uint8_t *before_bytes = read_whole(p, &before_len);
+        srand(777);
+        for (int b = 0; b < BACKS_BLOCKS; b++) {
+            uint8_t block[BACKS_TILES];
+            for (int i = 0; i < BACKS_TILES; i++) block[i] = (uint8_t)(rand() % 256);
+            render_backs_put(ctx, b, block);
+        }
+        CHECK(!render_backs_save(ctx), "an oversized BACKS.SPL was written");
+        size_t after_len = 0;
+        uint8_t *after_bytes = read_whole(p, &after_len);
+        CHECK(before_bytes && after_bytes && before_len == after_len && memcmp(before_bytes, after_bytes, before_len) == 0,
+              "BACKS.SPL changed although the save was refused");
+        free(before_bytes); free(after_bytes);
+        render_close(ctx);
+        printf("background store: oversized save refused, file untouched\n");
+    }
     // scratch directory is left for inspection when something failed
     if (failures == 0) {
         const char *all[] = { "BACKS.SPL", "BACKS.SPL.orig", "BLOCKS.EGA", "SCENERY.EGA", "SCENERY.EGA.orig", "SPIDS1.EGA", "SPIDS2.EGA" };
@@ -164,11 +200,49 @@ static void check_backs_store(const char *data_dir) {
     }
 }
 
+// writeRooms() must refuse a file over the game's limit and leave ROOMS.SPL
+// as it was: a scratch copy of `rooms_path` gets 64 rooms of random tiles.
+static void check_rooms_limit(const char *rooms_path) {
+    const char *tmpdir = getenv("TMPDIR");
+    char dir[1024], cwd[1024];
+    snprintf(dir, sizeof dir, "%s/spl_check_rooms.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
+    if (mkdtemp(dir) == NULL || getcwd(cwd, sizeof cwd) == NULL) { CHECK(false, "scratch dir for the rooms check"); return; }
+    char copy[1200];
+    snprintf(copy, sizeof copy, "%s/%s", dir, ROOMS_FILE);
+    if (!copy_file(rooms_path, copy)) { CHECK(false, "cannot copy %s", rooms_path); return; }
+    size_t before_len = 0;
+    uint8_t *before = read_whole(copy, &before_len);
+    if (chdir(dir) != 0) { CHECK(false, "chdir %s", dir); free(before); return; }
+    RoomFile file = {0};
+    CHECK(readRooms(&file), "readRooms on the copy failed");
+    srand(4242);
+    for (size_t r = 0; r < 64; r++) {
+        Room *room = &file.rooms[r];
+        if (!room->valid) { memset(&room->data, 0, sizeof room->data); memset(room->data.name, ' ', sizeof room->data.name); room->index = (uint8_t)r; room->valid = true; }
+        for (size_t i = 0; i < sizeof room->data.tiles; i++) room->data.tiles[i] = (uint8_t)(rand() % 256);
+        ARRAY_FREE(room->compressed);
+    }
+    CHECK(!writeRooms(&file), "an oversized ROOMS.SPL was written");
+    size_t after_len = 0;
+    uint8_t *after = read_whole(copy, &after_len);
+    CHECK(before && after && before_len == after_len && memcmp(before, after, before_len) == 0,
+          "ROOMS.SPL changed although the write was refused");
+    // and a file that fits still writes
+    for (size_t r = 0; r < 64; r++) { memset(file.rooms[r].data.tiles, 0, sizeof file.rooms[r].data.tiles); ARRAY_FREE(file.rooms[r].compressed); }
+    CHECK(writeRooms(&file), "a small ROOMS.SPL was refused");
+    free(before); free(after);
+    freeRoomFile(&file);
+    if (chdir(cwd) != 0) CHECK(false, "chdir back");
+    if (failures == 0) { unlink(copy); snprintf(copy, sizeof copy, "%s/%s.tmp", dir, ROOMS_FILE); unlink(copy); rmdir(dir); }
+    printf("rooms file: oversized write refused, file untouched\n");
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s DATA_DIR [SPL_FILE...]\n", argv[0]); return 2; }
     check_random();
     for (int i = 2; i < argc; i++) check_spl_file(argv[i]);
     check_backs_store(argv[1]);
+    if (argc > 2) check_rooms_limit(argv[2]);
     if (failures) { fprintf(stderr, "%d check(s) failed\n", failures); return 1; }
     printf("all checks passed\n");
     return 0;

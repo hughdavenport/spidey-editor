@@ -116,7 +116,7 @@ uint8_t do_undo(void) {
 
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
     redraw();
-    assert(writeRooms(&state->rooms));
+    editor_save();
     return first_room;
 }
 
@@ -153,7 +153,7 @@ uint8_t do_redo(void) {
 
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
     redraw();
-    assert(writeRooms(&state->rooms));
+    editor_save();
     return first_room;
 }
 
@@ -210,7 +210,7 @@ static void transfer_object(struct RoomObject *object, size_t nbr_idx, int new_x
     state->cursors[nbr_idx].y = new_y;
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
     redraw();
-    assert(writeRooms(&state->rooms));
+    editor_save();
 }
 
 static void transfer_switch(struct SwitchObject *switcch, size_t nbr_idx, int new_x, int new_y) {
@@ -241,7 +241,7 @@ static void transfer_switch(struct SwitchObject *switcch, size_t nbr_idx, int ne
     state->cursors[nbr_idx].y = new_y;
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
     redraw();
-    assert(writeRooms(&state->rooms));
+    editor_save();
 }
 
 static bool sprite_at(struct DecompressedRoom *room, struct RoomObject *exclude, int x, int y) {
@@ -289,7 +289,7 @@ void move(int dx, int dy) {
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                     redraw();
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }
             } else {
                 push_undo((uint8_t)state->current_level, false);
@@ -302,7 +302,7 @@ void move(int dx, int dy) {
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                 redraw();
-                assert(writeRooms(&state->rooms));
+                editor_save();
             }
             moved = true;
         } else {
@@ -351,7 +351,7 @@ void move(int dx, int dy) {
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                     redraw();
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                     moved = true;
                     break;
                 }
@@ -406,7 +406,7 @@ void move(int dx, int dy) {
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                         redraw();
-                        assert(writeRooms(&state->rooms));
+                        editor_save();
                     }
                 }
             } else {
@@ -429,7 +429,7 @@ void move(int dx, int dy) {
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                         redraw();
-                        assert(writeRooms(&state->rooms));
+                        editor_save();
                     }
                 }
             }
@@ -453,7 +453,7 @@ void move(int dx, int dy) {
                 state->cursors[nbr_idx].y = new_y;
                 snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                 redraw();
-                assert(writeRooms(&state->rooms));
+                editor_save();
             } else {
                 /* Self-loop: wrap to opposite edge within same room */
                 push_undo((uint8_t)state->current_level, false);
@@ -464,7 +464,7 @@ void move(int dx, int dy) {
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                 redraw();
-                assert(writeRooms(&state->rooms));
+                editor_save();
             }
         } else if (x + dx >= 0 && x + dx < WIDTH_TILES && y + dy >= 0 && y + dy < HEIGHT_TILES) {
             push_undo((uint8_t)state->current_level, false);
@@ -475,7 +475,7 @@ void move(int dx, int dy) {
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             snprintf(state->status_message, sizeof(state->status_message), "Writing room");
             redraw();
-            assert(writeRooms(&state->rooms));
+            editor_save();
         }
     }
 }
@@ -549,7 +549,7 @@ void stretch(int dx, int dy) {
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                 redraw();
-                assert(writeRooms(&state->rooms));
+                editor_save();
                 stretched = true;
                 break;
             }
@@ -617,7 +617,7 @@ void stretch(int dx, int dy) {
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             snprintf(state->status_message, sizeof(state->status_message), "Writing room");
             redraw();
-            assert(writeRooms(&state->rooms));
+            editor_save();
             stretched = true;
         }
     }
@@ -629,7 +629,7 @@ void stretch(int dx, int dy) {
         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
         snprintf(state->status_message, sizeof(state->status_message), "Writing room");
         redraw();
-        assert(writeRooms(&state->rooms));
+        editor_save();
     }
 }
 
@@ -665,7 +665,7 @@ void shrink(int dx, int dy) {
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             snprintf(state->status_message, sizeof(state->status_message), "Writing room");
             redraw();
-            assert(writeRooms(&state->rooms));
+            editor_save();
             shrank = true;
         }
     }
@@ -743,7 +743,7 @@ void shrink(int dx, int dy) {
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             snprintf(state->status_message, sizeof(state->status_message), "Writing room");
             redraw();
-            assert(writeRooms(&state->rooms));
+            editor_save();
             shrank = true;
         }
     }
@@ -754,6 +754,22 @@ void shrink(int dx, int dy) {
 /* Move the switch (preamble at the cursor) or object (containing the cursor)
  * to room `room_idx`, keeping its coordinates: the GUI's "drop it on that room
  * in the world map". The cursor follows it. false = nothing to move. */
+// Write ROOMS.SPL. writeRooms() refuses (and leaves the file as it was) when
+// the result would pass the game's size limits; then everything done since
+// the last successful write is undone so the editor shows what is on disk,
+// and the status line says why.
+bool editor_save(void) {
+    if (writeRooms(&state->rooms)) {
+        state->saved_undo_len = state->undo_stack.length;
+        return true;
+    }
+    bool undone = false;
+    while (state->undo_stack.length > state->saved_undo_len) { do_undo(); undone = true; }
+    snprintf(state->status_message, sizeof(state->status_message),
+             undone ? "NOT SAVED: over the game's size limit, change undone" : "NOT SAVED: over the game's size limit");
+    return false;
+}
+
 // A room the file does not contain becomes a real, saved room, entirely
 // blank: zero tiles, every setting 0 (tileset 0, background 0, no gravity,
 // no damage, no exits), no objects or switches, a blank name. Rooms only
@@ -766,8 +782,8 @@ bool room_create(size_t room_idx) {
     r->index = (uint8_t)room_idx;
     r->valid = true;
     memset(r->data.name, ' ', sizeof r->data.name);
+    if (!editor_save()) { r->valid = false; return false; }   // no room for one more room
     snprintf(state->status_message, sizeof(state->status_message), "Created room %02zx", room_idx);
-    assert(writeRooms(&state->rooms));
     return true;
 }
 
@@ -831,7 +847,7 @@ int switch_add_chunk(size_t sw_idx, struct SwitchChunk chunk) {
     }
     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
-    assert(writeRooms(&state->rooms));
+    editor_save();
     return (int)state->current_chunk;
 }
 
@@ -858,7 +874,7 @@ void warp_to(int tx, int ty) {
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                 redraw();
-                assert(writeRooms(&state->rooms));
+                editor_save();
                 moved = true;
                 break;
             }
@@ -891,7 +907,7 @@ void warp_to(int tx, int ty) {
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                     redraw();
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                     moved = true;
                     break;
                 }
@@ -934,7 +950,7 @@ void warp_to(int tx, int ty) {
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
             snprintf(state->status_message, sizeof(state->status_message), "Writing room");
             redraw();
-            assert(writeRooms(&state->rooms));
+            editor_save();
             moved = true;
         }
     }
@@ -948,6 +964,6 @@ void warp_to(int tx, int ty) {
         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
         snprintf(state->status_message, sizeof(state->status_message), "Writing room");
         redraw();
-        assert(writeRooms(&state->rooms));
+        editor_save();
     }
 }

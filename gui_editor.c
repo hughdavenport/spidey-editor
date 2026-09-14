@@ -21,7 +21,7 @@ game_state *state = NULL;
 // (see ged_key), so this only runs for EOF-style exits; behave like the TUI.
 void end(void) {
     if (state != NULL) {
-        if (paint_pending) writeRooms(&state->rooms);
+        if (paint_pending) editor_save();
         free_undo_stacks();
         freeRoomFile(&state->rooms);
         free(state);
@@ -111,7 +111,7 @@ void *ged_open(RoomFile *host, void *prev) {
 void ged_close(void *es, RoomFile *host) {
     game_state *s = es;
     state = s;
-    if (paint_pending) { writeRooms(&s->rooms); paint_pending = false; }
+    if (paint_pending) { editor_save(); paint_pending = false; }
     *host = s->rooms;                       // main() frees the room data
     state_free_keep_rooms(s);
 }
@@ -237,7 +237,7 @@ void ged_map_click(int room, bool right) {
     if (room < 0 || room >= 64) return;
     if (!state->rooms.rooms[room].valid) {
         if (right) return;                          // nothing to move into a room that does not exist
-        room_create((size_t)room);                  // going to an empty slot on the map creates the room
+        if (!room_create((size_t)room)) return;     // going to an empty slot on the map creates the room (unless the file is full)
     }
     if (right) {
         if (state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS && state->current_switch) {
@@ -247,7 +247,7 @@ void ged_map_click(int room, bool right) {
                 sw->chunks.data[state->current_chunk].room_idx = (uint16_t)room;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 snprintf(state->status_message, sizeof(state->status_message), "Chunk now targets room %d", room);
-                assert(writeRooms(&state->rooms));
+                editor_save();
             }
         } else if (plain_state()) {
             if (!transfer_item_to_room((size_t)room))
@@ -300,7 +300,7 @@ void ged_adjust_room(int dbackground, int dtileset) {
     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
     snprintf(state->status_message, sizeof(state->status_message), "bkgrnd %d tileset %d",
              room->background, room->tile_offset);
-    assert(writeRooms(&state->rooms));
+    editor_save();
 }
 
 int ged_linking(void) {
@@ -388,7 +388,7 @@ bool ged_place_sprite(int sprite_type, int damage) {
     o->sprite.damage = (uint8_t)damage;
     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
-    assert(writeRooms(&state->rooms));
+    editor_save();
     return true;
 }
 
@@ -438,6 +438,6 @@ void ged_paint(int tx, int ty, uint8_t tile) {
 bool ged_flush(void) {
     if (!paint_pending) return false;
     paint_pending = false;
-    assert(writeRooms(&state->rooms));
+    editor_save();
     return true;
 }

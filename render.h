@@ -80,6 +80,7 @@ const uint8_t (*render_palette(void))[3];
 // never drawn (black). Blocks are cached in the context; render_backs_save()
 // recompresses and writes the whole file (one-time <file>.orig backup).
 #define BACKS_BLOCKS 64
+#define BACKS_FILE_LIMIT 0x2b93   // bytes: the shipped BACKS.SPL's size. The game's buffer limit is unknown; this is the known-safe bound
 #define BACKS_TILES (WIDTH_TILES * HEIGHT_TILES)   // 704
 int  render_backs_tile(RenderCtx *ctx, int bid, int x, int y);
 void render_backs_set_tile(RenderCtx *ctx, int bid, int x, int y, int tile);

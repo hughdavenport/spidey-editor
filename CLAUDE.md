@@ -48,6 +48,19 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - `MIN_WIDTH = 2 * WIDTH_TILES = 64`, `MIN_HEIGHT = HEIGHT_TILES + 1 = 23`
 - Largest needed height: 36 rows (GOTO_ROOM state)
 
+## File size limits
+- ROOMS.SPL must stay within `MAX_ROOM_FILE_SIZE` (0x3100, room.c) and each room within writeRoom's
+  960-byte buffers. `writeFile` fails (no partial file) when a room will not fit; `writeRooms` writes
+  ROOMS.SPL.tmp and renames it over ROOMS.SPL only on success. Every editor write goes through
+  `editor_save()` (editor_actions.c): on refusal it undoes back to `saved_undo_len` (the undo depth
+  at the last successful write) and puts "NOT SAVED: ..." in the status line, so the editor always
+  shows what is on disk. `room_create` un-creates its room on refusal.
+- BACKS.SPL: the game's limit is unknown, so `render_backs_save` refuses to grow past the shipped
+  file's size (`BACKS_FILE_LIMIT` 0x2b93; our compressor packs about twice as tight, so there is headroom) and
+  also writes via .tmp + rename. The GUI then undoes background strokes until it fits and shows the
+  refusal in red under the picker (`gui_error`).
+- `make check` covers both refusals (oversized file refused, file on disk untouched).
+
 ## Terminal / Screen Handling
 - Editor uses ANSI escape codes (`\033[row;colH` cursor movement, color codes)
 - `get_screen_dimensions()`: calls `ioctl(STDOUT_FILENO, TIOCGWINSZ, &w)` — **fails when piped (returns 0)**

@@ -709,15 +709,14 @@ bool render_backs_original(RenderCtx *ctx, int bid, uint8_t *out) {
 // Recompress every present block and write BACKS.SPL: 64 big-endian block
 // offsets, the file size, then the blocks (an absent block gets the next
 // block's offset, as the original file does). The game's size limit for the
-// file is not known, so growing past the original is only warned about.
+// file is not known, so the shipped file's size (BACKS_FILE_LIMIT) is the
+// bound: a result larger than that is refused and nothing is written.
 bool render_backs_save(RenderCtx *ctx) {
     if (ctx == NULL) return false;
     char path[1200], orig[1200];
     snprintf(path, sizeof path, "%s/BACKS.SPL", ctx->dir);
     snprintf(orig, sizeof orig, "%s/BACKS.SPL.orig", ctx->dir);
     keep_original(path, orig);
-    struct stat st;
-    long orig_size = stat(orig, &st) == 0 ? (long)st.st_size : -1;
 
     static uint8_t body[BACKS_BLOCKS * 2 * BACKS_TILES];   // worst case: every byte escaped
     uint8_t hdr[0x82];
@@ -733,13 +732,19 @@ bool render_backs_save(RenderCtx *ctx) {
     size_t total = sizeof hdr + len;
     if (total > 0xffff) { fprintf(stderr, "render: BACKS.SPL too large (%zu bytes)\n", total); return false; }
     hdr[0x80] = (uint8_t)(total >> 8); hdr[0x81] = (uint8_t)total;
-    if (orig_size >= 0 && (long)total > orig_size)
-        fprintf(stderr, "render: BACKS.SPL grew from %ld to %zu bytes; the game's limit is unknown\n", orig_size, total);
+    if (total > BACKS_FILE_LIMIT) {
+        fprintf(stderr, "render: not writing BACKS.SPL: %zu bytes would exceed the shipped file's %d\n", total, BACKS_FILE_LIMIT);
+        return false;
+    }
 
-    FILE *f = fopen(path, "wb");
-    if (f == NULL) { fprintf(stderr, "render: cannot write %s: %s\n", path, strerror(errno)); return false; }
+    char tmp[1300];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    if (f == NULL) { fprintf(stderr, "render: cannot write %s: %s\n", tmp, strerror(errno)); return false; }
     bool ok = fwrite(hdr, 1, sizeof hdr, f) == sizeof hdr && fwrite(body, 1, len, f) == len;
-    fclose(f);
+    ok = (fclose(f) == 0) && ok;
+    if (ok && rename(tmp, path) != 0) { fprintf(stderr, "render: cannot replace %s: %s\n", path, strerror(errno)); ok = false; }
+    if (!ok) remove(tmp);
     return ok;
 }
 

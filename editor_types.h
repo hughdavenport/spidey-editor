@@ -203,6 +203,7 @@ typedef struct {
 
     ARRAY(UndoEntry) undo_stack;
     ARRAY(UndoEntry) redo_stack;
+    size_t saved_undo_len;      // undo_stack.length when ROOMS.SPL was last written (editor_save reverts to here on refusal)
     char status_message[80];
 
     /* Mouse drag state */
@@ -268,6 +269,7 @@ extern size_t panel_oob_switch_n;
 /* GUI helpers (editor_actions.c) */
 bool transfer_item_to_room(size_t room_idx);
 bool room_create(size_t room_idx);   // make an absent room exist, entirely blank (tiles and settings all 0); false if it already does
+bool editor_save(void);              // writeRooms(); a refused write (game limits) undoes the change and says so in the status line
 int  switch_add_chunk(size_t sw_idx, struct SwitchChunk chunk);
 
 /* Forward declarations for cross-module calls */

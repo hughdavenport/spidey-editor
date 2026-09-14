@@ -785,7 +785,10 @@ bool writeRoom(Room *room, FILE *fp) {
         decompressed[d_len++] = room->data.name[i];
     }
 
-    assert(d_len + 2 * room->data.num_objects < C_ARRAY_LEN(decompressed));
+    if (d_len + 2 * room->data.num_objects >= C_ARRAY_LEN(decompressed)) {
+        fprintf(stderr, "Room %d is too big to write (objects)\n", room->index);
+        return false;
+    }
     for (size_t i = 0; i < room->data.num_objects; i ++) {
         // FIXME depending on type, first byte should have 0x80
         switch (room->data.objects[i].type) {
@@ -847,17 +850,26 @@ bool writeRoom(Room *room, FILE *fp) {
         }
     }
     // then stuff that controls enemy placement, switch actions, etc
-    assert(d_len + room->rest.length < C_ARRAY_LEN(decompressed));
+    if (d_len + room->rest.length >= C_ARRAY_LEN(decompressed)) {
+        fprintf(stderr, "Room %d is too big to write (%zu bytes)\n", room->index, d_len + room->rest.length);
+        return false;
+    }
     for (size_t i = 0; i < room->rest.length; i ++) {
         decompressed[d_len++] = room->rest.data[i];
     }
 
-    assert(d_len < C_ARRAY_LEN(decompressed));
+    if (d_len >= C_ARRAY_LEN(decompressed)) {
+        fprintf(stderr, "Room %d is too big to write (%zu bytes)\n", room->index, d_len);
+        return false;
+    }
     log("Compressing %ld bytes of data\n", d_len);
 
     c_len = spl_compress(decompressed, d_len, 0x8f, compressed, C_ARRAY_LEN(compressed));
     log("Compressed %ld bytes of data into %ld bytes\n", d_len, c_len);
-    assert(c_len > 0);
+    if (c_len == 0) {
+        fprintf(stderr, "Room %d does not compress into %zu bytes\n", room->index, C_ARRAY_LEN(compressed));
+        return false;
+    }
 
     /* printf("  Data to compress (length=%zu): [", d_len); */
     /* for (size_t i = 0; i < d_len; i ++) { */
@@ -898,16 +910,16 @@ bool writeFile(RoomFile *file, FILE *fp) {
     long offset = sizeof(Header);
     if (fseek(fp, offset, SEEK_SET) == -1) return false;
 
+    // Any room that will not fit fails the whole write: the caller must not
+    // end up with a file missing rooms.
     for (size_t i = 0; i < C_ARRAY_LEN(file->rooms); i ++) {
         head.definitions[i] = htons(offset);
-        if (!writeRoom(&file->rooms[i], fp)) {
-            /* fprintf(stderr, "%s:%d: Not writing room %ld\n", __FILE__, __LINE__, i); */
-            continue;
-        }
+        if (!file->rooms[i].valid) continue;
+        if (!writeRoom(&file->rooms[i], fp)) return false;
         if (ftell(fp) > MAX_ROOM_FILE_SIZE) {
-            fprintf(stderr, "%s:%d: Can't write room %ld @ 0x%2lx within size limit. size now %lx\n",
-                    __FILE__, __LINE__, i, offset, ftell(fp));
-            break;
+            fprintf(stderr, "%s:%d: Can't write room %ld @ 0x%2lx within the 0x%x byte limit. size now %lx\n",
+                    __FILE__, __LINE__, i, offset, MAX_ROOM_FILE_SIZE, ftell(fp));
+            return false;
         }
         /* printf("%s:%d: Wrote room %ld \"%s\" @ 0x%2lx length %ld\n", */
         /*        __FILE__, __LINE__, i, file->rooms[i].data.name, offset, ftell(fp) - offset); */
@@ -1369,12 +1381,21 @@ next:
         }
     }
 
-    FILE *fp = fopen(ROOMS_FILE, "wb");
+    // Write beside the file and rename over it only when everything fitted,
+    // so a refused write leaves the last good ROOMS.SPL in place.
+    const char *tmp = ROOMS_FILE ".tmp";
+    FILE *fp = fopen(tmp, "wb");
     if (fp == NULL) {
-        fprintf(stderr, "Could not open %s for writing.\n", ROOMS_FILE);
+        fprintf(stderr, "Could not open %s for writing.\n", tmp);
         return false;
     }
     bool ret = writeFile(file, fp);
-    fclose(fp);
-    return ret;
+    if (fclose(fp) != 0) ret = false;
+    if (!ret) { remove(tmp); return false; }
+    if (rename(tmp, ROOMS_FILE) != 0) {
+        fprintf(stderr, "Could not replace %s: %s\n", ROOMS_FILE, strerror(errno));
+        remove(tmp);
+        return false;
+    }
+    return true;
 }

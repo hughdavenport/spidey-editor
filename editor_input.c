@@ -180,7 +180,7 @@ static void delete_current_chunk(void) {
     memset(sw->chunks.data + ch_i, 0, sizeof(struct SwitchChunk));
     sw->chunks.length --;
     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-    assert(writeRooms(&state->rooms));
+    editor_save();
     if (state->current_chunk > 2) state->current_chunk --;
     switch (sw->chunks.length) {
         case 1: state->current_state = EDIT_SWITCHDETAILS; break;
@@ -233,7 +233,7 @@ static void chunk_swap_next(void) {
             sw->chunks.data[state->current_chunk+1] = ch;
             state->current_chunk ++;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         }
     }
 }
@@ -249,7 +249,7 @@ static void chunk_swap_prev(void) {
             sw->chunks.data[state->current_chunk-1] = ch;
             state->current_chunk --;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         }
     }
 }
@@ -340,7 +340,7 @@ static void delete_item_at_cursor(void) {
         room->tiles[TILE_IDX(x, y)] = 0;
     }
     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-    assert(writeRooms(&state->rooms));
+    editor_save();
 }
 
 static bool handle_goto_object(Key key) {
@@ -661,7 +661,7 @@ static bool handle_edit_roomname(Key key) {
                 state->current_chunk = 0;
                 state->previous_state = NORMAL;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                assert(writeRooms(&state->rooms));
+                editor_save();
             } else {
                 switch (key.ch) {
                     case 'H': state->debug.hex = !state->debug.hex; break;
@@ -949,7 +949,7 @@ static bool handle_edit_roomdetails_num(Key key) {
                     state->partial_byte = 0;
                     state->room_detail = 0;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 } else {
                     if (state->room_detail != 'e' || digit == 0) {
                         state->partial_byte = 0xFF00 | digit;
@@ -1050,7 +1050,7 @@ static bool handle_edit_roomdetails_room(Key key) {
                         state->roomname_cursor = 0;
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }
             } else if (state->roomname_cursor == 0 && state->partial_byte == 0 &&
                        key.ch >= '0' &&
@@ -1103,7 +1103,7 @@ static bool handle_edit_roomdetails_room(Key key) {
                             state->roomname_cursor = 0;
                         }
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                        assert(writeRooms(&state->rooms));
+                        editor_save();
                     }
                 }
             }
@@ -1177,7 +1177,7 @@ static bool handle_edit_switchdetails(Key key) {
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_DOWN:
         {
@@ -1185,7 +1185,7 @@ static bool handle_edit_switchdetails(Key key) {
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_RIGHT:
         {
@@ -1193,7 +1193,7 @@ static bool handle_edit_switchdetails(Key key) {
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_LEFT:
         {
@@ -1201,7 +1201,7 @@ static bool handle_edit_switchdetails(Key key) {
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_BS:
         case KEY_DELETE:
@@ -1223,7 +1223,7 @@ static bool handle_edit_switchdetails(Key key) {
                             room->switches[sw_i+1] = sw;
                             state->current_switch ++;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                            assert(writeRooms(&state->rooms));
+                            editor_save();
                         }
                     }
                 }; break;
@@ -1240,7 +1240,7 @@ static bool handle_edit_switchdetails(Key key) {
                             room->switches[sw_i-1] = sw;
                             state->current_switch --;
                             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                            assert(writeRooms(&state->rooms));
+                            editor_save();
                         }
                     }
                 }; break;
@@ -1251,7 +1251,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'j':
@@ -1260,7 +1260,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'k':
@@ -1269,7 +1269,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'l':
@@ -1278,7 +1278,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'o':
@@ -1287,7 +1287,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].one_time_use = !room->switches[state->current_switch - 1].chunks.data[0].one_time_use;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'y':
@@ -1310,7 +1310,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     ARRAY_ADD(sw->chunks, state->clipboard.chunk);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'e':
@@ -1319,7 +1319,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].room_entry = !room->switches[state->current_switch - 1].chunks.data[0].room_entry;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 's':
@@ -1328,7 +1328,7 @@ static bool handle_edit_switchdetails(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = (room->switches[state->current_switch - 1].chunks.data[0].side + 1) % NUM_SIDES;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'c':
@@ -1342,7 +1342,7 @@ static bool handle_edit_switchdetails(Key key) {
                         state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
                         state->switch_on = false;
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                        assert(writeRooms(&state->rooms));
+                        editor_save();
                     } else if (sw->chunks.length == 2) {
                         state->current_chunk = 1;
                         assert(sw->chunks.data[0].type == PREAMBLE);
@@ -1385,7 +1385,7 @@ static bool handle_edit_switchdetails(Key key) {
                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
                     state->switch_on = false;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
 
                 case 'q':
@@ -1502,7 +1502,7 @@ static bool handle_edit_switchdetails_select_chunk(Key key) {
                     ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK }));
                     state->switch_on = false;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 default:
                     state->current_state = EDIT_SWITCHDETAILS;
@@ -1659,7 +1659,7 @@ static void delete_current_switch(void) {
         state->roomname_cursor = 0;
     }
     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-    assert(writeRooms(&state->rooms));
+    editor_save();
 }
 
 static bool handle_edit_switchdetails_chunk_switch(Key key) {
@@ -1687,7 +1687,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     chunk->switch_idx = index;
                     state->partial_byte = 0;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 } else {
                     state->partial_byte = 0xFF00 | b;
                 }
@@ -1702,7 +1702,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     chunk->off = (chunk->off + 1) % 4;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'n': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -1711,7 +1711,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     chunk->on = (chunk->on + 1) % 4;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 't': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -1752,7 +1752,7 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                             }
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'q':
                     if (state->help) {
@@ -1849,7 +1849,7 @@ static bool handle_edit_switchdetails_chunk_switch_room(Key key) {
                     state->roomname_cursor = 0;
                     RESTORE_ROOM_NAME();
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }
             } else if (state->roomname_cursor == 0 && state->partial_byte == 0 &&
                        key.ch >= '0' &&
@@ -1893,7 +1893,7 @@ static bool handle_edit_switchdetails_chunk_switch_room(Key key) {
                         state->roomname_cursor = 0;
                         RESTORE_ROOM_NAME();
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                        assert(writeRooms(&state->rooms));
+                        editor_save();
                     }
                 }
             }
@@ -1977,7 +1977,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     }
                     state->partial_byte = 0;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 } else {
                     state->partial_byte = 0xFF00 | b;
                 }
@@ -2000,7 +2000,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                         }
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'j':
                 case 'l': {
@@ -2022,7 +2022,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                         chunk->x = 0;
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'o':
                     state->switch_on = !state->switch_on;
@@ -2046,7 +2046,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                         chunk->x = 0;
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case '^': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2055,7 +2055,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     if (chunk->size < 8) chunk->size ++;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'v': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2064,7 +2064,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     if (chunk->size > 1) chunk->size --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'r': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2073,7 +2073,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     chunk->dir = (chunk->dir + 1) % NUM_DIRECTIONS;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 't': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2114,7 +2114,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                             }
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'q':
                     if (state->help) {
@@ -2154,7 +2154,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                 }
             }
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_DOWN:
         case KEY_RIGHT:
@@ -2177,7 +2177,7 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                 chunk->x = 0;
             }
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_BS:
         case KEY_DELETE:
@@ -2241,7 +2241,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     }
                     state->partial_byte = 0;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 } else {
                     state->partial_byte = 0xFF00 | b;
                 }
@@ -2257,7 +2257,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     chunk->dir = (chunk->dir + 1) % NUM_DIRECTIONS;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case '^': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2266,7 +2266,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     if (chunk->size < 8) chunk->size ++;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'v': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2275,7 +2275,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     if (chunk->size > 1) chunk->size --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'h': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2284,7 +2284,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     if (chunk->x) chunk->x --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'j': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2298,7 +2298,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                         state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'k': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2307,7 +2307,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     if (chunk->y) chunk->y --;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'l': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2321,7 +2321,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                         state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 't': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2362,7 +2362,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                             }
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'q':
                     if (state->help) {
@@ -2391,7 +2391,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
             push_undo((uint8_t)state->current_level, false);
             if (chunk->y) chunk->y --;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_DOWN:
         {
@@ -2406,7 +2406,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                 state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
             }
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_LEFT:
         {
@@ -2416,7 +2416,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
             push_undo((uint8_t)state->current_level, false);
             if (chunk->x) chunk->x --;
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_RIGHT:
         {
@@ -2431,7 +2431,7 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                 state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
             }
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         } break;
         case KEY_BS:
         case KEY_DELETE:
@@ -2491,7 +2491,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     chunk->value = value;
                     state->partial_byte = 0;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 } else {
                     state->partial_byte = 0xFF00 | b;
                 }
@@ -2535,7 +2535,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                             }
                     }
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'i': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2543,7 +2543,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     chunk->index = (chunk->index + 1) % 0x10;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 's': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
@@ -2551,7 +2551,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     push_undo((uint8_t)state->current_level, false);
                     chunk->test = (((chunk->test >> 4) + 1) % 4) << 4;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                 }; break;
                 case 'q':
                     if (state->help) {
@@ -2964,7 +2964,7 @@ static bool handle_tile_edit(Key key) {
                     push_undo((uint8_t)*cursorlevel, false);
                     obj->sprite.damage = (uint8_t)(key.ch - '0');
                     ARRAY_FREE(state->rooms.rooms[*cursorlevel].compressed);
-                    assert(writeRooms(&state->rooms));
+                    editor_save();
                     return true;
                 }
             }
@@ -3026,7 +3026,7 @@ static bool handle_tile_edit(Key key) {
                 }
                 if (!obj && !ch) room->tiles[TILE_IDX(x, y)] = value;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                assert(writeRooms(&state->rooms));
+                editor_save();
                 state->partial_byte = 0;
             } else {
                 state->partial_byte = 0xFF00 | b;
@@ -3125,7 +3125,7 @@ static bool handle_tile_edit(Key key) {
                 }
             }
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         }; break;
         case '+': {
             struct RoomObject *object_underneath = NULL;
@@ -3202,7 +3202,7 @@ static bool handle_tile_edit(Key key) {
                 }
             }
             ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-            assert(writeRooms(&state->rooms));
+            editor_save();
         }; break;
         case 'u': {
             uint8_t r = do_undo();
@@ -3252,7 +3252,7 @@ static bool handle_tile_edit(Key key) {
                 }
                 room->num_objects++;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                assert(writeRooms(&state->rooms));
+                editor_save();
             } else if (state->clipboard.type == CLIP_SWITCH) {
                 if (room->num_switches >= 15) {
                     snprintf(state->status_message, sizeof(state->status_message), "Max 15 switches");
@@ -3276,7 +3276,7 @@ static bool handle_tile_edit(Key key) {
                 }
                 room->num_switches++;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                assert(writeRooms(&state->rooms));
+                editor_save();
             } else if (state->clipboard.type == CLIP_CHUNK) {
                 /* Append chunk to switch preamble at cursor */
                 bool found_sw = false;
@@ -3287,7 +3287,7 @@ static bool handle_tile_edit(Key key) {
                         push_undo((uint8_t)state->current_level, false);
                         ARRAY_ADD(sw->chunks, state->clipboard.chunk);
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                        assert(writeRooms(&state->rooms));
+                        editor_save();
                         found_sw = true;
                         break;
                     }
@@ -3300,7 +3300,7 @@ static bool handle_tile_edit(Key key) {
                 push_undo((uint8_t)state->current_level, false);
                 room->tiles[TILE_IDX(x, y)] = state->clipboard.tile;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                assert(writeRooms(&state->rooms));
+                editor_save();
             } else {
                 snprintf(state->status_message, sizeof(state->status_message), "Nothing to paste");
             }
@@ -3375,7 +3375,7 @@ static bool handle_tile_edit(Key key) {
                     ARRAY_ADD(sw->chunks, ((struct SwitchChunk){ .type = PREAMBLE, .x = x, .y = y }));
                 }
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                assert(writeRooms(&state->rooms));
+                editor_save();
                 state->current_switch = sw_idx + 1;
                 state->current_state = EDIT_SWITCHDETAILS;
                 return true;
@@ -3455,7 +3455,7 @@ static bool handle_tile_edit(Key key) {
                     }
                 }
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
-                assert(writeRooms(&state->rooms));
+                editor_save();
                 done_cycle:
                 return true;
             }

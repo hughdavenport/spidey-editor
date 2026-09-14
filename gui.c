@@ -84,6 +84,8 @@ typedef struct {
     bool paint_dirty;       // painted cells not yet written to disk
     float save_timer;       // seconds until the pending paint write
     float saved_flash;      // seconds left to show "saved"
+    float err_flash;        // seconds left to show err
+    char err[96];           // a refused write, shown under the picker in red
     float src_check;        // seconds until the next hot-reload source check
     bool pix_op;            // this frame's mouse event went to the pixel editor (for `u` routing)
     int focus;              // which panel arrows / hjkl move: the room, the picker, the pixel editor, its colours, its buttons, or the world map
@@ -1195,7 +1197,9 @@ static void draw_palette(GuiState *g) {
         gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs,
               i == 0 ? RAYWHITE : link ? ORANGE : GRAY);
 
-    if (g->saved_flash > 0)
+    if (g->err_flash > 0)
+        gtext(&g->font, g->font_loaded, g->err, x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, RED);
+    else if (g->saved_flash > 0)
         gtext(&g->font, g->font_loaded, "saved", x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
 }
 
@@ -1239,6 +1243,12 @@ static void backs_undo_push(GuiState *g, int bid) {
     g->pix_seq = ++g->seq;
 }
 
+static void gui_error(GuiState *g, const char *msg) {
+    snprintf(g->err, sizeof g->err, "%s", msg);
+    g->err_flash = 4.0f;
+    fprintf(stderr, "gui: %s\n", msg);
+}
+
 static void backs_touched(GuiState *g) {
     g->backs_dirty = true; g->gfx_timer = 0.6f;
     g->room_dirty = true;
@@ -1273,12 +1283,24 @@ static bool gfx_save_all(GuiState *g) {
     for (int i = 0; i < GFX_SOURCES; i++) {
         if (!g->gfx_dirty[i]) continue;
         g->gfx_dirty[i] = false;
-        any |= render_gfx_save(g->rctx, (GfxSource)i);
+        if (render_gfx_save(g->rctx, (GfxSource)i)) any = true;
+        else gui_error(g, TextFormat("could not write %s", render_gfx_name((GfxSource)i)));
         if (i == GFX_SPIDS1) spidey_build(g);
     }
     if (g->backs_dirty) {
         g->backs_dirty = false;
-        any |= render_backs_save(g->rctx);
+        if (render_backs_save(g->rctx)) any = true;
+        else {
+            // refused: the file would pass its size limit. Undo background
+            // strokes, newest first, until what is left fits again.
+            bool fits = false;
+            while (!fits && g->pix_undo_n > 0 && g->pix_undo[g->pix_undo_n - 1].src == UNDO_BACKS) {
+                pix_undo_pop(g);
+                fits = render_backs_save(g->rctx);
+            }
+            g->backs_dirty = false;
+            gui_error(g, "NOT SAVED: BACKS.SPL over its size limit, background stroke undone");
+        }
     }
     return any;
 }
@@ -1826,6 +1848,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             g->save_timer -= dt;
             if (g->save_timer <= 0 && !g->painting) {
                 if (ged_flush()) g->saved_flash = 1.2f;
+                g->room_dirty = true;                  // a refused write undid the stroke: show the room as saved
                 g->paint_dirty = false;
             }
         }
@@ -1873,6 +1896,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->backs_view && (!g->sheet_loaded[GFX_SCENERY] || g->sheet_stale[GFX_SCENERY])) sheet_build(g, GFX_SCENERY);
 
         if (g->saved_flash > 0) g->saved_flash -= dt;
+        if (g->err_flash > 0) g->err_flash -= dt;
         BeginDrawing();
         ClearBackground(BLACK);
         draw_text_screen(g);
