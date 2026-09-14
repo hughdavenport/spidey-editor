@@ -150,8 +150,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Block object under the cursor: its tile grid replaces the pixel editor (`ged_block_*`);
   click paints the picked tile (with the attribute buttons' bits), w+/w-/h+/h- call the
   editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block.
-- Keyboard focus (`g->focus`): Tab cycles room / picker / editor / world map, or click one;
-  arrows and hjkl move that panel's selection, Enter/Space applies it (world map: go there;
+- Keyboard focus (`g->focus`): Tab cycles room / picker / editor / colours / world map, or click
+  one; arrows and hjkl move that panel's selection (colours: moving selects the paint colour;
+  skipped while the block panel is up), Enter/Space applies it (world map: go there;
   picker: put tile / creature at the room cursor; editor: paint). Esc, or any other key that
   is forwarded to the editor (`r`, `s`, digits, Ctrl-X, ...), returns focus to the room, so
   `r` then `h`/`l` types into the room prompt rather than moving the world-map selection. `u` after a mouse-driven room edit goes to the room undo.

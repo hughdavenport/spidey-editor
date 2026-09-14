@@ -40,7 +40,7 @@
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
 #define PALETTE_LINES 4         // text lines under the palette before the world map
 #define SWATCH_ROWS 2
-enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_WORLD, FOCUS_COUNT };
+enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
@@ -86,7 +86,7 @@ typedef struct {
     float saved_flash;      // seconds left to show "saved"
     float src_check;        // seconds until the next hot-reload source check
     bool pix_op;            // this frame's mouse event went to the pixel editor (for `u` routing)
-    int focus;              // which panel arrows / hjkl move: the room, the picker, or the world map
+    int focus;              // which panel arrows / hjkl move: the room, the picker, the pixel editor, its colours, or the world map
     int block_hidden;       // block object whose panel was closed with "gfx" (-1 none)
     int ecx, ecy;           // keyboard cursor in the pixel / block editor grid
     bool eyedrop;           // next click anywhere picks that colour
@@ -385,6 +385,8 @@ static void focus_move(GuiState *g, int dx, int dy) {
         else { g->sel_sprite += dx + 8 * dy; sync_sprite_sel(g); }
     } else if (g->focus == FOCUS_WORLD) {
         g->world_sel = ((g->world_sel + dx + 8 * dy) % 64 + 64) % 64;
+    } else if (g->focus == FOCUS_COLOURS) {           // the 8 x 2 swatches: moving selects
+        g->sel_colour = ((g->sel_colour + dx + 8 * dy) % 16 + 16) % 16;
     } else if (g->focus == FOCUS_EDITOR) {
         int bi, bx, by, w, h;
         if (!block_panel(g, &bi, &bx, &by, &w, &h)) pixed_dims(g, &w, &h);
@@ -498,7 +500,10 @@ static bool feed_keys(GuiState *g) {
         bool ok = true;
         if (rk == KEY_F2) { g->text_map = !g->text_map; continue; }   // GUI-only: hex map toggle
         if (rk == KEY_TAB && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {      // GUI-only: cycle keyboard focus
-            g->focus = (g->focus + ((m & GK_MOD_SHIFT) ? FOCUS_COUNT - 1 : 1)) % FOCUS_COUNT;
+            int step = (m & GK_MOD_SHIFT) ? FOCUS_COUNT - 1 : 1, bi, bx, by, bw, bh;
+            g->focus = (g->focus + step) % FOCUS_COUNT;
+            if (g->focus == FOCUS_COLOURS && block_panel(g, &bi, &bx, &by, &bw, &bh))   // no swatches while the block panel is up
+                g->focus = (g->focus + step) % FOCUS_COUNT;
             any = true; continue;
         }
         if (g->focus != FOCUS_ROOM && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {   // the focused panel takes these
@@ -1029,8 +1034,8 @@ static void draw_help(GuiState *g) {
         "wheel over room or picker: background; Shift+wheel / horizontal wheel: tileset",
         "world map: click = go there; right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
-        "focus: Tab cycles room / picker / editor / world map (or click one); arrows, hjkl move it; Enter or Space",
-        "       applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
+        "focus: Tab cycles room / picker / editor / colours / world map (or click one); arrows, hjkl move it;",
+        "       Enter or Space applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
         "       key (r, s, o, ...) = back to the room",
         "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
         "        pick = then click any colour on screen (room, picker, world map); fill = a mode: clicks on",
@@ -1403,6 +1408,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         }
         if (c == g->sel_colour) DrawRectangleLinesEx((Rectangle){sx, yy, sp, sp}, 2, WHITE);
     }
+    if (g->focus == FOCUS_COLOURS) DrawRectangleLinesEx((Rectangle){x0 - 2, sy - 2, 8 * sp + 4, SWATCH_ROWS * sp + 4}, 2, GOLD);
     int ty = pixed_text_y(g), fs = g->font_px;
     bool dirty = g->backs_dirty;
     for (int i = 0; i < GFX_SOURCES; i++) dirty |= g->gfx_dirty[i];
