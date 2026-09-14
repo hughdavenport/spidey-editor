@@ -70,8 +70,8 @@ xdotool mousemove $((X + 776 + 192 + 16 + 5*9 + 4)) $((Y + 24 + 5*9 + 4)) moused
 xdotool key u; sleep 0.8
 xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 405 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
-# labels start under the editor column (430+8=438), world map at 438 + 5 rows*24 + 8 = 566; thumbs 98x67 + 4 gap
-xdotool mousemove $((X + 776 + 1*102 + 40)) $((Y + 566 + 30)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
+# labels start under the editor column (430+8=438), world map at 438 + 5 rows*24 + 8 = 566; thumbs 68x47 + 4 gap (height-limited)
+xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 566 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
 # wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
 xdotool mousemove $((X + 400)) $((Y + 24 + 200)) click 5; sleep 0.4; snap s13b-wheel-bkgrnd
 xdotool keydown shift; xdotool click 4; xdotool keyup shift; sleep 0.4; snap s13c-wheel-tileset

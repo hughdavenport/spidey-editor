@@ -135,8 +135,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block.
 - Keyboard focus (`g->focus`): Tab cycles room / picker / editor / world map, or click one;
   arrows and hjkl move that panel's selection, Enter/Space applies it (world map: go there;
-  picker: put tile / creature at the room cursor; editor: paint), Esc returns to the room
-  (and still reaches the editor). `u` after a mouse-driven room edit goes to the room undo.
+  picker: put tile / creature at the room cursor; editor: paint). Esc, or any other key that
+  is forwarded to the editor (`r`, `s`, digits, Ctrl-X, ...), returns focus to the room, so
+  `r` then `h`/`l` types into the room prompt rather than moving the world-map selection. `u` after a mouse-driven room edit goes to the room undo.
 - The hint text lives in the Ctrl-? overlay (GUI lines appended under the editor's box).
 - `gui_smoke_test.sh` runs in a sandbox copy (sources, binaries, Spider/, ROOMS.SPL) so it
   never touches the live files or a GUI you have open.

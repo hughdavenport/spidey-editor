@@ -443,6 +443,7 @@ static bool feed_keys(GuiState *g) {
         // `u` undoes the last pixel stroke when that was the most recent edit
         if (c == 'u' && g->pix_undo_n && g->pix_seq > g->key_seq && ged_linking() == 0) { pix_undo_pop(g); any = true; continue; }
         g->key_seq = ++g->seq;
+        g->focus = FOCUS_ROOM;          // a key for the editor: the room is what cursors move again
         GKey k = { .code = GK_CHAR, .ch = (char)c, .mod = (uint8_t)((held | seen_any) & GK_MOD_ALT) };
         SEND(k);
     }
@@ -497,7 +498,7 @@ static bool feed_keys(GuiState *g) {
             case KEY_F12: k.code = GK_F12; break;
             default: ok = false; break;
         }
-        if (ok) SEND(k);
+        if (ok) { g->focus = FOCUS_ROOM; SEND(k); }
     }
     for (int i = 0; i < MAX_REPLAY_PER_FRAME && ged_replay_step(); i++) any = true;
     #undef SEND
@@ -951,7 +952,8 @@ static void draw_help(GuiState *g) {
         "world map: click = go there; right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
         "focus: Tab cycles room / picker / editor / world map (or click one); arrows, hjkl move it; Enter or Space",
-        "       applies (picker: put tile or creature at the room cursor; editor: paint); Esc = back to the room",
+        "       applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
+        "       key (r, s, o, ...) = back to the room",
         "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
         "        pick = then click any colour on screen (room, picker, world map)",
         "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize",
