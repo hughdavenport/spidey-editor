@@ -258,12 +258,9 @@ bool editor_replay_step(void);
 
 /* Screen buffer output switch (editor_screen.c): true = GUI renders the cells */
 extern bool screen_headless;
-/* First text row of the item-specific panel (switch/object/chunk details) drawn
- * by redraw(), or -1 when the current state draws none (editor_draw.c) */
-extern int panel_item_row;
-/* Rows [panel_left_row0, panel_left_row1) inside that panel are the out-of-bounds
- * switch list, which belongs with the room-level text */
-extern int panel_left_row0, panel_left_row1;
+/* GUI helpers (editor_actions.c) */
+bool transfer_item_to_room(size_t room_idx);
+int  switch_add_chunk(size_t sw_idx, struct SwitchChunk chunk);
 
 /* Forward declarations for cross-module calls */
 void end(void);

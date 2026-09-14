@@ -75,8 +75,19 @@ RoomFile *ged_rooms(void);
 bool  ged_help_shown(void);
 int   ged_goto_kind(void);         // 1 = choosing an object (o), 2 = a switch (s), else 0
 bool  ged_map_is_text(void);       // the editor has replaced the hex map with text (room list)
-int   ged_item_row(void);          // first text row of the thing-under-cursor details, or -1
-void  ged_item_left_rows(int *r0, int *r1);   // rows in that panel that stay with the room text
+
+// World map. Left click: go to that room (in the plain editing states).
+// Right click: move the switch/object under the cursor into that room, or, while
+// a switch-link chunk is selected, point the chunk at that room.
+void  ged_map_click(int room, bool right);
+
+// Switch links. ged_linking(): a switch is open for editing (Ctrl-S), so
+// right-drag / right-click in the room create chunks on it:
+int   ged_linking(void);                                   // 0 no, else the switch index + 1
+void  ged_link_block(int x, int y, int w, int h);          // TOGGLE_BLOCK covering the run
+void  ged_link_object(int object_idx);                     // TOGGLE_OBJECT
+void  ged_link_switch(int switch_idx);                     // TOGGLE_BIT to a switch in this room
+int   ged_item_at(int tx, int ty, int *idx);               // 1 switch preamble, 2 object, else 0
 
 // GUI-side tile painting (palette + drag): one undo entry per stroke, room
 // written after the stroke (ged_flush) rather than per cell.

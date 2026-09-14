@@ -91,10 +91,18 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   latched for a few frames (`mod_latch`) because a fast Ctrl-X can straddle a frame boundary.
 - Text cells are 4*scale x 8*scale px so the 64x22 hex map is exactly the picture; the
   scale follows the window size unless `--scale` pins it. Help is drawn as an overlay. The
-  editor's redraw() records `panel_item_row` (and the out-of-bounds switch rows) so the GUI
-  can move the thing-under-cursor details right of the picture, under the palette.
+  text under the picture scrolls with the wheel (scrollbar on the picture's right edge); the
+  editor's last row (macro overlay) is pinned to the window bottom.
 - Plain left press is held until release: a click moves the cursor, a drag moves the item
   and leaves the cursor (and Spider-Man) where it was.
+- World map right of the picture under the palette: every room rendered into one 8x8 atlas
+  texture (refreshed for the room being edited). Left click = go to that room; right click =
+  `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
+  or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
+- Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an
+  object -> TOGGLE_OBJECT chunk, right-click another switch -> TOGGLE_BIT chunk, right-drag a
+  run of tiles -> TOGGLE_BLOCK chunk covering it; all via `switch_add_chunk()`, which selects
+  the new chunk for editing exactly as `C` / `c[n]` would.
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the
   picture (click selects, Shift+drag / middle-drag paints; one undo entry per stroke,
   written 0.4 s after the stroke). Left/right click go to the editor's mouse handling.

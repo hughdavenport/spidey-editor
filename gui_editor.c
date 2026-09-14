@@ -191,14 +191,99 @@ void ged_set_cursor(int x, int y) {
     state->cursors[state->current_level].y = y;
 }
 bool ged_help_shown(void) { return state->help; }
-int ged_item_row(void) { return panel_item_row; }
-void ged_item_left_rows(int *r0, int *r1) { *r0 = panel_left_row0; *r1 = panel_left_row1; }
 bool ged_map_is_text(void) {
     return state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM ||
            state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM;
 }
 int ged_goto_kind(void) {
     return state->current_state == GOTO_OBJECT ? 1 : state->current_state == GOTO_SWITCH ? 2 : 0;
+}
+
+/* --- world map & switch links ------------------------------------------ */
+
+static bool plain_state(void) {
+    return state->current_state == NORMAL || state->current_state == TILE_EDIT;
+}
+
+static struct DecompressedRoom *cur_room(void) { return &state->rooms.rooms[state->current_level].data; }
+
+int ged_item_at(int tx, int ty, int *idx) {
+    struct DecompressedRoom *room = cur_room();
+    for (size_t i = 0; i < room->num_switches; i++) {
+        struct SwitchObject *sw = room->switches + i;
+        if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE &&
+                sw->chunks.data[0].x == tx && sw->chunks.data[0].y == ty) { *idx = (int)i; return 1; }
+    }
+    for (size_t i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        bool hit = o->type == SPRITE ? (tx == o->x && ty == o->y)
+                 : (tx >= o->x && tx < o->x + o->block.width && ty >= o->y && ty < o->y + o->block.height);
+        if (hit) { *idx = (int)i; return 2; }
+    }
+    return 0;
+}
+
+void ged_map_click(int room, bool right) {
+    if (room < 0 || room >= 64 || !state->rooms.rooms[room].valid) return;
+    if (right) {
+        if (state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS && state->current_switch) {
+            struct SwitchObject *sw = cur_room()->switches + state->current_switch - 1;
+            if (state->current_chunk < sw->chunks.length) {
+                push_undo((uint8_t)state->current_level, false);
+                sw->chunks.data[state->current_chunk].room_idx = (uint16_t)room;
+                ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                snprintf(state->status_message, sizeof(state->status_message), "Chunk now targets room %d", room);
+                assert(writeRooms(&state->rooms));
+            }
+        } else if (plain_state()) {
+            if (!transfer_item_to_room((size_t)room))
+                snprintf(state->status_message, sizeof(state->status_message), "Nothing under the cursor to move");
+        }
+        return;
+    }
+    if (plain_state() || state->current_state == GOTO_ROOM) {
+        if (state->current_state == GOTO_ROOM) { state->current_state = state->previous_state; state->previous_state = NORMAL; }
+        state->current_level = (size_t)room;
+        state->partial_byte = 0;
+        state->current_switch = 0;
+        state->switch_on = false;
+        state->current_chunk = 0;
+    }
+}
+
+int ged_linking(void) {
+    switch (state->current_state) {
+        case EDIT_SWITCHDETAILS:
+        case EDIT_SWITCHDETAILS_SELECT_CHUNK:
+        case EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS:
+        case EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS:
+        case EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS:
+        case EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS:
+            return (int)state->current_switch;
+        default:
+            return 0;
+    }
+}
+
+void ged_link_block(int x, int y, int w, int h) {
+    if (!ged_linking()) return;
+    struct SwitchChunk c = { .type = TOGGLE_BLOCK, .x = (uint8_t)x, .y = (uint8_t)y,
+                             .dir = w >= h ? HORIZONTAL : VERTICAL, .size = (uint8_t)(w >= h ? w : h),
+                             .on = cur_room()->tiles[TILE_IDX(x, y)], .off = 0 };
+    switch_add_chunk(state->current_switch - 1, c);
+}
+
+void ged_link_object(int object_idx) {
+    if (!ged_linking()) return;
+    struct SwitchChunk c = { .type = TOGGLE_OBJECT, .index = (uint8_t)object_idx, .test = 0x20, .value = 0 };   // test lives in the high nibble
+    switch_add_chunk(state->current_switch - 1, c);
+}
+
+void ged_link_switch(int switch_idx) {
+    if (!ged_linking()) return;
+    struct SwitchChunk c = { .type = TOGGLE_BIT, .room_idx = (uint16_t)state->current_level,
+                             .switch_idx = (uint16_t)switch_idx, .on = 1, .off = 0 };
+    switch_add_chunk(state->current_switch - 1, c);
 }
 
 /* --- painting ------------------------------------------------------------- */

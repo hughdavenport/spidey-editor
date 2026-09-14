@@ -14,7 +14,11 @@
 //
 // GUI-only extras: F2 shows the hex map instead of the picture; Spider-Man
 // is drawn at the cursor as a size reference; a tileset palette sits right of
-// the picture (click a tile, Shift+drag or middle-drag in the room paints it).
+// the picture (click a tile, Shift+drag or middle-drag in the room paints it);
+// under it a world map of every room (click = go there, right-click = move
+// the thing under the cursor there); the text under the picture scrolls with
+// the wheel. Switch links: with a switch open (Ctrl-S), right-click an object
+// or another switch to link it, or right-drag a run of tiles for a block chunk.
 #include <raylib.h>
 
 #include <stdbool.h>
@@ -33,7 +37,9 @@
 #define DEFAULT_SCALE 3
 #define MIN_PANEL_ROWS 12       // text rows kept visible under the picture when auto-scaling
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
-#define PALETTE_LINES 6         // text lines under the palette before the item panel
+#define PALETTE_LINES 8         // text lines under the palette before the world map
+#define MAP_GAP 4               // pixels between world-map thumbnails
+#define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
 #define INIT_ROWS (1 + HEIGHT_TILES + 18)   // rows shown by the initial window (i3 resizes anyway)
 
@@ -75,6 +81,12 @@ typedef struct {
     bool lpress;            // plain left press waiting to become a click or a drag
     int lpress_col, lpress_row;
     int mod_latch[3];       // frames a Shift/Alt/Ctrl press still counts as held (see feed_keys)
+    int scroll;             // text rows scrolled off the top of the panel under the picture
+    Texture2D atlas;        // world map: every room rendered, 8x8 grid of ROOM_PX_W x ROOM_PX_H
+    bool atlas_loaded;
+    int hover_room;         // world-map thumbnail under the mouse, or -1
+    bool rpress;            // right press in link mode waiting to become a click or a run
+    int rpress_tx, rpress_ty;
     Font help_font;         // the help overlay shrunk to fit the window, if it must
     bool help_font_loaded;
     int help_font_cw;
@@ -192,6 +204,10 @@ static void load_fonts(GuiState *g) {
 }
 
 /* ------------------------------------------------------------------ input */
+
+static int  panel_top(GuiState *g);
+static int  world_room_at(GuiState *g, Vector2 m);
+static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
 
 // Modifier bits from the keys currently held.
 static uint8_t mods(void) {
@@ -320,6 +336,46 @@ static bool feed_mouse(GuiState *g) {
         }
     }
 
+    // wheel over the text under the picture scrolls it
+    float wheel = GetMouseWheelMove();
+    if (wheel != 0 && m.x < pic_w(g) && m.y >= panel_top(g)) {
+        g->scroll -= (int)wheel * 3;
+        if (g->scroll < 0) g->scroll = 0;
+        return true;
+    }
+
+    // world map: hover names, left = go there, right = move the thing / retarget the chunk
+    g->hover_room = world_room_at(g, m);
+    if (g->hover_room >= 0 && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
+        ged_new_input_batch();
+        ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
+        return true;
+    }
+
+    // switch links (a switch is open with Ctrl-S): right-click an object or a
+    // switch links it, right-drag a run of tiles makes a block chunk
+    if (ged_linking()) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && mouse_tile(g, &tx, &ty)) {
+            g->rpress = true; g->rpress_tx = tx; g->rpress_ty = ty;
+            return false;
+        }
+        if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT) && g->rpress) {
+            g->rpress = false;
+            if (!mouse_tile(g, &tx, &ty)) return false;
+            ged_new_input_batch();
+            int idx, kind = ged_item_at(g->rpress_tx, g->rpress_ty, &idx);
+            if (tx == g->rpress_tx && ty == g->rpress_ty && kind == 1 && idx != ged_linking() - 1) ged_link_switch(idx);
+            else if (tx == g->rpress_tx && ty == g->rpress_ty && kind == 2) ged_link_object(idx);
+            else {
+                int rx, ry, rw, rh;
+                link_run(g->rpress_tx, g->rpress_ty, tx, ty, &rx, &ry, &rw, &rh);
+                ged_link_block(rx, ry, rw, rh);
+            }
+            return true;
+        }
+        if (g->rpress) return false;
+    }
+
     // Right click (and Ctrl+left): the editor acts on the press, as in the terminal.
     bool ctrl_left = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (mod & GK_MOD_CTRL);
     if ((IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) || ctrl_left) && in_text) {
@@ -391,38 +447,68 @@ static void draw_cell(const GCell *c, int px, int py, int cw, int ch, Font *font
     }
 }
 
-// Top-left of the panel for the thing under the cursor: right of the picture,
-// under the palette and its labels.
-static int item_panel_y(GuiState *g) { return palette_y(g) + TILESET_PX * g->scale + PAD + PALETTE_LINES * ch(g); }
+// Bottom of the picture = top of the scrolling text panel.
+static int panel_top(GuiState *g) { return pic_y(g) + pic_h(g); }
+static int panel_rows_visible(GuiState *g) { int r = (GetScreenHeight() - panel_top(g)) / ch(g); return r < 1 ? 1 : r; }
+
+// Last text row under the map with anything on it (>= first panel row).
+static int panel_last_row(const GCell *cells, int stride) {
+    int last = GED_MAP_Y + HEIGHT_TILES - 1;
+    for (int y = GED_MAP_Y + HEIGHT_TILES; y < GED_ROWS - 1; y++)
+        for (int x = 0; x < GED_COLS; x++) {
+            const GCell *c = &cells[y * stride + x];
+            if (c->bg || (c->ch && c->ch != ' ')) { last = y; break; }
+        }
+    return last;
+}
+
+static int panel_max_scroll(GuiState *g) {
+    int stride;
+    const GCell *cells = ged_cells(&stride);
+    int content = panel_last_row(cells, stride) - (GED_MAP_Y + HEIGHT_TILES) + 1;
+    int m = content - panel_rows_visible(g);
+    return m < 0 ? 0 : m;
+}
 
 // Everything the editor drew except the help box (right of the hex map; it
 // can run below the map band too — draw_help shows it as an overlay) and,
-// unless F2, the hex map itself. Rows from the editor's item panel onwards
-// (details of the switch/object/chunk under the cursor) are moved to the
-// right of the picture; the room-level lines stay under it.
+// unless F2, the hex map itself. Rows under the map scroll (`scroll`); the
+// editor's last row (macro overlay) is pinned to the bottom of the window.
 static void draw_text_screen(GuiState *g) {
     int stride;
     const GCell *cells = ged_cells(&stride);
     bool help = ged_help_shown(), text = g->text_map || ged_map_is_text();
-    int item_row = ged_item_row(), left0, left1;
-    ged_item_left_rows(&left0, &left1);
-    if (item_row < GED_MAP_Y + HEIGHT_TILES) item_row = -1;
-    int skipped = 0;                                   // rows kept left, so later moved rows close up
-    int left_y = item_row;                             // next free row under the picture
-    for (int y = 0; y < GED_ROWS; y++) {
-        bool moved = item_row >= 0 && y >= item_row && y < GED_ROWS - 1;   // last row: macro overlay
-        bool keep_left = moved && y >= left0 && y < left1;
-        if (keep_left) { moved = false; skipped++; }
+    int first_panel = GED_MAP_Y + HEIGHT_TILES;
+    int max_scroll = panel_max_scroll(g);
+    if (g->scroll > max_scroll) g->scroll = max_scroll;
+    BeginScissorMode(0, panel_top(g), pic_w(g), GetScreenHeight() - panel_top(g));
+    for (int y = first_panel; y < GED_ROWS - 1; y++) {
+        int py = panel_top(g) + (y - first_panel - g->scroll) * ch(g);
+        if (py + ch(g) <= panel_top(g) || py >= GetScreenHeight()) continue;
+        for (int x = 0; x < GED_COLS; x++) {
+            if (x >= GED_MAP_X + MAP_COLS && help) continue;
+            draw_cell(&cells[y * stride + x], x * cw(g), py, cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
+        }
+    }
+    EndScissorMode();
+    if (max_scroll > 0) {                       // scrollbar along the picture's right edge
+        int top = panel_top(g), hgt = GetScreenHeight() - top, x = pic_w(g) - SCROLLBAR_W;
+        int total = max_scroll + panel_rows_visible(g);
+        int th = hgt * panel_rows_visible(g) / total, ty = top + hgt * g->scroll / total;
+        DrawRectangle(x, top, SCROLLBAR_W, hgt, (Color){40, 40, 40, 255});
+        DrawRectangle(x + 1, ty, SCROLLBAR_W - 2, th < 12 ? 12 : th, (Color){170, 170, 170, 255});
+    }
+    for (int y = 0; y < first_panel; y++) {     // header + (F2 / room list) map band
         for (int x = 0; x < GED_COLS; x++) {
             if (x >= GED_MAP_X + MAP_COLS && (help || in_map_band(y))) continue;
             if (in_map_band(y) && !text) continue;
-            int px = x * cw(g), py = y * ch(g);
-            if (moved) { px += palette_x(g); py = item_panel_y(g) + (y - item_row - skipped) * ch(g); }
-            else if (keep_left) { py = (left_y + (y - left0)) * ch(g); }
-            draw_cell(&cells[y * stride + x], px, py, cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
+            draw_cell(&cells[y * stride + x], x * cw(g), y * ch(g), cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
         }
     }
-    if (g->text_map) {                       // faint tile grid over the hex map
+    int last = GED_ROWS - 1;                    // macro slot overlay: pinned to the window bottom
+    for (int x = 0; x < GED_COLS; x++)
+        draw_cell(&cells[last * stride + x], x * cw(g), GetScreenHeight() - ch(g), cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
+    if (text) {                                 // faint tile grid over the hex map
         Color grid = {255, 255, 255, 40};
         for (int tx = 0; tx <= WIDTH_TILES; tx++) DrawLineV(tile_pt(g, tx, 0), tile_pt(g, tx, HEIGHT_TILES), grid);
         for (int ty = 0; ty <= HEIGHT_TILES; ty++) DrawLineV(tile_pt(g, 0, ty), tile_pt(g, WIDTH_TILES, ty), grid);
@@ -502,20 +588,131 @@ static void draw_palette(GuiState *g) {
         DrawLine(x0 + i * s, y0, x0 + i * s, y0 + 8 * s, (Color){80, 80, 80, 255});
         DrawLine(x0, y0 + i * s, x0 + 8 * s, y0 + i * s, (Color){80, 80, 80, 255});
     }
+    if (g->text_map)                             // F2: the tile ids, as on the hex map
+        for (int t = 0; t < 64; t++) {
+            int tx = x0 + (t % 8) * s, ty = y0 + (t / 8) * s;
+            DrawRectangle(tx, ty, s, ch(g), (Color){0, 0, 0, 150});
+            gtext(&g->font, g->font_loaded, TextFormat("%02x", t), tx, ty, fs, RAYWHITE);
+        }
     int sx = g->sel_tile % 8, sy = g->sel_tile / 8;
     DrawRectangleLinesEx((Rectangle){x0 + sx * s, y0 + sy * s, s, s}, 2, GOLD);
     int ly = y0 + TILESET_PX * g->scale + PAD, lh = ch(g);
+    int link = ged_linking();
     const char *lines[] = {
         TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile),
         "click a tile; Shift+drag or",
         "middle-drag in the room paints",
+        "wheel scrolls the text below",
         "",
-        "Ctrl-? help   F2 hex map",
+        link ? TextFormat("switch %d open: right-click an object", link - 1)
+             : "world map: click = go there",
+        link ? "or switch links it; right-drag tiles"
+             : "right-click = move thing there",
+        link ? "makes a block chunk (Esc closes)" : "Ctrl-? help   F2 hex map",
     };
     for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
-        gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
+        gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs,
+              i == 0 ? RAYWHITE : (link && i >= 5) ? ORANGE : GRAY);
     if (g->saved_flash > 0)
-        gtext(&g->font, g->font_loaded, "saved", x0, ly + 6 * lh, fs, GREEN);
+        gtext(&g->font, g->font_loaded, "saved", x0 + (TILESET_PX + 8) * g->scale, y0, fs, GREEN);
+}
+
+/* -------------------------------------------------------------- world map */
+
+static int world_y(GuiState *g) { return palette_y(g) + TILESET_PX * g->scale + PAD + PALETTE_LINES * ch(g) + PAD; }
+
+// Thumbnail size: 8 columns across the space right of the picture, shrunk if
+// 8 rows would not fit the window.
+static void world_geom(GuiState *g, int *tw, int *th) {
+    int avail_w = GetScreenWidth() - palette_x(g) - PAD;
+    int w = (avail_w - 7 * MAP_GAP) / 8;
+    int avail_h = GetScreenHeight() - world_y(g) - PAD;
+    int hmax = (avail_h - 7 * MAP_GAP) / 8;
+    if (w * ROOM_PX_H / ROOM_PX_W > hmax) w = hmax * ROOM_PX_W / ROOM_PX_H;
+    if (w < 16) w = 16;
+    *tw = w; *th = w * ROOM_PX_H / ROOM_PX_W;
+}
+
+static Rectangle world_cell(GuiState *g, int room, int tw, int th) {
+    return (Rectangle){ palette_x(g) + (room % 8) * (tw + MAP_GAP), world_y(g) + (room / 8) * (th + MAP_GAP), tw, th };
+}
+
+static int world_room_at(GuiState *g, Vector2 m) {
+    int tw, th;
+    world_geom(g, &tw, &th);
+    for (int r = 0; r < 64; r++)
+        if (CheckCollisionPointRec(m, world_cell(g, r, tw, th))) return r;
+    return -1;
+}
+
+// Render room `room` into its slot of the atlas.
+static void world_update_room(GuiState *g, RoomFile *rooms, int room, uint8_t *buf) {
+    if (!rooms->rooms[room].valid) { memset(buf, 0, (size_t)ROOM_PX_W * ROOM_PX_H * 3); }
+    else render_room_rgb(g->rctx, rooms, room, buf);
+    UpdateTextureRec(g->atlas, (Rectangle){(room % 8) * ROOM_PX_W, (room / 8) * ROOM_PX_H, ROOM_PX_W, ROOM_PX_H}, buf);
+}
+
+static void world_build(GuiState *g, RoomFile *rooms, uint8_t *buf) {
+    if (!g->atlas_loaded) {
+        Image blank = GenImageColor(8 * ROOM_PX_W, 8 * ROOM_PX_H, BLACK);
+        ImageFormat(&blank, PIXELFORMAT_UNCOMPRESSED_R8G8B8);
+        g->atlas = LoadTextureFromImage(blank);
+        UnloadImage(blank);
+        SetTextureFilter(g->atlas, TEXTURE_FILTER_BILINEAR);
+        g->atlas_loaded = true;
+    }
+    for (int r = 0; r < 64; r++) world_update_room(g, rooms, r, buf);
+}
+
+static void draw_world_map(GuiState *g) {
+    RoomFile *rooms = ged_rooms();
+    struct DecompressedRoom *cur = &rooms->rooms[ged_room()].data;
+    int tw, th, fs = g->font_px;
+    world_geom(g, &tw, &th);
+    for (int r = 0; r < 64; r++) {
+        Rectangle d = world_cell(g, r, tw, th);
+        if (!rooms->rooms[r].valid) { DrawRectangleRec(d, (Color){25, 25, 30, 255}); continue; }
+        DrawTexturePro(g->atlas, (Rectangle){(r % 8) * ROOM_PX_W, (r / 8) * ROOM_PX_H, ROOM_PX_W, ROOM_PX_H}, d, (Vector2){0, 0}, 0, WHITE);
+        const char *side = r == cur->room_north ? "N" : r == cur->room_south ? "S" :
+                           r == cur->room_west ? "W" : r == cur->room_east ? "E" : NULL;
+        if (r == ged_room()) DrawRectangleLinesEx(d, 2, YELLOW);
+        else if (side) {
+            DrawRectangleLinesEx(d, 2, SKYBLUE);
+            DrawRectangle((int)d.x, (int)d.y, cw(g) + 2, ch(g), (Color){0, 0, 0, 170});
+            gtext(&g->font, g->font_loaded, side, (int)d.x + 1, (int)d.y, fs, SKYBLUE);
+        }
+        if (r == g->hover_room) DrawRectangleLinesEx(d, 2, WHITE);
+    }
+    if (g->hover_room >= 0 && rooms->rooms[g->hover_room].valid) {   // name of the hovered room
+        char name[25] = {0};
+        strncpy(name, rooms->rooms[g->hover_room].data.name, 24);
+        for (int j = 23; j >= 0 && (name[j] == ' ' || name[j] == '\0'); j--) name[j] = '\0';
+        const char *t = TextFormat("%02x  %s", g->hover_room, name);
+        Rectangle d = world_cell(g, g->hover_room, tw, th);
+        int w = text_w(&g->font, g->font_loaded, t, fs), x = (int)d.x, y = (int)d.y - ch(g) - 2;
+        if (x + w > GetScreenWidth() - PAD) x = GetScreenWidth() - PAD - w;
+        if (y < world_y(g) - ch(g)) y = (int)(d.y + d.height) + 2;
+        DrawRectangle(x - 2, y - 1, w + 4, ch(g) + 2, (Color){0, 0, 0, 220});
+        gtext(&g->font, g->font_loaded, t, x, y, fs, RAYWHITE);
+    }
+}
+
+// Rubber band for a right-drag block link: the run of tiles from the press
+// tile to the hovered one, along the longer axis.
+static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh) {
+    int dx = x1 - x0, dy = y1 - y0;
+    if (abs(dx) >= abs(dy)) { *rx = dx < 0 ? x1 : x0; *ry = y0; *rw = abs(dx) + 1; *rh = 1; }
+    else                    { *rx = x0; *ry = dy < 0 ? y1 : y0; *rw = 1; *rh = abs(dy) + 1; }
+}
+
+static void draw_link_drag(GuiState *g) {
+    if (!g->rpress || !IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) return;
+    int tx, ty, rx, ry, rw, rh;
+    if (!mouse_tile(g, &tx, &ty)) return;
+    link_run(g->rpress_tx, g->rpress_ty, tx, ty, &rx, &ry, &rw, &rh);
+    Vector2 p = tile_pt(g, rx, ry);
+    float s = 8.0f * g->scale;
+    DrawRectangleLinesEx((Rectangle){p.x, p.y, rw * s, rh * s}, 3, ORANGE);
 }
 
 // While a left drag is in progress: outline the tile it started on and point
@@ -628,6 +825,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->tex_loaded) UnloadTexture(g->tex);
         if (g->pal_loaded) UnloadTexture(g->pal_tex);
         if (g->spidey_loaded) UnloadTexture(g->spidey);
+        if (g->atlas_loaded) UnloadTexture(g->atlas);
         if (g->font_loaded) UnloadFont(g->font);
         if (g->help_font_loaded) UnloadFont(g->help_font);
         render_close(g->rctx);
@@ -653,7 +851,9 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     render_show_player(g->rctx, false);  // he is drawn at the cursor instead
     g->drawn_room = -1;
     g->room_dirty = true;
+    g->hover_room = -1;
     load_fonts(g);
+    world_build(g, ged_rooms(), buf);
     if (!g->spidey_loaded) {
         static uint8_t sbuf[SPIDS_FRAME_W * SPIDS_FRAME_H * 4];
         render_spids_rgba(g->rctx, render_player_frame(), sbuf);
@@ -710,6 +910,9 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             } else {
                 UpdateTexture(g->tex, buf);
             }
+            if (g->drawn_room != room && g->drawn_room >= 0)          // the room we left may have changed
+                world_update_room(g, rooms, g->drawn_room, buf);
+            world_update_room(g, rooms, room, buf);
             g->drawn_room = room;
             g->room_dirty = false;
         }
@@ -742,10 +945,12 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             draw_overlay(g);
             draw_hover_preview(g);
             draw_drag(g);
+            draw_link_drag(g);
             draw_cursor(g);
             EndScissorMode();
         }
         draw_palette(g);
+        draw_world_map(g);
         if (ged_help_shown()) draw_help(g);
         EndDrawing();
     }
@@ -754,6 +959,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     if (g->tex_loaded) UnloadTexture(g->tex);
     if (g->pal_loaded) UnloadTexture(g->pal_tex);
     if (g->spidey_loaded) UnloadTexture(g->spidey);
+    if (g->atlas_loaded) UnloadTexture(g->atlas);
     if (g->font_loaded) UnloadFont(g->font);
     if (g->help_font_loaded) UnloadFont(g->help_font);
     render_close(g->rctx);

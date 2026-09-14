@@ -751,6 +751,73 @@ void shrink(int dx, int dy) {
     (void)shrank;
 }
 
+/* Move the switch (preamble at the cursor) or object (containing the cursor)
+ * to room `room_idx`, keeping its coordinates: the GUI's "drop it on that room
+ * in the world map". The cursor follows it. false = nothing to move. */
+bool transfer_item_to_room(size_t room_idx) {
+    if (room_idx >= C_ARRAY_LEN(state->rooms.rooms) || room_idx == state->current_level) return false;
+    if (!state->rooms.rooms[room_idx].valid) return false;
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    int x = state->cursors[state->current_level].x;
+    int y = state->cursors[state->current_level].y;
+    for (size_t i = 0; i < room->num_switches; i++) {
+        struct SwitchObject *sw = room->switches + i;
+        if (sw->chunks.length > 0 && sw->chunks.data[0].type == PREAMBLE &&
+                x == sw->chunks.data[0].x && y == sw->chunks.data[0].y) {
+            if (state->rooms.rooms[room_idx].data.num_switches >= 15) {
+                snprintf(state->status_message, sizeof(state->status_message), "Max 15 switches there");
+                return false;
+            }
+            push_undo((uint8_t)room_idx, false);
+            push_undo((uint8_t)state->current_level, true);
+            transfer_switch(sw, room_idx, x, y);
+            return true;
+        }
+    }
+    for (size_t i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        bool hit = o->type == SPRITE ? (x == o->x && y == o->y)
+                 : (x >= o->x && x < o->x + o->block.width && y >= o->y && y < o->y + o->block.height);
+        if (!hit) continue;
+        if (state->rooms.rooms[room_idx].data.num_objects >= 7) {
+            snprintf(state->status_message, sizeof(state->status_message), "Max 7 objects there");
+            return false;
+        }
+        push_undo((uint8_t)room_idx, false);
+        push_undo((uint8_t)state->current_level, true);
+        transfer_object(o, room_idx, o->x, o->y);
+        return true;
+    }
+    return false;
+}
+
+/* Append `chunk` to switch `sw_idx` of the current room and select it for
+ * editing, as the editor's C / c[n] keys would. -1 = switch full. */
+int switch_add_chunk(size_t sw_idx, struct SwitchChunk chunk) {
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    if (sw_idx >= room->num_switches) return -1;
+    struct SwitchObject *sw = room->switches + sw_idx;
+    if (sw->chunks.length >= 16) {
+        snprintf(state->status_message, sizeof(state->status_message), "Switch has 16 chunks already");
+        return -1;
+    }
+    push_undo((uint8_t)state->current_level, false);
+    ARRAY_ADD(sw->chunks, chunk);
+    state->current_switch = sw_idx + 1;
+    state->current_chunk = sw->chunks.length - 1;
+    state->switch_on = false;
+    switch (chunk.type) {
+        case TOGGLE_BLOCK:  state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS; break;
+        case TOGGLE_BIT:    state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS; break;
+        case TOGGLE_OBJECT: state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS; break;
+        default: break;
+    }
+    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+    snprintf(state->status_message, sizeof(state->status_message), "Writing room");
+    assert(writeRooms(&state->rooms));
+    return (int)state->current_chunk;
+}
+
 void warp_to(int tx, int ty) {
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;

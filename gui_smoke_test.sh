@@ -46,6 +46,16 @@ xdotool mousemove_relative 24 0; sleep 0.1; xdotool mousemove_relative 24 0; sle
 xdotool mouseup 1; sleep 0.6; snap s9c-dragged
 xdotool key u; sleep 0.5
 xdotool key r; sleep 0.2; xdotool type 02; sleep 0.5
+# world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
+# thumbs start at y = 24 + 192 + 8 + 8*24 + 8 = 424, 8 across the remaining width
+xdotool mousemove $((X + 776 + 1*97 + 40)) $((Y + 424 + 30)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
+# wheel over the text panel scrolls it (room 1 has a short panel: no-op is fine)
+xdotool mousemove $((X + 200)) $((Y + 24 + 528 + 40)) click 5 click 5; sleep 0.3; snap s14-scrolled
+# switch link: open switch 0 in Midnight (goto switch, Ctrl-S), right-click object O1 (R2D2 at 26,7)
+xdotool key s; sleep 0.2; xdotool type 0; sleep 0.3; xdotool key ctrl+s; sleep 0.5; snap s15-switch-open
+xdotool mousemove $((X + 26*24 + 12)) $((Y + 24 + 7*24 + 12)) mousedown 3; sleep 0.08; xdotool mouseup 3; sleep 0.6; snap s16-linked-object
+xdotool key Escape; sleep 0.2; xdotool key Escape; sleep 0.2; xdotool key Escape; sleep 0.2; xdotool key u; sleep 0.4
+xdotool key r; sleep 0.2; xdotool type 02; sleep 0.5
 # palette right of the picture: (768+8, 16); pick tile 0x12 (row 2, col 2)
 xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 24 + 2*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1

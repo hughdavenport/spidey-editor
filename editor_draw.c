@@ -400,13 +400,8 @@ static void draw_switch_chunks_brief(struct SwitchObject *sw, int cx, int cy, in
     }
 }
 
-int panel_item_row = -1;
-int panel_left_row0 = -1, panel_left_row1 = -1;
-
 void redraw() {
 #define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
-    panel_item_row = -1;
-    panel_left_row0 = panel_left_row1 = -1;
 
     /* Guard before any GOTO: terminal must meet the absolute floor.
      * The existing check further down handles the debug-panel overage case. */
@@ -1345,8 +1340,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         goto show_help_if_needed;
     }
 
-    panel_item_row = bottom;   /* from here on: details of the thing under the cursor */
-
     if (state->debug.switches) {
 
         GOTO(0, bottom);
@@ -1724,7 +1717,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 break;
             }
         }
-        panel_left_row0 = bottom;   /* out-of-bounds switch list: stays with the room-level text */
         if (found) {
             GOTO(0, bottom);
             scr_printf("\n\nOut of bounds switches:\n");
@@ -1915,7 +1907,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 #undef BOOL_S
             }
         }
-        panel_left_row1 = bottom;
     }
 
     if (state->debug.objects) {
