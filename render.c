@@ -61,29 +61,32 @@ static uint8_t *read_asset(const char *dir, const char *name, size_t *len_out) {
     return buf;
 }
 
-// Decompress BACKS.SPL block `bid` into a 704-byte tilemap (mirrors room.c's
-// ROOMS read: seek, read 4 markers, spl_decompress the remainder).
-static void decode_backs_block(const char *dir, int bid, uint8_t out[704]) {
-    memset(out, 0, 704);
-    char path[1024];
-    snprintf(path, sizeof path, "%s/%s", dir, "BACKS.SPL");
+// Read every block of a BACKS.SPL: seek to each block's offset (64 big-endian
+// offsets, then the file size), read its 4 markers and spl_decompress the
+// rest. A block whose offset equals the next block's is absent (present[] =
+// false, tiles all 0 = black). Missing file: no blocks.
+static void load_backs_file(const char *path, uint8_t blocks[BACKS_BLOCKS][BACKS_TILES], bool present[BACKS_BLOCKS]) {
+    memset(blocks, 0, (size_t)BACKS_BLOCKS * BACKS_TILES);
+    memset(present, 0, BACKS_BLOCKS);
     FILE *fp = fopen(path, "rb");
     if (fp == NULL) return;
     uint8_t hdr[0x82];
     if (fread(hdr, 1, sizeof hdr, fp) != sizeof hdr) { fclose(fp); return; }
-    int start = (hdr[bid * 2] << 8) | hdr[bid * 2 + 1];
-    int end = (bid + 1 < 64) ? ((hdr[(bid + 1) * 2] << 8) | hdr[(bid + 1) * 2 + 1])
-                             : ((hdr[0x80] << 8) | hdr[0x81]);
-    if (end <= start) { fclose(fp); return; }
-    if (fseek(fp, start, SEEK_SET) != 0) { fclose(fp); return; }
-    uint8_t markers[4];
-    if (fread(markers, 1, 4, fp) != 4) { fclose(fp); return; }
-    uint8_array dec = {0};
-    if (spl_decompress(fp, (size_t)(end - start - 4), markers, &dec, NULL)) {
-        size_t n = dec.length < 704 ? dec.length : 704;
-        memcpy(out, dec.data, n);
+    for (int bid = 0; bid < BACKS_BLOCKS; bid++) {
+        int start = (hdr[bid * 2] << 8) | hdr[bid * 2 + 1];
+        int end = (bid + 1 < BACKS_BLOCKS) ? ((hdr[(bid + 1) * 2] << 8) | hdr[(bid + 1) * 2 + 1])
+                                           : ((hdr[0x80] << 8) | hdr[0x81]);
+        if (end <= start + 4 || fseek(fp, start, SEEK_SET) != 0) continue;
+        uint8_t markers[4];
+        if (fread(markers, 1, 4, fp) != 4) continue;
+        uint8_array dec = {0};
+        if (spl_decompress(fp, (size_t)(end - start - 4), markers, &dec, NULL)) {
+            size_t n = dec.length < BACKS_TILES ? dec.length : BACKS_TILES;
+            memcpy(blocks[bid], dec.data, n);
+            present[bid] = true;
+        }
+        ARRAY_FREE(dec);
     }
-    ARRAY_FREE(dec);
     fclose(fp);
 }
 
@@ -339,6 +342,8 @@ static bool write_png(const char *path, const uint8_t *rgb, int w, int h) {
 typedef struct {
     uint8_t *blocks, *scenery, *spids1, *spids2;
     size_t blocks_len, scenery_len, s1_len, s2_len;
+    uint8_t backs[BACKS_BLOCKS][BACKS_TILES];   // BACKS.SPL decoded (absent blocks: zeros)
+    bool backs_present[BACKS_BLOCKS];
 } Assets;
 
 static bool load_assets(const char *dir, Assets *a) {
@@ -346,6 +351,9 @@ static bool load_assets(const char *dir, Assets *a) {
     a->scenery = read_asset(dir, "SCENERY.EGA", &a->scenery_len);
     a->spids1  = read_asset(dir, "SPIDS1.EGA",  &a->s1_len);
     a->spids2  = read_asset(dir, "SPIDS2.EGA",  &a->s2_len);
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", dir, "BACKS.SPL");
+    load_backs_file(path, a->backs, a->backs_present);     // missing file: black backgrounds
     return a->blocks && a->scenery && a->spids1 && a->spids2;
 }
 static void free_assets(Assets *a) {
@@ -382,13 +390,12 @@ static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y) {
 
 // Fill a BW*BH*3 RGB buffer with one room (background + foreground + sprites,
 // plus the overlay if requested). Assumes the room is valid.
-static void render_room_base(RoomFile *file, int room_id, const char *dir,
+static void render_room_base(RoomFile *file, int room_id,
                              const Assets *a, bool debug, bool player, uint8_t *cv) {
     struct DecompressedRoom *room = &file->rooms[room_id].data;
     memset(cv, 0, (size_t)BW * BH * 3);
 
-    uint8_t bg[704];
-    decode_backs_block(dir, room->background, bg);
+    const uint8_t *bg = a->backs[room->background % BACKS_BLOCKS];
     for (int ty = 0; ty < HEIGHT_TILES; ty++)
         for (int tx = 0; tx < WIDTH_TILES; tx++) {
             int v = bg[ty * WIDTH_TILES + tx];
@@ -447,7 +454,7 @@ bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOp
     uint8_t *cv = malloc((size_t)BW * BH * 3);
     bool ok = cv != NULL;
     if (ok) {
-        render_room_base(file, room_id, dir, &a, opts.debug, true, cv);
+        render_room_base(file, room_id, &a, opts.debug, true, cv);
         ok = write_scaled(out_path, cv, opts.scale > 0 ? opts.scale : 1);
     }
     free(cv); free_assets(&a);
@@ -469,7 +476,7 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
         if (!file->rooms[rid].valid) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/room%02d.png", out_dir, rid);
-        render_room_base(file, rid, dir, &a, opts.debug, true, cv);
+        render_room_base(file, rid, &a, opts.debug, true, cv);
         ok = write_scaled(path, cv, opts.scale > 0 ? opts.scale : 1);
         n++;
     }
@@ -508,7 +515,7 @@ void render_close(RenderCtx *ctx) {
 bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out) {
     if (ctx == NULL || room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid)
         return false;
-    render_room_base(file, room_id, ctx->dir, &ctx->a, false, !ctx->hide_player, out);
+    render_room_base(file, room_id, &ctx->a, false, !ctx->hide_player, out);
     return true;
 }
 
@@ -526,6 +533,7 @@ static const struct { const char *file; int count, w, h, bytes, plane, key; } GF
     [GFX_TILES]  = { "BLOCKS.EGA", 512, 8, 8, 32, 8, -1 },
     [GFX_SPIDS1] = { "SPIDS1.EGA", 64, SPIDS_W, SPIDS_H, SPIDS_STRIDE, SPIDS_PLANE, SPRITE_KEY },
     [GFX_SPIDS2] = { "SPIDS2.EGA", 64, SPIDS_W, SPIDS_H, SPIDS_STRIDE, SPIDS_PLANE, SPRITE_KEY },
+    [GFX_SCENERY] = { "SCENERY.EGA", 256, 8, 8, 32, 8, -1 },
 };
 
 const char *render_gfx_name(GfxSource src) { return GFX[src].file; }
@@ -539,6 +547,7 @@ static uint8_t *gfx_data(RenderCtx *ctx, GfxSource src, size_t *len) {
         case GFX_TILES:  *len = ctx->a.blocks_len; return ctx->a.blocks;
         case GFX_SPIDS1: *len = ctx->a.s1_len;     return ctx->a.spids1;
         case GFX_SPIDS2: *len = ctx->a.s2_len;     return ctx->a.spids2;
+        case GFX_SCENERY: *len = ctx->a.scenery_len; return ctx->a.scenery;
         default: *len = 0; return NULL;
     }
 }
@@ -612,6 +621,21 @@ bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
     return ok;
 }
 
+// Before the first write of a data file, copy it to <file>.orig (kept forever
+// as "the original" for reset / render_*_original).
+static void keep_original(const char *path, const char *orig) {
+    struct stat st;
+    if (stat(orig, &st) == 0) return;
+    FILE *in = fopen(path, "rb"), *out = in ? fopen(orig, "wb") : NULL;
+    if (in && out) {
+        uint8_t buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, n, out);
+    }
+    if (in) fclose(in);
+    if (out) fclose(out);
+}
+
 bool render_gfx_save(RenderCtx *ctx, GfxSource src) {
     if (ctx == NULL) return false;
     size_t len;
@@ -620,17 +644,7 @@ bool render_gfx_save(RenderCtx *ctx, GfxSource src) {
     char path[1200], orig[1200];
     snprintf(path, sizeof path, "%s/%s", ctx->dir, GFX[src].file);
     snprintf(orig, sizeof orig, "%s/%s.orig", ctx->dir, GFX[src].file);
-    struct stat st;
-    if (stat(orig, &st) != 0) {                     // keep the untouched original once
-        FILE *in = fopen(path, "rb"), *out = in ? fopen(orig, "wb") : NULL;
-        if (in && out) {
-            uint8_t buf[4096];
-            size_t n;
-            while ((n = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, n, out);
-        }
-        if (in) fclose(in);
-        if (out) fclose(out);
-    }
+    keep_original(path, orig);
     FILE *f = fopen(path, "wb");
     if (f == NULL) { fprintf(stderr, "render: cannot write %s: %s\n", path, strerror(errno)); return false; }
     bool ok = fwrite(d, 1, len, f) == len;
@@ -651,6 +665,83 @@ void render_gfx_rgba(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
         }
 }
 
+/* --- backgrounds (BACKS.SPL) ------------------------------------------- */
+
+static bool backs_ok(RenderCtx *ctx, int bid, int x, int y) {
+    return ctx != NULL && bid >= 0 && bid < BACKS_BLOCKS && x >= 0 && x < WIDTH_TILES && y >= 0 && y < HEIGHT_TILES;
+}
+
+int render_backs_tile(RenderCtx *ctx, int bid, int x, int y) {
+    return backs_ok(ctx, bid, x, y) ? ctx->a.backs[bid][y * WIDTH_TILES + x] : 0;
+}
+
+void render_backs_set_tile(RenderCtx *ctx, int bid, int x, int y, int tile) {
+    if (!backs_ok(ctx, bid, x, y) || tile < 0 || tile >= GFX[GFX_SCENERY].count) return;
+    ctx->a.backs[bid][y * WIDTH_TILES + x] = (uint8_t)tile;
+    ctx->a.backs_present[bid] = true;             // painting into an absent block creates it
+}
+
+bool render_backs_get(RenderCtx *ctx, int bid, uint8_t *out) {
+    if (!backs_ok(ctx, bid, 0, 0)) return false;
+    memcpy(out, ctx->a.backs[bid], BACKS_TILES);
+    return true;
+}
+
+void render_backs_put(RenderCtx *ctx, int bid, const uint8_t *in) {
+    if (!backs_ok(ctx, bid, 0, 0)) return;
+    memcpy(ctx->a.backs[bid], in, BACKS_TILES);
+    ctx->a.backs_present[bid] = true;
+}
+
+bool render_backs_original(RenderCtx *ctx, int bid, uint8_t *out) {
+    if (!backs_ok(ctx, bid, 0, 0)) return false;
+    char path[1200];
+    snprintf(path, sizeof path, "%s/BACKS.SPL.orig", ctx->dir);
+    struct stat st;
+    if (stat(path, &st) != 0) snprintf(path, sizeof path, "%s/BACKS.SPL", ctx->dir);   // nothing saved yet
+    static uint8_t blocks[BACKS_BLOCKS][BACKS_TILES];
+    bool present[BACKS_BLOCKS];
+    load_backs_file(path, blocks, present);
+    memcpy(out, blocks[bid], BACKS_TILES);
+    return true;
+}
+
+// Recompress every present block and write BACKS.SPL: 64 big-endian block
+// offsets, the file size, then the blocks (an absent block gets the next
+// block's offset, as the original file does). The game's size limit for the
+// file is not known, so growing past the original is only warned about.
+bool render_backs_save(RenderCtx *ctx) {
+    if (ctx == NULL) return false;
+    char path[1200], orig[1200];
+    snprintf(path, sizeof path, "%s/BACKS.SPL", ctx->dir);
+    snprintf(orig, sizeof orig, "%s/BACKS.SPL.orig", ctx->dir);
+    keep_original(path, orig);
+    struct stat st;
+    long orig_size = stat(orig, &st) == 0 ? (long)st.st_size : -1;
+
+    static uint8_t body[BACKS_BLOCKS * 2 * BACKS_TILES];   // worst case: every byte escaped
+    uint8_t hdr[0x82];
+    size_t len = 0;
+    for (int bid = 0; bid < BACKS_BLOCKS; bid++) {
+        size_t off = sizeof hdr + len;
+        hdr[bid * 2] = (uint8_t)(off >> 8); hdr[bid * 2 + 1] = (uint8_t)off;
+        if (!ctx->a.backs_present[bid]) continue;
+        size_t n = spl_compress(ctx->a.backs[bid], BACKS_TILES, 0x00, body + len, sizeof body - len);
+        if (n == 0) { fprintf(stderr, "render: BACKS.SPL block %d would not compress\n", bid); return false; }
+        len += n;
+    }
+    size_t total = sizeof hdr + len;
+    if (total > 0xffff) { fprintf(stderr, "render: BACKS.SPL too large (%zu bytes)\n", total); return false; }
+    hdr[0x80] = (uint8_t)(total >> 8); hdr[0x81] = (uint8_t)total;
+    if (orig_size >= 0 && (long)total > orig_size)
+        fprintf(stderr, "render: BACKS.SPL grew from %ld to %zu bytes; the game's limit is unknown\n", orig_size, total);
+
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) { fprintf(stderr, "render: cannot write %s: %s\n", path, strerror(errno)); return false; }
+    bool ok = fwrite(hdr, 1, sizeof hdr, f) == sizeof hdr && fwrite(body, 1, len, f) == len;
+    fclose(f);
+    return ok;
+}
 
 void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out) {
     memset(out, 0, (size_t)SPIDS_FRAME_W * SPIDS_FRAME_H * 4);
@@ -703,7 +794,7 @@ bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
         for (int i = 0; i < mw * mh; i++) { m[i*3] = 40; m[i*3+1] = 40; m[i*3+2] = 48; }
         for (int rid = 0; rid < 64; rid++) {
             if (!file->rooms[rid].valid) continue;
-            render_room_base(file, rid, dir, &a, opts.debug, true, cv);
+            render_room_base(file, rid, &a, opts.debug, true, cv);
             int ox = pad + (rid % 8) * (cw + pad), oy = pad + (rid / 8) * (ch + pad);
             for (int y = 0; y < ch; y++)
                 for (int x = 0; x < cw; x++) {

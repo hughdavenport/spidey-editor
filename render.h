@@ -51,9 +51,10 @@ int render_player_frame(void);
 
 // Pixel editing of the game's graphics files in the context's data dir.
 // A "source" is one file of fixed-size images: BLOCKS.EGA (512 8x8 tiles),
-// SPIDS1.EGA / SPIDS2.EGA (64 24x21 sprite frames, colour 15 transparent).
+// SPIDS1.EGA / SPIDS2.EGA (64 24x21 sprite frames, colour 15 transparent),
+// SCENERY.EGA (256 8x8 background tiles).
 // Colours are palette indices 0..15; render_palette() gives their RGB.
-typedef enum { GFX_TILES, GFX_SPIDS1, GFX_SPIDS2, GFX_SOURCES } GfxSource;
+typedef enum { GFX_TILES, GFX_SPIDS1, GFX_SPIDS2, GFX_SCENERY, GFX_SOURCES } GfxSource;
 #define GFX_MAX_BYTES 256                 // largest per-image record (a SPIDS frame stride)
 const char *render_gfx_name(GfxSource src);
 int  render_gfx_count(GfxSource src);      // images in the file
@@ -73,6 +74,19 @@ void render_gfx_rgba(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
 const uint8_t (*render_palette(void))[3];
 #define TILE_BYTES 32
 const uint8_t (*render_palette(void))[3];
+
+// Backgrounds: BACKS.SPL holds up to 64 blocks, each a 32x22 map of SCENERY
+// tiles; a room shows block `background` (rooms may share one). Tile 0 is
+// never drawn (black). Blocks are cached in the context; render_backs_save()
+// recompresses and writes the whole file (one-time <file>.orig backup).
+#define BACKS_BLOCKS 64
+#define BACKS_TILES (WIDTH_TILES * HEIGHT_TILES)   // 704
+int  render_backs_tile(RenderCtx *ctx, int bid, int x, int y);
+void render_backs_set_tile(RenderCtx *ctx, int bid, int x, int y, int tile);
+bool render_backs_get(RenderCtx *ctx, int bid, uint8_t *out);           // the block (BACKS_TILES bytes), for undo
+void render_backs_put(RenderCtx *ctx, int bid, const uint8_t *in);
+bool render_backs_original(RenderCtx *ctx, int bid, uint8_t *out);      // as shipped (<file>.orig, or the file on disk)
+bool render_backs_save(RenderCtx *ctx);
 
 #define TILESET_PX 64   // 8x8 grid of 8x8 tiles = the 64 tiles of one tileset
 

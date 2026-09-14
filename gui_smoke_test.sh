@@ -69,6 +69,15 @@ xdotool mousemove $((X + 776 + 12)) $((Y + 24 + 3*21 + 10)) mousedown 1; sleep 0
 xdotool mousemove $((X + 776 + 192 + 16 + 5*9 + 4)) $((Y + 24 + 5*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12d-sprite-edit
 xdotool key u; sleep 0.8
 xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 405 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
+# backgrounds: "backs" button (4th), pick scenery tile 0x10 (16 across, 12 px cells: row 1, col 0; a solid tile),
+# Shift+drag along room row 3, wait for the BACKS.SPL write, undo, back to tiles
+xdotool mousemove $((X + 984 + 3*116 + 30)) $((Y + 402 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12e-backs-view
+xdotool mousemove $((X + 776 + 0*12 + 6)) $((Y + 24 + 1*12 + 6)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
+xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1
+for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done
+xdotool mouseup 1; xdotool keyup shift; sleep 1.2; snap s12f-backs-painted
+xdotool key u; sleep 0.8; snap s12g-backs-undo
+xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 405 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
 # labels start under the editor column (430+8=438), world map at 438 + 5 rows*24 + 8 = 566; thumbs 68x47 + 4 gap (height-limited)
 xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 566 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
@@ -105,4 +114,5 @@ wait $GP 2>/dev/null; echo "gui exit=$?"
 kill $WD 2>/dev/null; kill $XV 2>/dev/null
 [ -e Spider/BLOCKS.EGA.orig ] && echo "BLOCKS.EGA was written by the pixel edit (expected)" || echo "BLOCKS.EGA never written (pixel edit did not save!)"
 [ -e Spider/SPIDS1.EGA.orig ] && echo "SPIDS1.EGA was written by the sprite edit (expected)" || echo "SPIDS1.EGA never written (sprite edit did not save!)"
+[ -e Spider/BACKS.SPL.orig ] && echo "BACKS.SPL was written by the background edit (expected)" || echo "BACKS.SPL never written (background edit did not save!)"
 tail -8 $T/gui.log

@@ -24,4 +24,12 @@
 bool spl_decompress(FILE *fp, size_t size, const uint8_t markers[4],
                     uint8_array *out, uint8_array *compressed);
 
+/*
+ * Compress `n` bytes of `in` into `out`: the 4 markers first (markers[0] =
+ * `marker0`, the other three chosen to avoid the data where possible), then
+ * the stream spl_decompress() reads back. Returns the number of bytes
+ * written, or 0 if `cap` bytes would not hold it.
+ */
+size_t spl_compress(const uint8_t *in, size_t n, uint8_t marker0, uint8_t *out, size_t cap);
+
 #endif /* SPL_H */

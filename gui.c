@@ -106,11 +106,15 @@ typedef struct {
     bool help_font_loaded;
     int help_font_cw;
     int help_font_px;
-    // pixel editor: one image of one graphics source. The UI has two views:
-    // tiles, or "sprites" = SPIDS1 stacked over SPIDS2 (sel_sprite 0..127);
+    // pixel editor: one image of one graphics source. The picker has three
+    // views: tiles, "sprites" = SPIDS1 stacked over SPIDS2 (sel_sprite 0..127),
+    // or "backs" = the SCENERY tiles, painted into the room's background block;
     // pix_src / sel_img are derived from the view and kept as the effective source.
     GfxSource pix_src;
     bool sprites_view;
+    bool backs_view;
+    bool backs_painting;        // background stroke in progress (Shift+drag in the backs view)
+    bool backs_dirty;           // edited BACKS.SPL not yet written
     int sel_sprite;
     int sel_img[GFX_SOURCES];   // selected image per source (tiles: index within the current tileset)
     int sel_colour;             // colour to paint with
@@ -120,7 +124,7 @@ typedef struct {
     Texture2D sheet_tex[GFX_SOURCES];   // sprite sheets as 8-across pickers (tiles use pal_tex)
     bool sheet_loaded[GFX_SOURCES];
     bool sheet_stale[GFX_SOURCES];
-    struct { GfxSource src; int idx; uint8_t data[GFX_MAX_BYTES]; } pix_undo[64];   // image before each stroke / reset
+    struct { int src; int idx; uint8_t data[BACKS_TILES]; } pix_undo[64];   // image (GfxSource) or background block (src UNDO_BACKS) before each stroke / reset
     int pix_undo_n;
     unsigned seq, pix_seq, key_seq;   // ordering of pixel strokes vs editor keys, for `u`
     Font panel_font;        // text under the picture: a touch smaller so PANEL_COLS fit its width
@@ -129,6 +133,9 @@ typedef struct {
     int panel_font_px;
 } GuiState;
 #define PANEL_COLS 84           // columns of panel text that fit across the picture
+#define UNDO_BACKS (-1)         // pix_undo.src: a BACKS block, idx = block id
+enum { VIEW_TILES, VIEW_SPRITES, VIEW_BACKS };
+#define BACKS_COLS 16           // the scenery picker: 16 x 16 tiles in the picker square
 #define MOD_LATCH_FRAMES 3
 
 static const char *FONT_CANDIDATES[] = {
@@ -155,6 +162,10 @@ static void focus_move(GuiState *g, int dx, int dy);
 static void focus_apply(GuiState *g);
 static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh);
 static void sync_sprite_sel(GuiState *g);
+static void set_view(GuiState *g, int view);
+static int  cur_backs(void);
+static void backs_touched(GuiState *g);
+static void backs_undo_push(GuiState *g, int bid);
 
 // Which creature a sprite frame belongs to (frame ranges verified against the
 // game), and the editor object that places it (SHARK's damage picks Mysterio
@@ -345,6 +356,18 @@ static void sync_sprite_sel(GuiState *g) {
     g->sel_img[g->pix_src] = g->sel_sprite % 64;
 }
 
+// Switch the picker between tiles / sprites / backgrounds.
+static void set_view(GuiState *g, int view) {
+    g->sprites_view = view == VIEW_SPRITES;
+    g->backs_view = view == VIEW_BACKS;
+    if (view == VIEW_TILES) g->pix_src = GFX_TILES;
+    else if (view == VIEW_BACKS) g->pix_src = GFX_SCENERY;
+    else sync_sprite_sel(g);
+}
+
+// The background block the current room shows.
+static int cur_backs(void) { return ged_rooms()->rooms[ged_room()].data.background % BACKS_BLOCKS; }
+
 // Is the block panel (rather than the pixel editor) showing right now?
 static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh) {
     return ged_block_at_cursor(bi, bx, by, bw, bh) && *bi != g->block_hidden;
@@ -353,7 +376,8 @@ static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh
 // Arrow / hjkl movement for the panel that has keyboard focus.
 static void focus_move(GuiState *g, int dx, int dy) {
     if (g->focus == FOCUS_PICKER) {
-        if (!g->sprites_view) g->sel_tile = (uint8_t)((g->sel_tile + dx + 8 * dy + 64) % 64);
+        if (g->backs_view) g->sel_img[GFX_SCENERY] = (g->sel_img[GFX_SCENERY] + dx + BACKS_COLS * dy + 256) % 256;
+        else if (!g->sprites_view) g->sel_tile = (uint8_t)((g->sel_tile + dx + 8 * dy + 64) % 64);
         else { g->sel_sprite += dx + 8 * dy; sync_sprite_sel(g); }
     } else if (g->focus == FOCUS_WORLD) {
         g->world_sel = ((g->world_sel + dx + 8 * dy) % 64 + 64) % 64;
@@ -392,7 +416,15 @@ static void focus_apply(GuiState *g) {
     } else if (g->focus == FOCUS_PICKER) {
         int cx, cy;
         ged_cursor(&cx, &cy);
-        if (g->pix_src == GFX_TILES) {
+        if (g->backs_view) {
+            int bid = cur_backs();
+            if (render_backs_tile(g->rctx, bid, cx, cy) != g->sel_img[GFX_SCENERY]) {
+                backs_undo_push(g, bid);
+                render_backs_set_tile(g->rctx, bid, cx, cy, g->sel_img[GFX_SCENERY]);
+                backs_touched(g);
+                g->pix_op = true;
+            }
+        } else if (g->pix_src == GFX_TILES) {
             ged_paint_begin();
             ged_paint(cx, cy, (uint8_t)(g->sel_tile | g->sel_attr));
             ged_flush();
@@ -529,15 +561,39 @@ static bool feed_mouse(GuiState *g) {
         return true;
     }
 
-    // middle click on the room: pick that tile into the palette (reverse picker)
+    // middle click on the room: pick that tile into the palette (reverse
+    // picker); in the backs view it picks the background tile there
     if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) && mouse_tile(g, &tx, &ty)) {
+        if (g->backs_view) { g->sel_img[GFX_SCENERY] = render_backs_tile(g->rctx, cur_backs(), tx, ty); return true; }
         g->sel_tile = (uint8_t)(ged_tile_at(tx, ty) & 0x3f);
         g->sel_attr = (uint8_t)(ged_tile_at(tx, ty) & 0xc0);
-        g->pix_src = GFX_TILES; g->sprites_view = false;
+        set_view(g, VIEW_TILES);
         return true;
     }
 
-    if (paint_btn && g->pix_src != GFX_TILES && mouse_tile(g, &tx, &ty)) {   // a sprite sheet is up: place its creature
+    // backs view: Shift+drag paints scenery tiles into the room's background
+    // block (shared by every room with that background); one undo entry per stroke
+    if (paint_btn && g->backs_view && mouse_tile(g, &tx, &ty)) {
+        backs_undo_push(g, cur_backs());
+        g->backs_painting = true;
+        g->paint_x = -1; g->paint_y = -1;
+        g->pix_op = true;
+    }
+    if (g->backs_painting) {
+        g->pix_op = true;
+        if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { g->backs_painting = false; return false; }
+        if (mouse_tile(g, &tx, &ty) && (tx != g->paint_x || ty != g->paint_y)) {
+            g->paint_x = tx; g->paint_y = ty;
+            if (render_backs_tile(g->rctx, cur_backs(), tx, ty) != g->sel_img[GFX_SCENERY]) {
+                render_backs_set_tile(g->rctx, cur_backs(), tx, ty, g->sel_img[GFX_SCENERY]);
+                backs_touched(g);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (paint_btn && g->sprites_view && mouse_tile(g, &tx, &ty)) {   // a sprite sheet is up: place its creature
         int c = creature_of(g->pix_src, g->sel_img[g->pix_src]);
         if (c >= 0 && CREATURES[c].type >= 0) {
             ged_new_input_batch();
@@ -566,10 +622,17 @@ static bool feed_mouse(GuiState *g) {
         return any;
     }
 
-    // picker: pick a tile, or a sprite frame
+    // picker: pick a tile, a scenery tile, or a sprite frame
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int side = TILESET_PX * g->scale, px0 = palette_x(g), py0 = palette_y(g);
-        if (!g->sprites_view) {
+        if (g->backs_view) {
+            int c = side / BACKS_COLS;
+            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + side) {
+                g->sel_img[GFX_SCENERY] = ((int)(m.y - py0) / c) * BACKS_COLS + (int)(m.x - px0) / c;
+                g->focus = FOCUS_PICKER;
+                return true;
+            }
+        } else if (!g->sprites_view) {
             int s = 8 * g->scale;
             if (m.x >= px0 && m.x < px0 + 8 * s && m.y >= py0 && m.y < py0 + 8 * s) {
                 g->sel_tile = (uint8_t)(((int)(m.y - py0) / s) * 8 + (int)(m.x - px0) / s);
@@ -610,7 +673,7 @@ static bool feed_mouse(GuiState *g) {
     }
 
     // attribute buttons under the source buttons (tiles view)
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !g->sprites_view)
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !g->sprites_view && !g->backs_view)
         for (int i = 0; i < 4; i++)
             if (CheckCollisionPointRec(m, attr_button(g, i))) { g->sel_attr = ATTRS[i].bits; return true; }
 
@@ -627,7 +690,7 @@ static bool feed_mouse(GuiState *g) {
                 }
                 if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
                     int t = ged_block_tile(bi, cx, cy);
-                    g->sel_tile = (uint8_t)(t & 0x3f); g->sel_attr = (uint8_t)(t & 0xc0); g->pix_src = GFX_TILES; g->sprites_view = false;
+                    g->sel_tile = (uint8_t)(t & 0x3f); g->sel_attr = (uint8_t)(t & 0xc0); set_view(g, VIEW_TILES);
                     return true;
                 }
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->block_painting = true; ged_paint_begin(); }
@@ -683,12 +746,12 @@ static bool feed_mouse(GuiState *g) {
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
         if (g->pix_painting) return false;
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && g->block_hidden >= 0 && CheckCollisionPointRec(m, pixed_button(g, 3))) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && g->block_hidden >= 0 && CheckCollisionPointRec(m, pixed_button(g, 4))) {
             g->block_hidden = -1;                                        // block: show its panel again
             return true;
         }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 4; i++) {
                 if (!CheckCollisionPointRec(m, pixed_button(g, i))) continue;
                 g->pix_op = true;
                 if (i == 0) {                                   // reset: the image as shipped
@@ -698,8 +761,7 @@ static bool feed_mouse(GuiState *g) {
                         render_gfx_put(g->rctx, g->pix_src, idx, orig);
                         gfx_touched(g, g->pix_src);
                     }
-                } else if (i == 1) { g->sprites_view = false; g->pix_src = GFX_TILES; }
-                else { g->sprites_view = true; sync_sprite_sel(g); }
+                } else set_view(g, i == 1 ? VIEW_TILES : i == 2 ? VIEW_SPRITES : VIEW_BACKS);
                 return true;
             }
         }
@@ -948,6 +1010,8 @@ static void draw_help(GuiState *g) {
         "F2 hex map               q quit             wheel over text: scroll",
         "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
         "        that creature); middle-click on the room picks the tile",
+        "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
+        "        (BACKS.SPL, shared by every room with that background number); middle-click picks",
         "wheel over room or picker: background; Shift+wheel / horizontal wheel: tileset",
         "world map: click = go there; right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
@@ -1014,10 +1078,11 @@ static void draw_cursor(GuiState *g) {
 }
 
 // Build the 8-across picker texture of a sprite sheet (RGBA, key transparent).
+static int sheet_cols(GfxSource src) { return src == GFX_SCENERY ? BACKS_COLS : 8; }
 static void sheet_build(GuiState *g, GfxSource src) {
     int w, h, n = render_gfx_count(src);
     render_gfx_size(src, &w, &h);
-    int cols = 8, rows = (n + cols - 1) / cols;
+    int cols = sheet_cols(src), rows = (n + cols - 1) / cols;
     Image img = GenImageColor(cols * w, rows * h, BLANK);
     static uint8_t one[SPIDS_FRAME_W * SPIDS_FRAME_H * 4];
     for (int i = 0; i < n; i++) {
@@ -1033,10 +1098,37 @@ static void sheet_build(GuiState *g, GfxSource src) {
     UnloadImage(img);
 }
 
-// The picker: the current tileset, or the selected sprite sheet, 8 across.
+// Rooms showing background `bid`, as "01 02 0a" (at most a few).
+static const char *backs_users(int bid) {
+    static char buf[64];
+    RoomFile *rooms = ged_rooms();
+    int n = 0, len = 0;
+    for (int r = 0; r < 64; r++) {
+        if (!rooms->rooms[r].valid || rooms->rooms[r].data.background % BACKS_BLOCKS != bid) continue;
+        if (n < 8) len += snprintf(buf + len, sizeof buf - (size_t)len, "%s%02x", n ? " " : "", r);
+        n++;
+    }
+    if (n > 8) snprintf(buf + len, sizeof buf - (size_t)len, " +%d", n - 8);
+    return buf;
+}
+
+// The picker: the current tileset, the selected sprite sheet (8 across), or
+// the scenery tiles (16 across).
 static void draw_palette(GuiState *g) {
     int s = 8 * g->scale, x0 = palette_x(g), y0 = palette_y(g), fs = g->font_px, side = TILESET_PX * g->scale;
-    if (g->pix_src == GFX_TILES) {
+    if (g->backs_view) {
+        int c = side / BACKS_COLS, sel = g->sel_img[GFX_SCENERY];
+        DrawRectangle(x0, y0, side, side, (Color){35, 45, 35, 255});
+        if (g->sheet_loaded[GFX_SCENERY])
+            DrawTexturePro(g->sheet_tex[GFX_SCENERY], (Rectangle){0, 0, g->sheet_tex[GFX_SCENERY].width, g->sheet_tex[GFX_SCENERY].height},
+                           (Rectangle){x0, y0, side, side}, (Vector2){0, 0}, 0, WHITE);
+        for (int i = 0; i <= BACKS_COLS; i++) {
+            DrawLine(x0 + i * c, y0, x0 + i * c, y0 + side, (Color){80, 80, 80, 255});
+            DrawLine(x0, y0 + i * c, x0 + side, y0 + i * c, (Color){80, 80, 80, 255});
+        }
+        DrawRectangleLinesEx((Rectangle){x0 + (sel % BACKS_COLS) * c, y0 + (sel / BACKS_COLS) * c, c, c}, 2, GOLD);
+        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, side + 4}, 2, GOLD);
+    } else if (g->pix_src == GFX_TILES) {
         DrawTexturePro(g->pal_tex, (Rectangle){0, 0, TILESET_PX, TILESET_PX},
                        (Rectangle){x0, y0, side, side}, (Vector2){0, 0}, 0, WHITE);
         for (int i = 0; i <= 8; i++) {
@@ -1073,9 +1165,10 @@ static void draw_palette(GuiState *g) {
     int ly = labels_y(g), lh = ch(g);
     int link = ged_linking();
     const char *lines[] = {
-        !g->sprites_view ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
+        g->backs_view    ? TextFormat("background %d  scenery tile 0x%02x", cur_backs(), g->sel_img[GFX_SCENERY])
+        : !g->sprites_view ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
                          : TextFormat("%s  frame 0x%02x", render_gfx_name(g->pix_src), g->sel_img[g->pix_src]),
-        "",
+        g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs())) : "",
         link ? TextFormat("switch %d open: right-click an object", link - 1) : "Ctrl-? help (mouse and GUI keys too)",
         link ? "or switch links it; right-drag tiles" : "",
         link ? "makes a block chunk (Esc closes)" : "",
@@ -1097,10 +1190,24 @@ static Rectangle pixed_button(GuiState *g, int i) {
 // Remember the image as it is now, so the coming stroke (or reset) can be undone.
 static void pix_undo_push(GuiState *g, GfxSource src, int idx) {
     if (g->pix_undo_n == 64) { memmove(g->pix_undo, g->pix_undo + 1, 63 * sizeof g->pix_undo[0]); g->pix_undo_n--; }
-    g->pix_undo[g->pix_undo_n].src = src;
+    g->pix_undo[g->pix_undo_n].src = (int)src;
     g->pix_undo[g->pix_undo_n].idx = idx;
     if (render_gfx_get(g->rctx, src, idx, g->pix_undo[g->pix_undo_n].data)) g->pix_undo_n++;
     g->pix_seq = ++g->seq;
+}
+
+// Remember a background block before a stroke into it (same undo stack).
+static void backs_undo_push(GuiState *g, int bid) {
+    if (g->pix_undo_n == 64) { memmove(g->pix_undo, g->pix_undo + 1, 63 * sizeof g->pix_undo[0]); g->pix_undo_n--; }
+    g->pix_undo[g->pix_undo_n].src = UNDO_BACKS;
+    g->pix_undo[g->pix_undo_n].idx = bid;
+    if (render_backs_get(g->rctx, bid, g->pix_undo[g->pix_undo_n].data)) g->pix_undo_n++;
+    g->pix_seq = ++g->seq;
+}
+
+static void backs_touched(GuiState *g) {
+    g->backs_dirty = true; g->gfx_timer = 0.6f;
+    g->room_dirty = true;
 }
 
 static void gfx_touched(GuiState *g, GfxSource src) {
@@ -1113,9 +1220,14 @@ static void gfx_touched(GuiState *g, GfxSource src) {
 static bool pix_undo_pop(GuiState *g) {
     if (g->pix_undo_n == 0) return false;
     g->pix_undo_n--;
-    GfxSource src = g->pix_undo[g->pix_undo_n].src;
-    render_gfx_put(g->rctx, src, g->pix_undo[g->pix_undo_n].idx, g->pix_undo[g->pix_undo_n].data);
-    gfx_touched(g, src);
+    int src = g->pix_undo[g->pix_undo_n].src;
+    if (src == UNDO_BACKS) {
+        render_backs_put(g->rctx, g->pix_undo[g->pix_undo_n].idx, g->pix_undo[g->pix_undo_n].data);
+        backs_touched(g);
+    } else {
+        render_gfx_put(g->rctx, (GfxSource)src, g->pix_undo[g->pix_undo_n].idx, g->pix_undo[g->pix_undo_n].data);
+        gfx_touched(g, (GfxSource)src);
+    }
     g->pix_seq = g->pix_undo_n ? ++g->seq : 0;
     return true;
 }
@@ -1129,6 +1241,10 @@ static bool gfx_save_all(GuiState *g) {
         g->gfx_dirty[i] = false;
         any |= render_gfx_save(g->rctx, (GfxSource)i);
         if (i == GFX_SPIDS1) spidey_build(g);
+    }
+    if (g->backs_dirty) {
+        g->backs_dirty = false;
+        any |= render_backs_save(g->rctx);
     }
     return any;
 }
@@ -1200,7 +1316,9 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
 
 // Tile 0 of every tileset is "invisible": the game never draws it (the
 // background shows through), so editing its pixels would change nothing.
-static bool pixed_locked(GuiState *g) { return g->pix_src == GFX_TILES && g->sel_tile == 0; }
+static bool pixed_locked(GuiState *g) {
+    return (g->pix_src == GFX_TILES && g->sel_tile == 0) || (g->pix_src == GFX_SCENERY && g->sel_img[GFX_SCENERY] == 0);
+}
 
 // Zoomed view of the selected image; left click paints sel_colour, right
 // click picks a pixel's colour; the 16 palette swatches sit under it. The
@@ -1239,10 +1357,11 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         if (c == g->sel_colour) DrawRectangleLinesEx((Rectangle){sx, yy, sp, sp}, 2, WHITE);
     }
     int ty = pixed_text_y(g), fs = g->font_px;
-    bool dirty = false;
+    bool dirty = g->backs_dirty;
     for (int i = 0; i < GFX_SOURCES; i++) dirty |= g->gfx_dirty[i];
     gtext(&g->font, g->font_loaded,
           g->pix_src == GFX_TILES ? TextFormat("tile 0x%02x  colour %d", idx, g->sel_colour)
+          : g->pix_src == GFX_SCENERY ? TextFormat("scenery tile 0x%02x  colour %d", idx, g->sel_colour)
           : g->sel_colour == key  ? TextFormat("%s frame 0x%02x  colour %d = transparent", render_gfx_name(g->pix_src), idx, g->sel_colour)
                                   : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->pix_src), idx, g->sel_colour),
           x0, ty, fs, RAYWHITE);
@@ -1267,7 +1386,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
                 gtext(&g->font, g->font_loaded, "Shift+click in the room places one", x0, ty + 4 * ch(g), fs, SKYBLUE);
         }
     }
-    if (!g->sprites_view)
+    if (!g->sprites_view && !g->backs_view)
         for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
             Rectangle rb = attr_button(g, i);
             bool on = ATTRS[i].bits == g->sel_attr;
@@ -1276,10 +1395,10 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
             int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
             gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
         }
-    const char *names[] = { "reset", "tiles", "sprites", "block" };
-    for (int i = 0; i < (block_available ? 4 : 3); i++) {
+    const char *names[] = { "reset", "tiles", "sprites", "backs", "block" };
+    for (int i = 0; i < (block_available ? 5 : 4); i++) {
         Rectangle rb = pixed_button(g, i);
-        bool on = (i == 1 && !g->sprites_view) || (i == 2 && g->sprites_view);
+        bool on = (i == 1 && !g->sprites_view && !g->backs_view) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view);
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
@@ -1440,6 +1559,14 @@ static void draw_hover_preview(GuiState *g) {
         return;
     }
     Rectangle dst = { p.x, p.y, s, s };
+    if (g->backs_view) {
+        if (!g->sheet_loaded[GFX_SCENERY]) return;
+        int t = g->sel_img[GFX_SCENERY];
+        Rectangle src = { (t % BACKS_COLS) * 8, (t / BACKS_COLS) * 8, 8, 8 };
+        DrawTexturePro(g->sheet_tex[GFX_SCENERY], src, dst, (Vector2){0, 0}, 0, (Color){255, 255, 255, 150});
+        DrawRectangleLinesEx(dst, 2, GREEN);
+        return;
+    }
     Rectangle src = { (g->sel_tile % 8) * 8, (g->sel_tile / 8) * 8, 8, 8 };
     DrawTexturePro(g->pal_tex, src, dst, (Vector2){0, 0}, 0, (Color){255, 255, 255, 150});
     DrawRectangleLinesEx(dst, 2, GOLD);
@@ -1608,9 +1735,9 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             if (!g->pix_op) g->key_seq = ++g->seq;      // a room edit by mouse: `u` goes to the editor
         }
 
-        bool gfx_dirty = false;
+        bool gfx_dirty = g->backs_dirty;
         for (int i = 0; i < GFX_SOURCES; i++) gfx_dirty |= g->gfx_dirty[i];
-        if (gfx_dirty && !g->pix_painting) {              // debounced write of pixel edits
+        if (gfx_dirty && !g->pix_painting && !g->backs_painting) {   // debounced write of pixel / background edits
             g->gfx_timer -= dt;
             if (g->gfx_timer <= 0) {
                 if (gfx_save_all(g)) g->saved_flash = 1.2f;
@@ -1666,6 +1793,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->sprites_view)
             for (int k = GFX_SPIDS1; k <= GFX_SPIDS2; k++)
                 if (!g->sheet_loaded[k] || g->sheet_stale[k]) sheet_build(g, (GfxSource)k);
+        if (g->backs_view && (!g->sheet_loaded[GFX_SCENERY] || g->sheet_stale[GFX_SCENERY])) sheet_build(g, GFX_SCENERY);
 
         if (g->saved_flash > 0) g->saved_flash -= dt;
         BeginDrawing();

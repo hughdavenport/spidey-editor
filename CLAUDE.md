@@ -7,6 +7,7 @@ A terminal-based map editor for "The Amazing Spider-Man" (1990 DOS game). Reads/
 ```sh
 make             # builds ./a.out with ASAN + debug; editor.so / gui.so are built on first use and hot-reload
 make release     # builds ./spidey-editor: one binary, editor + GUI linked in, static raylib, -O2, no hot reload
+make check       # spl_check: .SPL compressor round trips + background store save/reload (scratch copy of Spider/)
 ./a.out editor   # interactive editor
 ./a.out help     # show all patch commands
 ```
@@ -23,6 +24,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 |------|---------|
 | `main.c` | Patch/CLI mode: `rooms`, `display`, `patch`, `delete` subcommands |
 | `room.c` | ROOMS.SPL binary decode/encode with RLE compression |
+| `spl.c` | The .SPL LZ/RLE codec shared by ROOMS.SPL and BACKS.SPL: `spl_decompress`, `spl_compress` (writeRoom's compressor, extracted) |
+| `render.c` | Room rendering (PNG + GUI), the game graphics as editable sources (`GfxSource`), the BACKS.SPL background store |
+| `spl_check.c` | `make check`: round-trip tests for the codec and the background store |
 | `room.h` | Room structs: `DecompresssedRoom`, `RoomObject`, `SwitchObject`, `SwitchChunk`, `RoomFile` |
 | `editor.c` | Interactive TUI editor with hot-reload via dlopen. Global `state` pointer. All drawing via ANSI escape codes to stdout. |
 | `array.h` | Generic dynamic array macros (`ARRAY`, `ARRAY_ADD`, `ARRAY_FREE`, `ARRAY_ENSURE`) |
@@ -126,7 +130,17 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   keeping a one-time <file>.orig backup. This edits the game's graphics for every room. `u`
   undoes the last stroke while a pixel stroke is the most recent edit (GUI-side stack, no
   redo); "reset" restores the image from the .orig; "pick" is an eyedropper for the next click
-  anywhere on screen. play.sh copies a newer ./BLOCKS.EGA into Spider/ so the game shows edits.
+  anywhere on screen. play.sh copies newer ./BLOCKS.EGA, SPIDS1/2.EGA, SCENERY.EGA and
+  BACKS.SPL into Spider/ so the game shows edits.
+- Backgrounds ("backs" button): the picker shows the 256 SCENERY tiles 16 across; Shift+drag in
+  the room paints them into the room's background block (`render_backs_set_tile`, BACKS.SPL
+  block = the room's `bkgrnd`, so every room with that number changes: the label lists them),
+  middle-click picks the background tile under the mouse, Shift shows a green ghost. Strokes go on
+  the same undo stack as pixel strokes (`UNDO_BACKS` entries hold the whole 704-byte block) and
+  BACKS.SPL is recompressed and written 0.6 s later (`render_backs_save`: 64 offsets + size header,
+  `spl_compress` per present block, one-time BACKS.SPL.orig). The game's size limit for BACKS.SPL
+  is unknown; growing past the original only warns on stderr. Scenery tile pixels are edited in
+  the same pixel editor (`GFX_SCENERY`; tile 0 is locked, it is never drawn).
 - Sprite frames map to creatures (`CREATURES[]` in gui.c, ranges verified against the game);
   with a sprite selected, Shift+click in the room places that creature (`ged_place_sprite`:
   retypes the object under the cursor or creates one).
@@ -149,5 +163,6 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - `./gui_smoke_test.sh` drives the GUI headlessly (Xvfb + xdotool) and screenshots each step.
 
 ## Raylib notes
-- Raylib 6.0 prebuilt lives in `raylib-6.0_linux_amd64/` (gitignored; fetch the GitHub release)
+- Raylib 6.0 prebuilt (headers, `libraylib.a`, `libraylib.so`, zlib licence) is committed in
+  `raylib-6.0_linux_amd64/` so a fresh clone builds with `make` / `make release` and nothing else
 - `../breadboard/breadboard.c` is the original reference for the raylib + dlopen hot-reload pattern
