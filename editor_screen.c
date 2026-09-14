@@ -5,6 +5,10 @@
 static int     scr_x, scr_y;
 static uint8_t scr_fg, scr_bg, scr_attr;
 
+/* Set by the GUI: keep filling the cell buffer (it renders the cells itself)
+ * but write nothing to the terminal. */
+bool screen_headless = false;
+
 int scr_printf(const char *fmt, ...) {
     char buf[4096];
     va_list ap;
@@ -93,7 +97,7 @@ void screen_flush(void) {
     int cur_x = -1, cur_y = -1;
     uint8_t cur_fg = 0, cur_bg = 0, cur_attr = 0;
 
-    for (int y = 0; y < h; y++) {
+    for (int y = 0; y < h && !screen_headless; y++) {
         for (int x = 0; x < w; x++) {
             Cell *curr = &state->screen_curr[y * SCREEN_MAX_WIDTH + x];
             Cell *prev = &state->screen_prev[y * SCREEN_MAX_WIDTH + x];
@@ -117,8 +121,10 @@ void screen_flush(void) {
             cur_x++;
         }
     }
-    printf("\033[m");
-    fflush(stdout);
+    if (!screen_headless) {
+        printf("\033[m");
+        fflush(stdout);
+    }
 
     memcpy(state->screen_prev, state->screen_curr,
            sizeof(Cell) * SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH);

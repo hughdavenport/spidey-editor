@@ -38,6 +38,17 @@ void render_close(RenderCtx *ctx);
 // background + foreground + sprites, no debug overlay (the GUI draws its own).
 bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out);
 
+// Whether render_room_rgb draws Spider-Man at his start position in room 1
+// (default true; the GUI draws him at the cursor instead).
+void render_show_player(RenderCtx *ctx, bool show);
+
+#define SPIDS_FRAME_W 24
+#define SPIDS_FRAME_H 21
+// One SPIDS1 frame as SPIDS_FRAME_W*SPIDS_FRAME_H*4 RGBA bytes (key colour -> alpha 0).
+void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out);
+// The frame the game shows for the standing player.
+int render_player_frame(void);
+
 #define TILESET_PX 64   // 8x8 grid of 8x8 tiles = the 64 tiles of one tileset
 
 // Render the 64 foreground (BLOCKS) tiles for `tile_offset` into `out`

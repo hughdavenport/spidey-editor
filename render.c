@@ -383,7 +383,7 @@ static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y) {
 // Fill a BW*BH*3 RGB buffer with one room (background + foreground + sprites,
 // plus the overlay if requested). Assumes the room is valid.
 static void render_room_base(RoomFile *file, int room_id, const char *dir,
-                             const Assets *a, bool debug, uint8_t *cv) {
+                             const Assets *a, bool debug, bool player, uint8_t *cv) {
     struct DecompressedRoom *room = &file->rooms[room_id].data;
     memset(cv, 0, (size_t)BW * BH * 3);
 
@@ -414,7 +414,7 @@ static void render_room_base(RoomFile *file, int room_id, const char *dir,
         if (s2) draw_spids(cv, a->spids2, a->s2_len, frame, dx, dy);
         else    draw_spids(cv, a->spids1, a->s1_len, frame, dx, dy);
     }
-    if (room_id == PLAYER_ROOM)
+    if (player && room_id == PLAYER_ROOM)
         draw_spids(cv, a->spids1, a->s1_len, PLAYER_FRAME,
                    (3 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE, (20 + 1) * 8 - SPIDS_H);
     if (debug) draw_overlay(cv, room);
@@ -447,7 +447,7 @@ bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOp
     uint8_t *cv = malloc((size_t)BW * BH * 3);
     bool ok = cv != NULL;
     if (ok) {
-        render_room_base(file, room_id, dir, &a, opts.debug, cv);
+        render_room_base(file, room_id, dir, &a, opts.debug, true, cv);
         ok = write_scaled(out_path, cv, opts.scale > 0 ? opts.scale : 1);
     }
     free(cv); free_assets(&a);
@@ -469,7 +469,7 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
         if (!file->rooms[rid].valid) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/room%02d.png", out_dir, rid);
-        render_room_base(file, rid, dir, &a, opts.debug, cv);
+        render_room_base(file, rid, dir, &a, opts.debug, true, cv);
         ok = write_scaled(path, cv, opts.scale > 0 ? opts.scale : 1);
         n++;
     }
@@ -484,6 +484,7 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
 struct RenderCtx {
     Assets a;
     char dir[1024];
+    bool hide_player;
 };
 
 RenderCtx *render_open(const char *data_dir) {
@@ -507,8 +508,33 @@ void render_close(RenderCtx *ctx) {
 bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out) {
     if (ctx == NULL || room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid)
         return false;
-    render_room_base(file, room_id, ctx->dir, &ctx->a, false, out);
+    render_room_base(file, room_id, ctx->dir, &ctx->a, false, !ctx->hide_player, out);
     return true;
+}
+
+void render_show_player(RenderCtx *ctx, bool show) {
+    if (ctx) ctx->hide_player = !show;
+}
+
+int render_player_frame(void) { return PLAYER_FRAME; }
+
+void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out) {
+    memset(out, 0, (size_t)SPIDS_FRAME_W * SPIDS_FRAME_H * 4);
+    if (ctx == NULL) return;
+    int base = frame * SPIDS_STRIDE;
+    for (int y = 0; y < SPIDS_H; y++) {
+        for (int x = 0; x < SPIDS_W; x++) {
+            int c = 0;
+            for (int s = 0; s < 4; s++) {
+                int o = base + s * SPIDS_PLANE + y * 3 + x / 8;
+                if (o >= 0 && (size_t)o < ctx->a.s1_len)
+                    c |= ((ctx->a.spids1[o] >> (7 - (x % 8))) & 1) << PLANE_ORDER[s];
+            }
+            if (c == SPRITE_KEY) continue;
+            uint8_t *px = out + (y * SPIDS_FRAME_W + x) * 4;
+            px[0] = PAL[c][0]; px[1] = PAL[c][1]; px[2] = PAL[c][2]; px[3] = 255;
+        }
+    }
 }
 
 void render_tileset_rgb(RenderCtx *ctx, int tile_offset, uint8_t *out) {
@@ -543,7 +569,7 @@ bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
         for (int i = 0; i < mw * mh; i++) { m[i*3] = 40; m[i*3+1] = 40; m[i*3+2] = 48; }
         for (int rid = 0; rid < 64; rid++) {
             if (!file->rooms[rid].valid) continue;
-            render_room_base(file, rid, dir, &a, opts.debug, cv);
+            render_room_base(file, rid, dir, &a, opts.debug, true, cv);
             int ox = pad + (rid % 8) * (cw + pad), oy = pad + (rid / 8) * (ch + pad);
             for (int y = 0; y < ch; y++)
                 for (int x = 0; x < cw; x++) {

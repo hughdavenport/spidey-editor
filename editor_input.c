@@ -3599,19 +3599,74 @@ static state_handler_fn state_handlers[NUM_STATES] = {
     [NORMAL]           = handle_normal,
 };
 
+/* Pop one queued macro-replay key and run it through the current state's
+ * handler. Returns false when the replay queue is empty. */
+bool editor_replay_step(void) {
+    if (state->macro_replay.length == 0) return false;
+    Key k = state->macro_replay.data[0];
+    memmove(state->macro_replay.data,
+            state->macro_replay.data + 1,
+            (state->macro_replay.length - 1) * sizeof(Key));
+    state->macro_replay.length--;
+    assert(state->current_state < NUM_STATES);
+    assert(state_handlers[state->current_state] != NULL);
+    state_handlers[state->current_state](k);
+    return true;
+}
+
+/* Run one decoded key through the macro layer (record / slot selection) and
+ * then the current state's handler. Shared by the terminal editor and the
+ * GUI, which decodes raylib events into the same Key struct. */
+void editor_handle_key(Key key) {
+    /* Macro meta: awaiting slot key after 'm' — consume key, start or cancel */
+    if (state->macro_meta) {
+        state->macro_meta = false;
+        if (key.code == KEY_CHAR && key.mod == MOD_NONE &&
+                key.ch >= 'a' && key.ch <= 'z') {
+            state->macro_recording = true;
+            state->macro_slot = key.ch;
+            state->macro_buf.length = 0;
+        }
+        /* ESC or any other key: cancel, key consumed */
+        return;
+    }
+
+    /* Replay pending: awaiting slot key after ',' — consume key, queue or cancel */
+    if (state->macro_replay_pending) {
+        state->macro_replay_pending = false;
+        if (key.code == KEY_CHAR && key.mod == MOD_NONE) {
+            char ch = key.ch;
+            char slot = '\0';
+            if      (ch >= 'a' && ch <= 'z') slot = ch;
+            else if (ch == ',')              slot = state->macro_last_replayed;
+            else if (ch == '.')              slot = state->macro_last_saved;
+            if (slot >= 'a' && slot <= 'z') {
+                KeyArray *m = &state->macro_slots[slot - 'a'];
+                if (m->length > 0) {
+                    for (size_t mi = 0; mi < m->length; mi++)
+                        ARRAY_ADD(state->macro_replay, m->data[mi]);
+                    state->macro_last_replayed = slot;
+                }
+            }
+        }
+        /* any other key or empty slot: cancel, key consumed */
+        return;
+    }
+
+    /* Record key into macro buf (skip plain 'm' — it is the stop delimiter) */
+    if (state->macro_recording &&
+            !(key.code == KEY_CHAR && key.mod == MOD_NONE && key.ch == 'm')) {
+        ARRAY_ADD(state->macro_buf, key);
+    }
+
+    assert(state->current_state < NUM_STATES);
+    assert(state_handlers[state->current_state] != NULL);
+    state_handlers[state->current_state](key);
+}
+
 bool process_input(void) {
     /* Drain one queued replay key before blocking on stdin */
-    if (state->macro_replay.length > 0) {
-        Key k = state->macro_replay.data[0];
-        memmove(state->macro_replay.data,
-                state->macro_replay.data + 1,
-                (state->macro_replay.length - 1) * sizeof(Key));
-        state->macro_replay.length--;
-        assert(state->current_state < NUM_STATES);
-        assert(state_handlers[state->current_state] != NULL);
-        state_handlers[state->current_state](k);
-        return true;
-    }
+    if (editor_replay_step()) return true;
 
     state->status_message[0] = '\0';  /* clear previous status on each keypress */
     struct pollfd fd = { .fd = STDIN_FILENO, .events = POLLIN };
@@ -3642,52 +3697,7 @@ bool process_input(void) {
     }
     int i = 0;
     while (i < n) {
-        Key key = parse_key(buf, &i, (int)n);
-
-        /* Macro meta: awaiting slot key after 'm' — consume key, start or cancel */
-        if (state->macro_meta) {
-            state->macro_meta = false;
-            if (key.code == KEY_CHAR && key.mod == MOD_NONE &&
-                    key.ch >= 'a' && key.ch <= 'z') {
-                state->macro_recording = true;
-                state->macro_slot = key.ch;
-                state->macro_buf.length = 0;
-            }
-            /* ESC or any other key: cancel, key consumed */
-            continue;
-        }
-
-        /* Replay pending: awaiting slot key after ',' — consume key, queue or cancel */
-        if (state->macro_replay_pending) {
-            state->macro_replay_pending = false;
-            if (key.code == KEY_CHAR && key.mod == MOD_NONE) {
-                char ch = key.ch;
-                char slot = '\0';
-                if      (ch >= 'a' && ch <= 'z') slot = ch;
-                else if (ch == ',')              slot = state->macro_last_replayed;
-                else if (ch == '.')              slot = state->macro_last_saved;
-                if (slot >= 'a' && slot <= 'z') {
-                    KeyArray *m = &state->macro_slots[slot - 'a'];
-                    if (m->length > 0) {
-                        for (size_t mi = 0; mi < m->length; mi++)
-                            ARRAY_ADD(state->macro_replay, m->data[mi]);
-                        state->macro_last_replayed = slot;
-                    }
-                }
-            }
-            /* any other key or empty slot: cancel, key consumed */
-            continue;
-        }
-
-        /* Record key into macro buf (skip plain 'm' — it is the stop delimiter) */
-        if (state->macro_recording &&
-                !(key.code == KEY_CHAR && key.mod == MOD_NONE && key.ch == 'm')) {
-            ARRAY_ADD(state->macro_buf, key);
-        }
-
-        assert(state->current_state < NUM_STATES);
-        assert(state_handlers[state->current_state] != NULL);
-        state_handlers[state->current_state](key);
+        editor_handle_key(parse_key(buf, &i, (int)n));
     }
     return true;
 }

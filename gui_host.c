@@ -29,7 +29,7 @@ static bool build_gui_lib(void) {
     return true;
 }
 
-int gui_main(RoomFile *file, const char *data_dir) {
+int gui_main(RoomFile *file, const char *data_dir, int scale) {
     if (!load_raylib()) return 1;
 
     struct stat st;
@@ -42,14 +42,14 @@ int gui_main(RoomFile *file, const char *data_dir) {
             fprintf(stderr, "gui: dlopen gui.so: %s\n", dlerror());
             return 1;
         }
-        void *(*loop)(const char *, RoomFile *, const char *, void *);
+        void *(*loop)(const char *, RoomFile *, const char *, int, void *);
         *(void **)(&loop) = dlsym(mod, "gui_loop");
         if (loop == NULL) {
             fprintf(stderr, "gui: gui.so missing gui_loop: %s\n", dlerror());
             dlclose(mod);
             return 1;
         }
-        state = loop("gui.so", file, data_dir, state);
+        state = loop("gui.so", file, data_dir, scale, state);
         dlclose(mod);
         if (state == NULL) break;   // window closed
         // Source changed: gui_loop already rebuilt gui.so; reopen it.

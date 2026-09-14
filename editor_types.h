@@ -252,6 +252,13 @@ void screen_flush(void);
 /* Key parser — decodes raw bytes into a Key struct, advancing *i */
 Key parse_key(const char *buf, int *i, int n);
 
+/* Key dispatch (editor_input.c): macro layer + current state's handler */
+void editor_handle_key(Key key);
+bool editor_replay_step(void);
+
+/* Screen buffer output switch (editor_screen.c): true = GUI renders the cells */
+extern bool screen_headless;
+
 /* Forward declarations for cross-module calls */
 void end(void);
 void debugalltoggle(void);

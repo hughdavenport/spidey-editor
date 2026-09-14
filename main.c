@@ -997,7 +997,7 @@ static void print_subcommands(FILE *out) {
     fprintf(out, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
     fprintf(out, "    find_sprite SPRITENAME               - Find a sprite\n");
     fprintf(out, "    render ROOMID|all|montage OUT|DIR    - Render room(s) to PNG (--debug --scale N --data-dir DIR)\n");
-    fprintf(out, "    gui [--data-dir DIR]                 - Hot-reloadable raylib GUI editor\n");
+    fprintf(out, "    gui [--data-dir DIR] [--scale N]     - Hot-reloadable raylib GUI editor (terminal-editor keys)\n");
     fprintf(out, "    editor                               - Start the text-mode editor\n");
     fprintf(out, "    help                                 - Display this message\n");
 }
@@ -1294,10 +1294,14 @@ int main(int argc, char **argv) {
         } else if (strcasecmp(argv[0], "gui") == 0) {
             argv ++; argc --;
             const char *data_dir = ".";
-            while (argc > 0 && strcmp(argv[0], "--data-dir") == 0 && argc >= 2) {
-                data_dir = argv[1]; argv += 2; argc -= 2;
+            int scale = 0;
+            while (argc >= 2) {
+                if (strcmp(argv[0], "--data-dir") == 0)   { data_dir = argv[1]; }
+                else if (strcmp(argv[0], "--scale") == 0) { scale = atoi(argv[1]); }
+                else break;
+                argv += 2; argc -= 2;
             }
-            int rc = gui_main(&file, data_dir);
+            int rc = gui_main(&file, data_dir, scale);
             ARRAY_FREE(rooms);
             ARRAY_FREE(patches);
             freeRoomFile(&file);
