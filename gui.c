@@ -88,6 +88,7 @@ typedef struct {
     bool pix_op;            // this frame's mouse event went to the pixel editor (for `u` routing)
     int focus;              // which panel arrows / hjkl move: the room, the picker, the pixel editor, its colours, its buttons, or the world map
     int btn_sel;            // FOCUS_BUTTONS: the reset / tiles / sprites / backs / block button the keyboard is on
+    int btn_row;            // FOCUS_BUTTONS: 0 = those, 1 = the pass / solid / magnet / slip row (tiles view)
     int block_hidden;       // block object whose panel was closed with "gfx" (-1 none)
     int ecx, ecy;           // keyboard cursor in the pixel / block editor grid
     bool eyedrop;           // next click anywhere picks that colour
@@ -390,8 +391,11 @@ static void focus_move(GuiState *g, int dx, int dy) {
         g->world_sel = ((g->world_sel + dx + 8 * dy) % 64 + 64) % 64;
     } else if (g->focus == FOCUS_COLOURS) {           // the 8 x 2 swatches: moving selects
         g->sel_colour = ((g->sel_colour + dx + 8 * dy) % 16 + 16) % 16;
-    } else if (g->focus == FOCUS_BUTTONS) {           // a row of buttons: left / right
-        int n = pixed_button_count(g);
+    } else if (g->focus == FOCUS_BUTTONS) {           // two rows of buttons: left / right along a row, up / down between them
+        bool attrs = !g->sprites_view && !g->backs_view;  // the attribute row exists in the tiles view only
+        if (dy && attrs) g->btn_row = !g->btn_row;
+        if (!attrs) g->btn_row = 0;
+        int n = g->btn_row ? 4 : pixed_button_count(g);
         g->btn_sel = ((g->btn_sel + dx) % n + n) % n;
     } else if (g->focus == FOCUS_EDITOR) {
         int bi, bx, by, w, h;
@@ -409,7 +413,8 @@ static void focus_apply(GuiState *g) {
     if (g->focus == FOCUS_WORLD) {
         ged_map_click(g->world_sel, false);
     } else if (g->focus == FOCUS_BUTTONS) {
-        pixed_button_press(g, g->btn_sel);
+        if (g->btn_row && !g->sprites_view && !g->backs_view) g->sel_attr = ATTRS[g->btn_sel % 4].bits;
+        else pixed_button_press(g, g->btn_sel % pixed_button_count(g));
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
         if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
@@ -1456,8 +1461,9 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
             Rectangle rb = attr_button(g, i);
             bool on = ATTRS[i].bits == g->sel_attr;
+            bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 1 && i == g->btn_sel % 4;
             DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-            DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
+            DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
             int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
             gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
         }
@@ -1466,7 +1472,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     for (int i = 0; i < pixed_button_count(g); i++) {
         Rectangle rb = pixed_button(g, i);
         bool on = (i == 1 && !g->sprites_view && !g->backs_view) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view);
-        bool kbd = g->focus == FOCUS_BUTTONS && i == g->btn_sel;
+        bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 0 && i == g->btn_sel;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
@@ -1545,15 +1551,18 @@ static void draw_world_map(GuiState *g) {
     world_geom(g, &tw, &th);
     for (int r = 0; r < 64; r++) {
         Rectangle d = world_cell(g, r, tw, th);
-        if (!rooms->rooms[r].valid) { DrawRectangleRec(d, (Color){25, 25, 30, 255}); continue; }
-        DrawTexturePro(g->atlas, (Rectangle){(r % 8) * ROOM_PX_W, (r / 8) * ROOM_PX_H, ROOM_PX_W, ROOM_PX_H}, d, (Vector2){0, 0}, 0, WHITE);
-        const char *side = r == cur->room_north ? "N" : r == cur->room_south ? "S" :
-                           r == cur->room_west ? "W" : r == cur->room_east ? "E" : NULL;
-        if (r == ged_room()) DrawRectangleLinesEx(d, 2, YELLOW);
-        else if (side) {
-            DrawRectangleLinesEx(d, 2, SKYBLUE);
-            DrawRectangle((int)d.x, (int)d.y, cw(g) + 2, ch(g), (Color){0, 0, 0, 170});
-            gtext(&g->font, g->font_loaded, side, (int)d.x + 1, (int)d.y, fs, SKYBLUE);
+        if (!rooms->rooms[r].valid) {                    // an empty slot: a click or Enter creates the room
+            DrawRectangleRec(d, (Color){25, 25, 30, 255});
+        } else {
+            DrawTexturePro(g->atlas, (Rectangle){(r % 8) * ROOM_PX_W, (r / 8) * ROOM_PX_H, ROOM_PX_W, ROOM_PX_H}, d, (Vector2){0, 0}, 0, WHITE);
+            const char *side = r == cur->room_north ? "N" : r == cur->room_south ? "S" :
+                               r == cur->room_west ? "W" : r == cur->room_east ? "E" : NULL;
+            if (r == ged_room()) DrawRectangleLinesEx(d, 2, YELLOW);
+            else if (side) {
+                DrawRectangleLinesEx(d, 2, SKYBLUE);
+                DrawRectangle((int)d.x, (int)d.y, cw(g) + 2, ch(g), (Color){0, 0, 0, 170});
+                gtext(&g->font, g->font_loaded, side, (int)d.x + 1, (int)d.y, fs, SKYBLUE);
+            }
         }
         if (r == g->hover_room) DrawRectangleLinesEx(d, 2, WHITE);
         if (g->focus == FOCUS_WORLD && r == g->world_sel) DrawRectangleLinesEx((Rectangle){d.x - 2, d.y - 2, d.width + 4, d.height + 4}, 2, GOLD);
