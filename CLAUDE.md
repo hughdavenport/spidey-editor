@@ -129,7 +129,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   the new chunk for editing exactly as `C` / `c[n]` would.
 - Clicks on the info text below the map are handled in the editor itself (`panel_click()` in
   editor_input.c, so the terminal mouse gets them too): the row's text is parsed back from the
-  drawn screen — "switch NN"/"switch id NN" opens that switch (`s`+id, Ctrl-S), a "(NN) type"
+  drawn screen — "switch NN"/"switch id NN" opens that switch (`s`+id, Ctrl-S; a click on its
+  (entry)= / (once)= / (side)= token also flips that field, the side clockwise), a "(NN) type"
   chunk line selects that chunk, "sprite N"/"block N" goes to the object, a room field label
   (bkgrnd, dmg, left, ...) opens Ctrl-R on that field. Any click first Escapes out of the
   current mode (`editor_cancel_to_plain()`); in room-choosing states a click on the room list

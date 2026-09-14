@@ -1643,9 +1643,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     break;
                             }
 
-                            scr_printf(" (value_without_direction)=");
+                            scr_printf(" (value)=");
                             PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
-                            scr_printf(" (value_raw)=");
+                            scr_printf(" (raw)=");
                             if (state->current_chunk == i) {
                                 if (state->partial_byte) {
                                     if (state->debug.hex) {
@@ -1903,9 +1903,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                         break;
                                 }
 
-                                scr_printf(" (value_without_direction)=");
+                                scr_printf(" (value)=");
                                 PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
-                                scr_printf(" (value_raw)=");
+                                scr_printf(" (raw)=");
                                 PRINTF_DATA(chunk->value);
                             }; break;
 

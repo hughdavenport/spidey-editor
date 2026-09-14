@@ -3710,6 +3710,23 @@ static bool panel_click(int row, int col) {
     if (strncmp(t, "switch id ", 10) == 0 || strncmp(t, "switch ", 7) == 0) {
         if (!parse_num(t + (strncmp(t, "switch id ", 10) == 0 ? 10 : 7), &v)) return false;
         open_switch(v);
+        /* a click on the (entry)=, (once)= or (side)= token flips that field */
+        if (state->current_state == EDIT_SWITCHDETAILS) {
+            static const char *labels[] = { "(entry)=", "(once)=", "(side)=" };
+            for (int i = 0; i < 3; i++) {
+                const char *hit = strstr(text, labels[i]);
+                if (hit == NULL) continue;
+                int pos = (int)(hit - text), end = pos + (int)strlen(labels[i]);
+                while (text[end] && text[end] != ' ') end++;            /* ... through its value */
+                if (col < pos || col >= end) continue;
+                const char *val = hit + strlen(labels[i]);
+                if (i == 0) feed_char('e');
+                else if (i == 1) feed_char('o');
+                else feed_char(strncmp(val, "TOP", 3) == 0 ? 'l' : strncmp(val, "RIGHT", 5) == 0 ? 'j'   /* clockwise */
+                               : strncmp(val, "BOTTOM", 6) == 0 ? 'h' : 'k');
+                break;
+            }
+        }
         return true;
     }
     if (t[0] == '(' && parse_num(t + 1, &v) && strstr(t, ") type") ) {   /* chunk line: find its switch header above */
