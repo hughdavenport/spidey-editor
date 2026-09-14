@@ -518,6 +518,75 @@ void render_show_player(RenderCtx *ctx, bool show) {
 
 int render_player_frame(void) { return PLAYER_FRAME; }
 
+const uint8_t (*render_palette(void))[3] { return PAL; }
+
+int render_tile_pixel(RenderCtx *ctx, int tile, int x, int y) {
+    if (ctx == NULL || x < 0 || x > 7 || y < 0 || y > 7 || (size_t)(tile * 32 + 31) >= ctx->a.blocks_len) return 0;
+    const uint8_t *base = ctx->a.blocks + tile * 32;
+    int c = 0;
+    for (int p = 0; p < 4; p++) c |= ((base[p * 8 + y] >> (7 - x)) & 1) << PLANE_ORDER[p];
+    return c;
+}
+
+void render_tile_set_pixel(RenderCtx *ctx, int tile, int x, int y, int colour) {
+    if (ctx == NULL || x < 0 || x > 7 || y < 0 || y > 7 || (size_t)(tile * 32 + 31) >= ctx->a.blocks_len) return;
+    uint8_t *base = ctx->a.blocks + tile * 32;
+    for (int p = 0; p < 4; p++) {
+        uint8_t mask = (uint8_t)(1 << (7 - x));
+        if ((colour >> PLANE_ORDER[p]) & 1) base[p * 8 + y] |= mask;
+        else base[p * 8 + y] &= (uint8_t)~mask;
+    }
+}
+
+bool render_tile_get(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]) {
+    if (ctx == NULL || tile < 0 || (size_t)(tile * TILE_BYTES + TILE_BYTES) > ctx->a.blocks_len) return false;
+    memcpy(out, ctx->a.blocks + tile * TILE_BYTES, TILE_BYTES);
+    return true;
+}
+
+void render_tile_put(RenderCtx *ctx, int tile, const uint8_t in[TILE_BYTES]) {
+    if (ctx == NULL || tile < 0 || (size_t)(tile * TILE_BYTES + TILE_BYTES) > ctx->a.blocks_len) return;
+    memcpy(ctx->a.blocks + tile * TILE_BYTES, in, TILE_BYTES);
+}
+
+bool render_tile_original(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]) {
+    if (ctx == NULL || tile < 0) return false;
+    char path[1100];
+    snprintf(path, sizeof path, "%s/BLOCKS.EGA.orig", ctx->dir);
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {                                // nothing saved yet: the file on disk is original
+        snprintf(path, sizeof path, "%s/BLOCKS.EGA", ctx->dir);
+        f = fopen(path, "rb");
+    }
+    if (f == NULL) return false;
+    bool ok = fseek(f, (long)tile * TILE_BYTES, SEEK_SET) == 0 && fread(out, 1, TILE_BYTES, f) == TILE_BYTES;
+    fclose(f);
+    return ok;
+}
+
+bool render_save_blocks(RenderCtx *ctx) {
+    if (ctx == NULL) return false;
+    char path[1100], orig[1100];
+    snprintf(path, sizeof path, "%s/BLOCKS.EGA", ctx->dir);
+    snprintf(orig, sizeof orig, "%s/BLOCKS.EGA.orig", ctx->dir);
+    struct stat st;
+    if (stat(orig, &st) != 0) {                     // keep the untouched original once
+        FILE *in = fopen(path, "rb"), *out = in ? fopen(orig, "wb") : NULL;
+        if (in && out) {
+            uint8_t buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, n, out);
+        }
+        if (in) fclose(in);
+        if (out) fclose(out);
+    }
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) { fprintf(stderr, "render: cannot write %s: %s\n", path, strerror(errno)); return false; }
+    bool ok = fwrite(ctx->a.blocks, 1, ctx->a.blocks_len, f) == ctx->a.blocks_len;
+    fclose(f);
+    return ok;
+}
+
 void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out) {
     memset(out, 0, (size_t)SPIDS_FRAME_W * SPIDS_FRAME_H * 4);
     if (ctx == NULL) return;

@@ -400,8 +400,18 @@ static void draw_switch_chunks_brief(struct SwitchObject *sw, int cx, int cy, in
     }
 }
 
+/* Where redraw() put the out-of-bounds switch list (GUI pins it and makes the
+ * entries clickable): text rows [oob_row0, oob_row1), and for each listed
+ * switch the row of its header line. */
+int panel_oob_row0 = -1, panel_oob_row1 = -1;
+int panel_oob_switch_row[16];
+int panel_oob_switch_id[16];
+size_t panel_oob_switch_n = 0;
+
 void redraw() {
 #define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
+    panel_oob_row0 = panel_oob_row1 = -1;
+    panel_oob_switch_n = 0;
 
     /* Guard before any GOTO: terminal must meet the absolute floor.
      * The existing check further down handles the debug-panel overage case. */
@@ -1717,6 +1727,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 break;
             }
         }
+        if (found) panel_oob_row0 = bottom;
         if (found) {
             GOTO(0, bottom);
             scr_printf("\n\nOut of bounds switches:\n");
@@ -1727,6 +1738,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             int x = sw->chunks.data[0].x;
             int y = sw->chunks.data[0].y;
             if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
+                if (panel_oob_switch_n < 16) { panel_oob_switch_row[panel_oob_switch_n] = bottom; panel_oob_switch_id[panel_oob_switch_n++] = (int)s; }
                 GOTO(0, bottom); bottom ++;
 #define BOOL_S(b) ((b) ? "true" : "false")
                 if (state->current_state == EDIT_SWITCHDETAILS && state->current_switch == s) {
@@ -1907,6 +1919,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 #undef BOOL_S
             }
         }
+        if (found) panel_oob_row1 = bottom;
     }
 
     if (state->debug.objects) {

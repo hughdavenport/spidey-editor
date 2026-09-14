@@ -49,6 +49,20 @@ void render_spids_rgba(RenderCtx *ctx, int frame, uint8_t *out);
 // The frame the game shows for the standing player.
 int render_player_frame(void);
 
+// Tile pixel editing (BLOCKS.EGA in the context's data dir). Colours are
+// palette indices 0..15; render_palette() gives their RGB.
+int  render_tile_pixel(RenderCtx *ctx, int tile, int x, int y);
+void render_tile_set_pixel(RenderCtx *ctx, int tile, int x, int y, int colour);
+// Write BLOCKS.EGA back (a one-time BLOCKS.EGA.orig backup is kept beside it).
+bool render_save_blocks(RenderCtx *ctx);
+#define TILE_BYTES 32
+// Raw 32-byte tile data (for undo), and the tile as it is in BLOCKS.EGA.orig
+// (or the unedited file on disk) for "reset tile".
+bool render_tile_get(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]);
+void render_tile_put(RenderCtx *ctx, int tile, const uint8_t in[TILE_BYTES]);
+bool render_tile_original(RenderCtx *ctx, int tile, uint8_t out[TILE_BYTES]);
+const uint8_t (*render_palette(void))[3];
+
 #define TILESET_PX 64   // 8x8 grid of 8x8 tiles = the 64 tiles of one tileset
 
 // Render the 64 foreground (BLOCKS) tiles for `tile_offset` into `out`

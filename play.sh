@@ -1,7 +1,17 @@
 #!/bin/bash
 
 SPIDEY_DIR=${SPIDEY_DIR:-Spider}
-cp ROOMS.SPL $SPIDEY_DIR
+# tiles edited in the GUI (BLOCKS.EGA in its data dir, here if that was .)
+if [ -f BLOCKS.EGA ] && [ BLOCKS.EGA -nt "$SPIDEY_DIR/BLOCKS.EGA" ]; then cp BLOCKS.EGA "$SPIDEY_DIR/"; fi
+# PLAY_ROOM (set by the editor's Ctrl-P) = start in that room: it is swapped
+# into slot 1, the game's start room, in the copy the game runs from.
+if [ -n "${PLAY_ROOM:-}" ] && [ "$PLAY_ROOM" != 1 ]; then
+    tmp=$(mktemp)
+    ./a.out display "$PLAY_ROOM" > "$tmp" && ./a.out importRoom 1 "$tmp" "$SPIDEY_DIR/ROOMS.SPL"
+    rm -f "$tmp"
+else
+    cp ROOMS.SPL $SPIDEY_DIR
+fi
 cd $SPIDEY_DIR
 dosbox-x -nopromptfolder SPIDEY.EXE 2>/dev/null &
 db=$!

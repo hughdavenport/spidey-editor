@@ -255,9 +255,16 @@ Key parse_key(const char *buf, int *i, int n);
 /* Key dispatch (editor_input.c): macro layer + current state's handler */
 void editor_handle_key(Key key);
 bool editor_replay_step(void);
+void editor_cancel_to_plain(void);        /* Escape out to NORMAL/TILE_EDIT */
+void editor_feed_room_number(int room);   /* type a room id into a room-choosing state */
 
 /* Screen buffer output switch (editor_screen.c): true = GUI renders the cells */
 extern bool screen_headless;
+/* Out-of-bounds switch list placement recorded by redraw() (editor_draw.c) */
+extern int panel_oob_row0, panel_oob_row1;
+extern int panel_oob_switch_row[16], panel_oob_switch_id[16];
+extern size_t panel_oob_switch_n;
+
 /* GUI helpers (editor_actions.c) */
 bool transfer_item_to_room(size_t room_idx);
 int  switch_add_chunk(size_t sw_idx, struct SwitchChunk chunk);

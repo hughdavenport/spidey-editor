@@ -12,6 +12,7 @@ mkdir -p "$T"
 R=$(cd "$(dirname "$0")" && pwd)
 cd $R
 cp ROOMS.SPL $T/ROOMS.SPL.bak
+cp Spider/BLOCKS.EGA $T/BLOCKS.EGA.bak; had_orig=0; [ -e Spider/BLOCKS.EGA.orig ] && had_orig=1
 pkill -f "^Xvfb :97" 2>/dev/null; sleep 0.3
 Xvfb :97 -screen 0 1600x1200x24 -nolisten tcp >/dev/null 2>&1 &
 XV=$!
@@ -23,9 +24,14 @@ GP=$!
 WD=$!
 snap() { import -window root "$T/$1.png"; }
 sleep 4; snap s1-start
+eval $(xdotool search --name "Spidey Editor" getwindowgeometry --shell | head -5)
+echo "window at $X,$Y size ${WIDTH}x${HEIGHT}"
 xdotool key ctrl+shift+slash; sleep 0.5; snap s2-nohelp
 xdotool key l l l j j; sleep 0.5; snap s3-moved
 xdotool key r; sleep 0.4; snap s4a-gotoroom-list; xdotool type 02; sleep 0.6; snap s4-room2
+xdotool key r; sleep 0.3; xdotool type 03; sleep 0.6; snap s4b-lift
+xdotool mousemove $((X + 30)) $((Y + HEIGHT - 60)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s4c-lift-oob-click
+xdotool key r; sleep 0.3; xdotool type 02; sleep 0.6
 xdotool key ctrl+r; sleep 0.5; snap s5-roomdetails
 xdotool key Escape; sleep 0.3
 xdotool key F2; sleep 0.5; snap s6-hexmap
@@ -34,9 +40,6 @@ xdotool key Escape; sleep 0.3
 xdotool key s; sleep 0.5; snap s8a-gotoswitch-mode; xdotool type 0; sleep 0.5; snap s8-gotoswitch
 xdotool key o; sleep 0.5; snap s8b-gotoobject-mode; xdotool key Escape; sleep 0.3
 xdotool key ctrl+shift+slash; sleep 0.5; snap s8c-help-overlay; xdotool key ctrl+shift+slash; sleep 0.3
-# window is at the Xvfb origin? find it
-eval $(xdotool search --name "Spidey Editor" getwindowgeometry --shell | head -5)
-echo "window at $X,$Y size ${WIDTH}x${HEIGHT}"
 # picture scale 3: tile = 24 px, picture origin (0,24). left click on tile (10,5)
 xdotool mousemove $((X + 10*24 + 12)) $((Y + 24 + 5*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s9-click
 # drag: room 1, pull the helicopter block (9,15) two tiles right; the cursor must stay put
@@ -46,9 +49,17 @@ xdotool mousemove_relative 24 0; sleep 0.1; xdotool mousemove_relative 24 0; sle
 xdotool mouseup 1; sleep 0.6; snap s9c-dragged
 xdotool key u; sleep 0.5
 xdotool key r; sleep 0.2; xdotool type 02; sleep 0.5
+# tile pixel editor (right of the palette): pick colour 2 (red), paint pixel (1,1) of tile 0x12
+xdotool mousemove $((X + 776 + 192 + 16 + 2*9 + 4)) $((Y + 24 + 8*9 + 8 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.2
+xdotool mousemove $((X + 776 + 192 + 16 + 1*9 + 4)) $((Y + 24 + 1*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12b-pixel-edit
+xdotool key u; sleep 0.8; snap s12c-pixel-undo   # u undoes the stroke (most recent edit)
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
 # thumbs start at y = 24 + 192 + 8 + 8*24 + 8 = 424, 8 across the remaining width
 xdotool mousemove $((X + 776 + 1*97 + 40)) $((Y + 424 + 30)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
+# wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
+xdotool mousemove $((X + 400)) $((Y + 24 + 200)) click 5; sleep 0.4; snap s13b-wheel-bkgrnd
+xdotool keydown shift; xdotool click 4; xdotool keyup shift; sleep 0.4; snap s13c-wheel-tileset
+xdotool key u; sleep 0.3; xdotool key u; sleep 0.3
 # wheel over the text panel scrolls it (room 1 has a short panel: no-op is fine)
 xdotool mousemove $((X + 200)) $((Y + 24 + 528 + 40)) click 5 click 5; sleep 0.3; snap s14-scrolled
 # switch link: open switch 0 in Midnight (goto switch, Ctrl-S), right-click object O1 (R2D2 at 26,7)
@@ -70,4 +81,6 @@ wait $GP 2>/dev/null; echo "gui exit=$?"
 kill $WD 2>/dev/null; kill $XV 2>/dev/null
 if cmp -s ROOMS.SPL $T/ROOMS.SPL.bak; then echo "ROOMS unchanged (paint did not write!)"; else echo "ROOMS changed by paint (expected)"; ./a.out display 1 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | sed -n 6,7p; fi
 cp $T/ROOMS.SPL.bak ROOMS.SPL && echo restored
+if [ $had_orig = 0 ] && [ -e Spider/BLOCKS.EGA.orig ]; then echo "BLOCKS.EGA was written by the pixel edit (expected)"; else echo "BLOCKS.EGA never written (pixel edit did not save!)"; fi
+cp $T/BLOCKS.EGA.bak Spider/BLOCKS.EGA; [ $had_orig = 0 ] && rm -f Spider/BLOCKS.EGA.orig
 tail -8 $T/gui.log

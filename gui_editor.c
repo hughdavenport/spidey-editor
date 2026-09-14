@@ -241,14 +241,52 @@ void ged_map_click(int room, bool right) {
         }
         return;
     }
-    if (plain_state() || state->current_state == GOTO_ROOM) {
-        if (state->current_state == GOTO_ROOM) { state->current_state = state->previous_state; state->previous_state = NORMAL; }
-        state->current_level = (size_t)room;
-        state->partial_byte = 0;
-        state->current_switch = 0;
-        state->switch_on = false;
-        state->current_chunk = 0;
+    // choosing a room (goto room, a room link, a chunk's room): this is the choice;
+    // otherwise drop whatever was in progress and go there
+    if (state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM ||
+            state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM) {
+        editor_feed_room_number(room);
+        return;
     }
+    editor_cancel_to_plain();
+    state->current_level = (size_t)room;
+    state->partial_byte = 0;
+    state->current_switch = 0;
+    state->switch_on = false;
+    state->current_chunk = 0;
+}
+
+void ged_oob_rows(int *r0, int *r1) { *r0 = panel_oob_row0; *r1 = panel_oob_row1; }
+int ged_oob_switch_at_row(int row) {
+    for (size_t i = 0; i < panel_oob_switch_n; i++)
+        if (panel_oob_switch_row[i] == row) return panel_oob_switch_id[i];
+    return -1;
+}
+bool ged_is_oob_marker(int col, int row) {
+    struct DecompressedRoom *room = cur_room();
+    for (size_t i = 0; i < room->num_switches; i++) {
+        struct SwitchObject *sw = room->switches + i;
+        if (sw->chunks.length == 0) continue;
+        int x = sw->chunks.data[0].x, y = sw->chunks.data[0].y;
+        if ((x >= WIDTH_TILES || y >= HEIGHT_TILES) && row == y + 1 && (col == 2 * x || col == 2 * x + 1)) return true;
+    }
+    return false;
+}
+
+void ged_adjust_room(int dbackground, int dtileset) {
+    if (!plain_state() || (dbackground == 0 && dtileset == 0)) return;
+    struct DecompressedRoom *room = cur_room();
+    push_undo((uint8_t)state->current_level, false);
+    if (dbackground) room->background = (uint8_t)((room->background + 64 + dbackground) % 64);
+    if (dtileset) {
+        int t = (int)room->tile_offset / 4 * 4 + 4 * dtileset;    // the game uses multiples of 4, 0..28
+        while (t < 0) t += 32;
+        room->tile_offset = (uint8_t)(t % 32);
+    }
+    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+    snprintf(state->status_message, sizeof(state->status_message), "bkgrnd %d tileset %d",
+             room->background, room->tile_offset);
+    assert(writeRooms(&state->rooms));
 }
 
 int ged_linking(void) {
@@ -287,6 +325,11 @@ void ged_link_switch(int switch_idx) {
 }
 
 /* --- painting ------------------------------------------------------------- */
+
+int ged_tile_at(int tx, int ty) {
+    if (tx < 0 || tx >= WIDTH_TILES || ty < 0 || ty >= HEIGHT_TILES) return 0;
+    return cur_room()->tiles[TILE_IDX(tx, ty)];
+}
 
 void ged_paint_begin(void) { push_undo((uint8_t)state->current_level, false); }
 

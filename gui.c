@@ -14,7 +14,8 @@
 //
 // GUI-only extras: F2 shows the hex map instead of the picture; Spider-Man
 // is drawn at the cursor as a size reference; a tileset palette sits right of
-// the picture (click a tile, Shift+drag or middle-drag in the room paints it);
+// the picture (click a tile, Shift+drag in the room paints it, middle-click a
+// room tile picks it), with a pixel editor for the selected tile beside it;
 // under it a world map of every room (click = go there, right-click = move
 // the thing under the cursor there); the text under the picture scrolls with
 // the wheel. Switch links: with a switch open (Ctrl-S), right-click an object
@@ -37,7 +38,8 @@
 #define DEFAULT_SCALE 3
 #define MIN_PANEL_ROWS 12       // text rows kept visible under the picture when auto-scaling
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
-#define PALETTE_LINES 8         // text lines under the palette before the world map
+#define PALETTE_LINES 9         // text lines under the palette before the world map
+#define PIXEL_ZOOM 3            // tile editor pixel = PIXEL_ZOOM * scale px (a 24x24 tile at scale 3)
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
@@ -91,7 +93,19 @@ typedef struct {
     bool help_font_loaded;
     int help_font_cw;
     int help_font_px;
+    int sel_colour;         // tile pixel editor: colour to paint with
+    bool pix_painting;      // pixel stroke in progress
+    bool blocks_dirty;      // edited BLOCKS.EGA not yet written
+    float blocks_timer;
+    struct { int tile; uint8_t data[TILE_BYTES]; } pix_undo[64];   // tile before each pixel stroke / reset
+    int pix_undo_n;
+    unsigned seq, pix_seq, key_seq;   // ordering of pixel strokes vs editor keys, for `u`
+    Font panel_font;        // text under the picture: a touch smaller so PANEL_COLS fit its width
+    bool panel_font_loaded;
+    int panel_font_cw;
+    int panel_font_px;
 } GuiState;
+#define PANEL_COLS 84           // columns of panel text that fit across the picture
 #define MOD_LATCH_FRAMES 3
 
 static const char *FONT_CANDIDATES[] = {
@@ -102,6 +116,17 @@ static const char *FONT_CANDIDATES[] = {
 
 /* --------------------------------------------------------------- geometry */
 
+static int  panel_top(GuiState *g);
+static int  pinned_top(GuiState *g);
+static int  pch(GuiState *g);
+static int  pcw(GuiState *g);
+static int  oob_rows(int *r0);
+static int  world_room_at(GuiState *g, Vector2 m);
+static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
+static Rectangle reset_button(GuiState *g);
+static void pix_undo_push(GuiState *g, int tile);
+static bool pix_undo_pop(GuiState *g);
+
 static int cw(GuiState *g) { return 4 * g->scale; }        // text cell width
 static int ch(GuiState *g) { return 8 * g->scale; }        // text cell height (= one tile)
 static int pic_w(GuiState *g) { return ROOM_PX_W * g->scale; }
@@ -111,6 +136,11 @@ static int pic_y(GuiState *g) { return GED_MAP_Y * ch(g); }
 static bool in_map_band(int y) { return y >= GED_MAP_Y && y < GED_MAP_Y + HEIGHT_TILES; }
 static int palette_x(GuiState *g) { return pic_x(g) + pic_w(g) + PAD; }
 static int palette_y(GuiState *g) { return pic_y(g); }
+// tile pixel editor: 8x8 zoomed pixels right of the palette, colour swatches under it
+static int pixed_x(GuiState *g) { return palette_x(g) + TILESET_PX * g->scale + 2 * PAD; }
+static int pixed_px(GuiState *g) { return PIXEL_ZOOM * g->scale; }
+static int swatch_px(GuiState *g) { return pixed_px(g); }
+static int swatch_y(GuiState *g) { return palette_y(g) + 8 * pixed_px(g) + PAD; }
 static int window_w(GuiState *g) { return palette_x(g) + SIDE_COLS * cw(g) + PAD; }
 static int window_h(GuiState *g) { return INIT_ROWS * ch(g); }
 
@@ -137,15 +167,34 @@ static bool mouse_tile(GuiState *g, int *tx, int *ty) {
     return true;
 }
 
-// Text cell under the mouse (the space right of the picture is the palette,
-// not cells).
+// Text cell under the mouse. Header and map band are plain cells; below the
+// picture the rows are the scrolled panel (out-of-bounds list skipped) and
+// then the pinned out-of-bounds list. The space right of the picture is the
+// palette / world map, not cells.
 static bool mouse_cell(GuiState *g, int *col, int *row) {
     Vector2 m = GetMousePosition();
     if (m.x < 0 || m.y < 0) return false;
-    *col = (int)m.x / cw(g);
-    *row = (int)m.y / ch(g);
-    if (in_map_band(*row) && *col >= GED_MAP_X + MAP_COLS) return false;
-    return *col < GED_COLS && *row < GED_ROWS;
+    int px = (int)m.x, py = (int)m.y;
+    if (py < panel_top(g)) {
+        *col = px / cw(g);
+        *row = py / ch(g);
+        if (in_map_band(*row) && *col >= GED_MAP_X + MAP_COLS) return false;
+        return *col < GED_COLS && *row < GED_ROWS;
+    }
+    if (px >= pic_w(g)) return false;
+    *col = px / pcw(g);
+    int r0, n = oob_rows(&r0);
+    if (n && py >= pinned_top(g) && py < pinned_top(g) + n * pch(g)) {
+        *row = r0 + (py - pinned_top(g)) / pch(g);
+        return true;
+    }
+    if (py >= pinned_top(g)) return false;
+    int want = (py - panel_top(g)) / pch(g) + g->scroll, v = 0;
+    for (int y = GED_MAP_Y + HEIGHT_TILES; y < GED_ROWS - 1; y++) {
+        if (n && y >= r0 && y < r0 + n) continue;
+        if (v++ == want) { *row = y; return true; }
+    }
+    return false;
 }
 
 /* ---------------------------------------------------------------- helpers */
@@ -205,10 +254,6 @@ static void load_fonts(GuiState *g) {
 
 /* ------------------------------------------------------------------ input */
 
-static int  panel_top(GuiState *g);
-static int  world_room_at(GuiState *g, Vector2 m);
-static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
-
 // Modifier bits from the keys currently held.
 static uint8_t mods(void) {
     uint8_t m = 0;
@@ -248,6 +293,9 @@ static bool feed_keys(GuiState *g) {
     // printable characters: shift is already applied; Alt rides along as a modifier
     for (int c = GetCharPressed(); c != 0; c = GetCharPressed()) {
         if (c < 0x20 || c > 0x7e) continue;
+        // `u` undoes the last pixel stroke when that was the most recent edit
+        if (c == 'u' && g->pix_undo_n && g->pix_seq > g->key_seq && ged_linking() == 0) { pix_undo_pop(g); any = true; continue; }
+        g->key_seq = ++g->seq;
         GKey k = { .code = GK_CHAR, .ch = (char)c, .mod = (uint8_t)((held | seen_any) & GK_MOD_ALT) };
         SEND(k);
     }
@@ -263,6 +311,10 @@ static bool feed_keys(GuiState *g) {
         if (rk >= KEY_A && rk <= KEY_Z) {
             if (!(m & GK_MOD_CTRL)) continue;                          // plain letters arrived as chars
             k.code = GK_CTRL; k.ch = (char)('A' + rk - KEY_A); k.mod = (uint8_t)(m & GK_MOD_ALT);
+            if (k.ch == 'P' && g->blocks_dirty) {                      // play: the game must see the edited tiles
+                render_save_blocks(g->rctx); g->blocks_dirty = false;
+            }
+            g->key_seq = ++g->seq;
         } else if ((rk == KEY_SLASH || rk == KEY_MINUS) && (m & GK_MOD_CTRL)) {
             k.code = GK_CTRL; k.ch = '_'; k.mod = 0;                   // Ctrl-? / Ctrl-_ : help
         } else switch (rk) {
@@ -303,9 +355,14 @@ static bool feed_mouse(GuiState *g) {
     int col = 0, row = 0;
     bool in_text = mouse_cell(g, &col, &row);
     uint8_t mod = mods();
-    bool paint_btn = IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) ||
-                     (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (mod & GK_MOD_SHIFT));
+    bool paint_btn = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (mod & GK_MOD_SHIFT);
     int tx, ty;
+
+    // middle click on the room: pick that tile into the palette (reverse picker)
+    if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) && mouse_tile(g, &tx, &ty)) {
+        g->sel_tile = (uint8_t)(ged_tile_at(tx, ty) & 0x3f);
+        return true;
+    }
 
     if (paint_btn && mouse_tile(g, &tx, &ty)) {
         ged_paint_begin();                        // one undo entry per stroke
@@ -316,7 +373,7 @@ static bool feed_mouse(GuiState *g) {
         return true;
     }
     if (g->painting) {
-        bool held = IsMouseButtonDown(MOUSE_BUTTON_MIDDLE) || IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+        bool held = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
         if (!held) { g->painting = false; }
         else if (mouse_tile(g, &tx, &ty) && (tx != g->paint_x || ty != g->paint_y)) {
             g->paint_x = tx; g->paint_y = ty;
@@ -336,12 +393,62 @@ static bool feed_mouse(GuiState *g) {
         }
     }
 
+    // wheel over the picture or the palette: background up/down; horizontal (or Shift+wheel): tileset
+    Vector2 wv = GetMouseWheelMoveV();
+    bool over_pic = m.x >= pic_x(g) && m.x < pic_x(g) + pic_w(g) && m.y >= pic_y(g) && m.y < panel_top(g);
+    bool over_pal = m.x >= palette_x(g) && m.x < palette_x(g) + TILESET_PX * g->scale &&
+                    m.y >= palette_y(g) && m.y < palette_y(g) + TILESET_PX * g->scale;
+    if ((wv.x != 0 || wv.y != 0) && (over_pic || over_pal)) {
+        int dt = (int)wv.x, db = (int)wv.y;
+        if (mod & GK_MOD_SHIFT) { dt = db; db = 0; }
+        ged_new_input_batch();
+        ged_adjust_room(db, dt);
+        return true;
+    }
     // wheel over the text under the picture scrolls it
-    float wheel = GetMouseWheelMove();
-    if (wheel != 0 && m.x < pic_w(g) && m.y >= panel_top(g)) {
+    float wheel = wv.y;
+    if (wheel != 0 && m.x < pic_w(g) && m.y >= panel_top(g) && m.y < pinned_top(g)) {
         g->scroll -= (int)wheel * 3;
         if (g->scroll < 0) g->scroll = 0;
         return true;
+    }
+
+    // tile pixel editor
+    {
+        int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g);
+        bool in_grid = m.x >= x0 && m.x < x0 + 8 * px && m.y >= y0 && m.y < y0 + 8 * px;
+        bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + 2 * sp;
+        if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            g->sel_colour = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
+            return true;
+        }
+        if (in_grid) {
+            int tx = (int)(m.x - x0) / px, ty = (int)(m.y - y0) / px, tile = g->sel_tile + g->pal_offset * 16;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_tile_pixel(g->rctx, tile, tx, ty); return true; }
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->pix_painting = true; pix_undo_push(g, tile); }
+            if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+                    render_tile_pixel(g->rctx, tile, tx, ty) != g->sel_colour) {
+                render_tile_set_pixel(g->rctx, tile, tx, ty, g->sel_colour);
+                g->blocks_dirty = true; g->blocks_timer = 0.6f;
+                g->pal_offset = -1;                       // rebuild the palette texture
+                return true;
+            }
+        }
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
+        if (g->pix_painting) return false;
+        // "reset tile" button: back to the tile as shipped (BLOCKS.EGA.orig)
+        Rectangle rb = reset_button(g);
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, rb)) {
+            int tile = g->sel_tile + g->pal_offset * 16;
+            uint8_t orig[TILE_BYTES];
+            if (render_tile_original(g->rctx, tile, orig)) {
+                pix_undo_push(g, tile);
+                render_tile_put(g->rctx, tile, orig);
+                g->blocks_dirty = true; g->blocks_timer = 0.6f;
+                g->pal_offset = -1;
+            }
+            return true;
+        }
     }
 
     // world map: hover names, left = go there, right = move the thing / retarget the chunk
@@ -449,31 +556,50 @@ static void draw_cell(const GCell *c, int px, int py, int cw, int ch, Font *font
 
 // Bottom of the picture = top of the scrolling text panel.
 static int panel_top(GuiState *g) { return pic_y(g) + pic_h(g); }
-static int panel_rows_visible(GuiState *g) { int r = (GetScreenHeight() - panel_top(g)) / ch(g); return r < 1 ? 1 : r; }
+static int pcw(GuiState *g) { int w = pic_w(g) / PANEL_COLS; return w < 4 ? 4 : w; }   // panel cell size
+static int pch(GuiState *g) { return 2 * pcw(g); }
 
-// Last text row under the map with anything on it (>= first panel row).
-static int panel_last_row(const GCell *cells, int stride) {
-    int last = GED_MAP_Y + HEIGHT_TILES - 1;
-    for (int y = GED_MAP_Y + HEIGHT_TILES; y < GED_ROWS - 1; y++)
+static void ensure_panel_font(GuiState *g) {
+    if (g->panel_font_loaded && g->panel_font_cw != pcw(g)) { UnloadFont(g->panel_font); g->panel_font_loaded = false; }
+    if (!g->panel_font_loaded) {
+        g->panel_font_loaded = load_mono(&g->panel_font, pcw(g), &g->panel_font_px);
+        g->panel_font_cw = pcw(g);
+    }
+}
+
+// The out-of-bounds switch list is pinned above the window's last row (the
+// editor's macro overlay); the rest of the panel scrolls between the picture
+// and it.
+static int oob_rows(int *r0) { int r1; ged_oob_rows(r0, &r1); return r1 > *r0 ? r1 - *r0 : 0; }
+static int pinned_top(GuiState *g) { int r0; return GetScreenHeight() - pch(g) - oob_rows(&r0) * pch(g); }
+static int panel_rows_visible(GuiState *g) { int r = (pinned_top(g) - panel_top(g)) / pch(g); return r < 1 ? 1 : r; }
+
+// Rows the scrolling part has (everything under the map except the pinned list).
+static int panel_content_rows(const GCell *cells, int stride) {
+    int r0, n = oob_rows(&r0), last = GED_MAP_Y + HEIGHT_TILES - 1, count = 0;
+    for (int y = GED_MAP_Y + HEIGHT_TILES; y < GED_ROWS - 1; y++) {
+        if (n && y >= r0 && y < r0 + n) continue;
+        count++;
         for (int x = 0; x < GED_COLS; x++) {
             const GCell *c = &cells[y * stride + x];
-            if (c->bg || (c->ch && c->ch != ' ')) { last = y; break; }
+            if (c->bg || (c->ch && c->ch != ' ')) { last = count; break; }
         }
-    return last;
+    }
+    return last < 0 ? 0 : last;
 }
 
 static int panel_max_scroll(GuiState *g) {
     int stride;
     const GCell *cells = ged_cells(&stride);
-    int content = panel_last_row(cells, stride) - (GED_MAP_Y + HEIGHT_TILES) + 1;
-    int m = content - panel_rows_visible(g);
+    int m = panel_content_rows(cells, stride) - panel_rows_visible(g);
     return m < 0 ? 0 : m;
 }
 
 // Everything the editor drew except the help box (right of the hex map; it
 // can run below the map band too — draw_help shows it as an overlay) and,
-// unless F2, the hex map itself. Rows under the map scroll (`scroll`); the
-// editor's last row (macro overlay) is pinned to the bottom of the window.
+// unless F2, the hex map itself. Rows under the map scroll (`scroll`) except
+// the out-of-bounds switch list, pinned at the bottom with clickable S# badges;
+// the editor's last row (macro overlay) is pinned below that.
 static void draw_text_screen(GuiState *g) {
     int stride;
     const GCell *cells = ged_cells(&stride);
@@ -481,22 +607,40 @@ static void draw_text_screen(GuiState *g) {
     int first_panel = GED_MAP_Y + HEIGHT_TILES;
     int max_scroll = panel_max_scroll(g);
     if (g->scroll > max_scroll) g->scroll = max_scroll;
-    BeginScissorMode(0, panel_top(g), pic_w(g), GetScreenHeight() - panel_top(g));
+    ensure_panel_font(g);
+    int r0, n = oob_rows(&r0), v = 0;
+    BeginScissorMode(0, panel_top(g), pic_w(g), pinned_top(g) - panel_top(g));
     for (int y = first_panel; y < GED_ROWS - 1; y++) {
-        int py = panel_top(g) + (y - first_panel - g->scroll) * ch(g);
-        if (py + ch(g) <= panel_top(g) || py >= GetScreenHeight()) continue;
+        if (n && y >= r0 && y < r0 + n) continue;
+        int py = panel_top(g) + (v++ - g->scroll) * pch(g);
+        if (py + pch(g) <= panel_top(g) || py >= pinned_top(g)) continue;
         for (int x = 0; x < GED_COLS; x++) {
             if (x >= GED_MAP_X + MAP_COLS && help) continue;
-            draw_cell(&cells[y * stride + x], x * cw(g), py, cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
+            if (ged_is_oob_marker(x, y)) continue;   // its S# badge is in the pinned list instead
+            draw_cell(&cells[y * stride + x], x * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
         }
     }
     EndScissorMode();
     if (max_scroll > 0) {                       // scrollbar along the picture's right edge
-        int top = panel_top(g), hgt = GetScreenHeight() - top, x = pic_w(g) - SCROLLBAR_W;
+        int top = panel_top(g), hgt = pinned_top(g) - top, x = pic_w(g) - SCROLLBAR_W;
         int total = max_scroll + panel_rows_visible(g);
         int th = hgt * panel_rows_visible(g) / total, ty = top + hgt * g->scroll / total;
         DrawRectangle(x, top, SCROLLBAR_W, hgt, (Color){40, 40, 40, 255});
         DrawRectangle(x + 1, ty, SCROLLBAR_W - 2, th < 12 ? 12 : th, (Color){170, 170, 170, 255});
+    }
+    if (n) {                                    // pinned out-of-bounds switch list
+        int top = pinned_top(g);
+        DrawLine(0, top - 1, pic_w(g), top - 1, (Color){90, 90, 90, 255});
+        for (int i = 0; i < n; i++) {
+            int y = r0 + i, py = top + i * pch(g), sw = ged_oob_switch_at_row(y);
+            int shift = sw >= 0 ? 3 : 0;        // room for the badge
+            for (int x = 0; x < GED_COLS; x++)
+                draw_cell(&cells[y * stride + x], (x + shift) * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
+            if (sw >= 0) {
+                DrawRectangle(0, py, 3 * pcw(g) - 2, pch(g), (Color){60, 20, 60, 255});
+                gtext(&g->panel_font, g->panel_font_loaded, TextFormat("S%d", sw), 2, py, g->panel_font_px, MAGENTA);
+            }
+        }
     }
     for (int y = 0; y < first_panel; y++) {     // header + (F2 / room list) map band
         for (int x = 0; x < GED_COLS; x++) {
@@ -507,7 +651,8 @@ static void draw_text_screen(GuiState *g) {
     }
     int last = GED_ROWS - 1;                    // macro slot overlay: pinned to the window bottom
     for (int x = 0; x < GED_COLS; x++)
-        draw_cell(&cells[last * stride + x], x * cw(g), GetScreenHeight() - ch(g), cw(g), ch(g), &g->font, g->font_loaded, g->font_px);
+        draw_cell(&cells[last * stride + x], x * pcw(g), GetScreenHeight() - pch(g), pcw(g), pch(g),
+                  &g->panel_font, g->panel_font_loaded, g->panel_font_px);
     if (text) {                                 // faint tile grid over the hex map
         Color grid = {255, 255, 255, 40};
         for (int tx = 0; tx <= WIDTH_TILES; tx++) DrawLineV(tile_pt(g, tx, 0), tile_pt(g, tx, HEIGHT_TILES), grid);
@@ -600,9 +745,10 @@ static void draw_palette(GuiState *g) {
     int link = ged_linking();
     const char *lines[] = {
         TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile),
-        "click a tile; Shift+drag or",
-        "middle-drag in the room paints",
-        "wheel scrolls the text below",
+        "click a tile; Shift+drag in the",
+        "room paints it; middle-click picks",
+        "wheel over room: background;",
+        "Shift+wheel: tileset; text: scroll",
         "",
         link ? TextFormat("switch %d open: right-click an object", link - 1)
              : "world map: click = go there",
@@ -614,7 +760,61 @@ static void draw_palette(GuiState *g) {
         gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs,
               i == 0 ? RAYWHITE : (link && i >= 5) ? ORANGE : GRAY);
     if (g->saved_flash > 0)
-        gtext(&g->font, g->font_loaded, "saved", x0 + (TILESET_PX + 8) * g->scale, y0, fs, GREEN);
+        gtext(&g->font, g->font_loaded, "saved", x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
+}
+
+static Rectangle reset_button(GuiState *g) {
+    int sp = swatch_px(g);
+    return (Rectangle){ pixed_x(g), swatch_y(g) + 2 * sp + 4 + 3 * ch(g), 12 * cw(g), ch(g) + 4 };
+}
+
+// Remember the tile as it is now, so the coming stroke (or reset) can be undone.
+static void pix_undo_push(GuiState *g, int tile) {
+    if (g->pix_undo_n == 64) { memmove(g->pix_undo, g->pix_undo + 1, 63 * sizeof g->pix_undo[0]); g->pix_undo_n--; }
+    g->pix_undo[g->pix_undo_n].tile = tile;
+    if (render_tile_get(g->rctx, tile, g->pix_undo[g->pix_undo_n].data)) g->pix_undo_n++;
+    g->pix_seq = ++g->seq;
+}
+
+static bool pix_undo_pop(GuiState *g) {
+    if (g->pix_undo_n == 0) return false;
+    g->pix_undo_n--;
+    render_tile_put(g->rctx, g->pix_undo[g->pix_undo_n].tile, g->pix_undo[g->pix_undo_n].data);
+    g->blocks_dirty = true; g->blocks_timer = 0.6f;
+    g->pal_offset = -1;
+    g->pix_seq = g->pix_undo_n ? ++g->seq : 0;
+    return true;
+}
+
+// Zoomed view of the selected tile; left click paints sel_colour, right click
+// picks a pixel's colour; the 16 palette swatches sit under it.
+static void draw_tile_editor(GuiState *g) {
+    int tile = g->sel_tile + g->pal_offset * 16, px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g);
+    const uint8_t (*pal)[3] = render_palette();
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++) {
+            int c = render_tile_pixel(g->rctx, tile, x, y);
+            DrawRectangle(x0 + x * px, y0 + y * px, px, px, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
+        }
+    for (int i = 0; i <= 8; i++) {
+        DrawLine(x0 + i * px, y0, x0 + i * px, y0 + 8 * px, (Color){70, 70, 70, 255});
+        DrawLine(x0, y0 + i * px, x0 + 8 * px, y0 + i * px, (Color){70, 70, 70, 255});
+    }
+    int sp = swatch_px(g), sy = swatch_y(g);
+    for (int c = 0; c < 16; c++) {
+        int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
+        DrawRectangle(sx, yy, sp, sp, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
+        if (c == g->sel_colour) DrawRectangleLinesEx((Rectangle){sx, yy, sp, sp}, 2, WHITE);
+    }
+    gtext(&g->font, g->font_loaded, TextFormat("tile 0x%02x  colour %d", tile, g->sel_colour),
+          x0, sy + 2 * sp + 4, g->font_px, RAYWHITE);
+    gtext(&g->font, g->font_loaded, "click paints, right-click picks", x0, sy + 2 * sp + 4 + ch(g), g->font_px, GRAY);
+    gtext(&g->font, g->font_loaded, g->blocks_dirty ? "u undoes a stroke; BLOCKS.EGA..." : "u undoes a stroke",
+          x0, sy + 2 * sp + 4 + 2 * ch(g), g->font_px, g->blocks_dirty ? ORANGE : GRAY);
+    Rectangle rb = reset_button(g);
+    DrawRectangleRec(rb, (Color){50, 50, 60, 255});
+    DrawRectangleLinesEx(rb, 1, GRAY);
+    gtext(&g->font, g->font_loaded, " reset tile", (int)rb.x, (int)rb.y + 2, g->font_px, RAYWHITE);
 }
 
 /* -------------------------------------------------------------- world map */
@@ -733,7 +933,7 @@ static void draw_drag(GuiState *g) {
 // Ghost of the selected tile at the hovered cell while the paint modifier is held.
 static void draw_hover_preview(GuiState *g) {
     int tx, ty;
-    if (!(mods() & GK_MOD_SHIFT) && !IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) return;
+    if (!(mods() & GK_MOD_SHIFT)) return;
     if (!mouse_tile(g, &tx, &ty)) return;
     Vector2 p = tile_pt(g, tx, ty);
     int s = 8 * g->scale;
@@ -828,6 +1028,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->atlas_loaded) UnloadTexture(g->atlas);
         if (g->font_loaded) UnloadFont(g->font);
         if (g->help_font_loaded) UnloadFont(g->help_font);
+        if (g->panel_font_loaded) UnloadFont(g->panel_font);
         render_close(g->rctx);
         ged_close(g->es, file);
         free(g);
@@ -872,6 +1073,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             if (sources_changed(last_build)) {
                 fprintf(stderr, "gui: source changed, rebuilding\n");
                 ged_flush();                               // don't lose painted tiles
+                if (g->blocks_dirty) { render_save_blocks(g->rctx); g->blocks_dirty = false; }
                 if (system(GUI_BUILD_CMD) == 0) return g;  // host reloads
                 fprintf(stderr, "gui: rebuild failed, not reloading\n");
                 last_build = GetFileModTime(library);
@@ -887,6 +1089,15 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (feed_keys(g)) g->room_dirty = true;
         if (feed_mouse(g)) g->room_dirty = true;
 
+        if (g->blocks_dirty && !g->pix_painting) {         // debounced write of tile pixel edits
+            g->blocks_timer -= dt;
+            if (g->blocks_timer <= 0) {
+                if (render_save_blocks(g->rctx)) g->saved_flash = 1.2f;
+                g->blocks_dirty = false;
+                world_build(g, ged_rooms(), buf);          // every room may use the edited tile
+                g->room_dirty = true;
+            }
+        }
         if (g->paint_dirty) {                              // debounced write of paint strokes
             g->save_timer -= dt;
             if (g->save_timer <= 0 && !g->painting) {
@@ -950,11 +1161,13 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             EndScissorMode();
         }
         draw_palette(g);
+        draw_tile_editor(g);
         draw_world_map(g);
         if (ged_help_shown()) draw_help(g);
         EndDrawing();
     }
 
+    if (g->blocks_dirty) render_save_blocks(g->rctx);
     ged_close(g->es, file);          // writes pending paints, hands the rooms back to main()
     if (g->tex_loaded) UnloadTexture(g->tex);
     if (g->pal_loaded) UnloadTexture(g->pal_tex);
@@ -962,6 +1175,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     if (g->atlas_loaded) UnloadTexture(g->atlas);
     if (g->font_loaded) UnloadFont(g->font);
     if (g->help_font_loaded) UnloadFont(g->help_font);
+    if (g->panel_font_loaded) UnloadFont(g->panel_font);
     render_close(g->rctx);
     free(g);
     CloseWindow();

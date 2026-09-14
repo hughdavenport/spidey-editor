@@ -80,6 +80,13 @@ bool  ged_map_is_text(void);       // the editor has replaced the hex map with t
 // Right click: move the switch/object under the cursor into that room, or, while
 // a switch-link chunk is selected, point the chunk at that room.
 void  ged_map_click(int room, bool right);
+// Out-of-bounds switch list: its text rows and the switch listed on a row (-1
+// if none); clicking a row goes through the editor's own click handling.
+void  ged_oob_rows(int *r0, int *r1);
+int   ged_oob_switch_at_row(int row);
+bool  ged_is_oob_marker(int col, int row);   // text cell holding an out-of-bounds switch's map marker
+// Step the current room's background (+-1, wraps 0..63) and tileset (+-4, 0..28).
+void  ged_adjust_room(int dbackground, int dtileset);
 
 // Switch links. ged_linking(): a switch is open for editing (Ctrl-S), so
 // right-drag / right-click in the room create chunks on it:
@@ -91,6 +98,7 @@ int   ged_item_at(int tx, int ty, int *idx);               // 1 switch preamble,
 
 // GUI-side tile painting (palette + drag): one undo entry per stroke, room
 // written after the stroke (ged_flush) rather than per cell.
+int   ged_tile_at(int tx, int ty);         // foreground tile byte at a room cell
 void  ged_paint_begin(void);
 void  ged_paint(int tx, int ty, uint8_t tile);
 bool  ged_flush(void);             // write pending paints; true if it wrote

@@ -103,6 +103,25 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   object -> TOGGLE_OBJECT chunk, right-click another switch -> TOGGLE_BIT chunk, right-drag a
   run of tiles -> TOGGLE_BLOCK chunk covering it; all via `switch_add_chunk()`, which selects
   the new chunk for editing exactly as `C` / `c[n]` would.
+- Clicks on the info text below the map are handled in the editor itself (`panel_click()` in
+  editor_input.c, so the terminal mouse gets them too): the row's text is parsed back from the
+  drawn screen — "switch NN"/"switch id NN" opens that switch (`s`+id, Ctrl-S), a "(NN) type"
+  chunk line selects that chunk, "sprite N"/"block N" goes to the object, a room field label
+  (bkgrnd, dmg, left, ...) opens Ctrl-R on that field. Any click first Escapes out of the
+  current mode (`editor_cancel_to_plain()`); in room-choosing states a click on the room list
+  or the world map types that room number instead.
+- The out-of-bounds switch list is pinned at the bottom of the panel with S# badges (redraw()
+  records its rows in `panel_oob_*`); the editor's own out-of-bounds map markers are hidden.
+- Wheel over the picture or the palette: background +-1; horizontal or Shift+wheel: tileset +-4
+  (`ged_adjust_room`). Middle-click on a room tile picks it into the palette.
+- Tile pixel editor right of the palette: paints into the RenderCtx's BLOCKS data
+  (`render_tile_set_pixel`) and writes BLOCKS.EGA in the data dir 0.6 s after a stroke, keeping
+  a one-time BLOCKS.EGA.orig backup. This edits the game's graphics for every room. `u` undoes
+  the last stroke while a pixel stroke is the most recent edit (GUI-side stack, no redo);
+  "reset tile" restores the tile from the .orig. play.sh copies a newer ./BLOCKS.EGA into
+  Spider/ so the game shows edited tiles.
+- Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh swap the current room into
+  slot 1 of the copy the game runs from, so you start in the room being edited.
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the
   picture (click selects, Shift+drag / middle-drag paints; one undo entry per stroke,
   written 0.4 s after the stroke). Left/right click go to the editor's mouse handling.

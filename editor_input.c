@@ -30,11 +30,16 @@ static void yank_at_cursor(void);
 static void yank_current_switch(void);
 static void delete_current_switch(void);
 
+/* Run play.sh detached. PLAY_ROOM tells it which room to start in (it swaps
+ * that room into slot 1, the game's start room, in the copy the game runs). */
 static void fork_play(void) {
     signal(SIGCHLD, SIG_IGN);
     pid_t child = fork();
     if (child == 0) {
         if (state != NULL) {
+            char room[8];
+            snprintf(room, sizeof room, "%zu", state->current_level);
+            setenv("PLAY_ROOM", room, 1);
             freeRoomFile(&state->rooms);
             free(state);
         }
@@ -3599,6 +3604,143 @@ static state_handler_fn state_handlers[NUM_STATES] = {
     [NORMAL]           = handle_normal,
 };
 
+/* --- clicks on the text below the map ---------------------------------------
+ * The info rows are parsed back from the screen the editor just drew, so a
+ * click on "switch 03: ..." opens that switch, on a "(02) type block" chunk
+ * line selects that chunk, on "sprite 1:" goes to that object, and on a room
+ * field ("dmg: 01", "left: 00 - ...") edits that field. Works the same from a
+ * terminal mouse and from the GUI. */
+
+static bool plain_state(void) { return state->current_state == NORMAL || state->current_state == TILE_EDIT; }
+
+static bool room_list_state(void) {
+    return state->current_state == GOTO_ROOM || state->current_state == EDIT_ROOMDETAILS_ROOM ||
+           state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM;
+}
+
+static void feed(Key k) { state_handlers[state->current_state](k); }
+static void feed_char(char c) { feed((Key){ .code = KEY_CHAR, .ch = c }); }
+static void feed_ctrl(char c) { feed((Key){ .code = KEY_CTRL, .ch = c }); }
+static char hex_digit(int v) { return (char)(v < 10 ? '0' + v : 'a' + v - 10); }
+
+/* Row of the last drawn screen as text, trailing blanks trimmed. */
+static void screen_row_text(int row, char *out, size_t n) {
+    size_t len = 0;
+    if (row < 0 || row >= SCREEN_MAX_HEIGHT) { out[0] = '\0'; return; }
+    for (int x = 0; x < SCREEN_MAX_WIDTH && len + 1 < n; x++) {
+        char c = state->screen_prev[row * SCREEN_MAX_WIDTH + x].ch;
+        out[len++] = c ? c : ' ';
+    }
+    out[len] = '\0';
+    while (len && out[len - 1] == ' ') out[--len] = '\0';
+}
+
+/* Number as PRINTF_DATA printed it (hex when debug.hex). Chars consumed, 0 if none. */
+static int parse_num(const char *s, int *val) {
+    char *end;
+    long v = strtol(s, &end, state->debug.hex ? 16 : 10);
+    if (end == s) return 0;
+    *val = (int)v;
+    return (int)(end - s);
+}
+
+/* Press Escape until back in NORMAL/TILE_EDIT (closing help first). */
+void editor_cancel_to_plain(void) {
+    if (state->help) state->help = false;
+    for (int i = 0; i < 8 && !plain_state(); i++) feed((Key){ .code = KEY_ESC });
+    state->partial_byte = 0;
+}
+
+/* Type a room number the way the current room-choosing state expects it. */
+void editor_feed_room_number(int room) {
+    char buf[8];
+    snprintf(buf, sizeof buf, state->debug.hex ? "%02x" : "%02d", room);
+    feed_char(buf[0]);
+    feed_char(buf[1]);
+}
+
+/* `s` + id, then Ctrl-S if the switch was in bounds (goto-switch opens
+ * out-of-bounds ones itself). */
+static void open_switch(int id) {
+    if (id < 0 || id > 15) return;
+    editor_cancel_to_plain();
+    feed_char('s');
+    feed_char(hex_digit(id));
+    if (plain_state()) feed_ctrl('S');
+}
+
+static const struct { const char *label; char key; } room_fields[] = {
+    {"bkgrnd", 'g'}, {"tiles", 't'}, {"dmg", 'd'}, {"gravity (|)", '|'}, {"gravity (-)", '-'},
+    {"UNKNOWN_b", 'b'}, {"UNKNOWN_c", 'c'}, {"UNKNOWN_e", 'e'}, {"UNKNOWN_f", 'f'},
+    {"left", 'h'}, {"down", 'j'}, {"up", 'k'}, {"right", 'l'},
+};
+
+static bool panel_click(int row, int col) {
+    char text[SCREEN_MAX_WIDTH + 1];
+    screen_row_text(row, text, sizeof text);
+    const char *t = text;
+    while (*t == ' ') t++;
+    int v;
+
+    if (strncmp(t, "switch id ", 10) == 0 || strncmp(t, "switch ", 7) == 0) {
+        if (!parse_num(t + (strncmp(t, "switch id ", 10) == 0 ? 10 : 7), &v)) return false;
+        open_switch(v);
+        return true;
+    }
+    if (t[0] == '(' && parse_num(t + 1, &v) && strstr(t, ") type") ) {   /* chunk line: find its switch header above */
+        for (int r = row - 1; r > HEIGHT_TILES; r--) {
+            char h[SCREEN_MAX_WIDTH + 1], *hp;
+            screen_row_text(r, h, sizeof h);
+            hp = h;
+            while (*hp == ' ') hp++;
+            int id;
+            if (strncmp(hp, "switch ", 7) == 0 && parse_num(hp + (strncmp(hp, "switch id ", 10) == 0 ? 10 : 7), &id)) {
+                open_switch(id);
+                if (state->current_state == EDIT_SWITCHDETAILS && v >= 0 && v <= 15) { feed_char('c'); feed_char(hex_digit(v)); }
+                return true;
+            }
+        }
+        return false;
+    }
+    if (strncmp(t, "sprite ", 7) == 0 || strncmp(t, "block ", 6) == 0) {
+        if (!parse_num(t + (t[0] == 's' ? 7 : 6), &v) || v < 0 || v > 15) return false;
+        editor_cancel_to_plain();
+        feed_char('o');
+        feed_char(hex_digit(v));
+        return true;
+    }
+    /* room fields: the field whose label starts furthest left of the click column */
+    int best = -1; char key = 0;
+    for (size_t i = 0; i < C_ARRAY_LEN(room_fields); i++) {
+        const char *hit = text;
+        while ((hit = strcasestr(hit, room_fields[i].label)) != NULL) {
+            int pos = (int)(hit - text);
+            bool word_start = pos == 0 || text[pos - 1] == ' ' || text[pos - 1] == ',';
+            if (word_start && pos <= col && pos > best) { best = pos; key = room_fields[i].key; }
+            hit++;
+        }
+    }
+    if (key) {
+        editor_cancel_to_plain();
+        if (state->current_state == NORMAL) feed_ctrl('T');   /* Ctrl-R lives in tile-edit mode */
+        feed_ctrl('R');
+        if (state->current_state == EDIT_ROOMDETAILS) feed_char(key);
+        return true;
+    }
+    return false;
+}
+
+/* Click on the room list (goto room / link editing): pick that room. */
+static bool room_list_click(int row, int col) {
+    char text[SCREEN_MAX_WIDTH + 1];
+    screen_row_text(row, text, sizeof text);
+    int half = col >= WIDTH_TILES ? WIDTH_TILES : 0, v;
+    if ((int)strlen(text) <= half) return false;
+    if (!parse_num(text + half, &v)) return false;
+    editor_feed_room_number(v);
+    return true;
+}
+
 /* Pop one queued macro-replay key and run it through the current state's
  * handler. Returns false when the replay queue is empty. */
 bool editor_replay_step(void) {
@@ -3657,6 +3799,17 @@ void editor_handle_key(Key key) {
     if (state->macro_recording &&
             !(key.code == KEY_CHAR && key.mod == MOD_NONE && key.ch == 'm')) {
         ARRAY_ADD(state->macro_buf, key);
+    }
+
+    /* Plain left click below the map: act on the info line clicked (any state);
+     * on the room list: pick that room. */
+    if (key.code == KEY_MOUSE && !key.mouse.release && !MOUSE_IS_SCROLL(key.mouse.button) &&
+            MOUSE_BTN(key.mouse.button) == 0 && !(key.mod & MOD_CTRL)) {
+        if (room_list_state() && key.mouse.y >= 3 && key.mouse.x < 2 * WIDTH_TILES) {
+            if (room_list_click(key.mouse.y, key.mouse.x)) return;
+        } else if (key.mouse.y > HEIGHT_TILES) {
+            if (panel_click(key.mouse.y, key.mouse.x)) return;
+        }
     }
 
     assert(state->current_state < NUM_STATES);
