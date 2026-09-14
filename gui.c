@@ -410,7 +410,7 @@ static void focus_apply(GuiState *g) {
             }
         } else if (!pixed_locked(g)) {
             int idx = pixed_index(g);
-            if (g->fill_armed) { g->fill_armed = false; pix_fill(g, idx, g->ecx, g->ecy); g->pix_op = true; }
+            if (g->fill_armed) { pix_fill(g, idx, g->ecx, g->ecy); g->pix_op = true; }
             else if (render_gfx_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy) != g->sel_colour) {
                 pix_undo_push(g, g->pix_src, idx);
                 render_gfx_set_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy, g->sel_colour);
@@ -730,7 +730,6 @@ static bool feed_mouse(GuiState *g) {
         int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g), w, h;
         pixed_dims(g, &w, &h);
         bool in_grid = m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;
-        if (g->fill_armed && !in_grid && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) g->fill_armed = false;   // fill wants a click on the grid; anything else cancels it
         bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             g->sel_colour = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
@@ -743,8 +742,7 @@ static bool feed_mouse(GuiState *g) {
             int tx = (int)(m.x - x0) / px, ty = (int)(m.y - y0) / px;
             if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty); return true; }   // pick: the cursor stays put
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->focus = FOCUS_EDITOR; g->ecx = tx; g->ecy = ty; }
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && g->fill_armed) {
-                g->fill_armed = false;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && g->fill_armed) {   // fill stays on: click "fill" again to leave it
                 if (!pixed_locked(g)) pix_fill(g, idx, tx, ty);
                 return true;
             }
@@ -1031,8 +1029,8 @@ static void draw_help(GuiState *g) {
         "       applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
         "       key (r, s, o, ...) = back to the room",
         "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
-        "        pick = then click any colour on screen (room, picker, world map); fill = then click a",
-        "        region of the image (or Space at the editor cursor) to flood it with the colour",
+        "        pick = then click any colour on screen (room, picker, world map); fill = a mode: clicks on",
+        "        the image (or Space at the editor cursor) flood that region with the colour; click fill again to leave",
         "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize",
         "info text: click a switch / chunk / object / room field line to edit it",
     };

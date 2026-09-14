@@ -130,7 +130,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   keeping a one-time <file>.orig backup. This edits the game's graphics for every room. `u`
   undoes the last stroke while a pixel stroke is the most recent edit (GUI-side stack, no
   redo); "reset" restores the image from the .orig; "pick" is an eyedropper for the next click
-  anywhere on screen; "fill" flood-fills the region clicked next (4-connected, one undo entry).
+  anywhere on screen; "fill" is a mode: while lit, each click on the image flood-fills that region
+  (4-connected, one undo entry each); click it again to go back to painting.
   Right-click in the grid picks a colour without moving the keyboard cursor. play.sh copies newer ./BLOCKS.EGA, SPIDS1/2.EGA, SCENERY.EGA and
   BACKS.SPL into Spider/ so the game shows edits.
 - Backgrounds ("backs" button): the picker shows the 256 SCENERY tiles 16 across; Shift+drag in
