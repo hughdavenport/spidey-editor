@@ -27,8 +27,9 @@ static const uint8_t PAL[16][3] = {
 #define SPIDS_STRIDE 256
 #define SPRITE_KEY 15           // SPIDS transparency colour
 #define SPRITE_X_PAD 2          // figure sits ~2 tiles in from the box's left
+#define SPRITE_X_NUDGE 3        // ...plus 3 px (measured on the player and Mary Jane in DOSBox)
 #define PLAYER_ROOM 1
-#define PLAYER_FRAME 9
+#define PLAYER_FRAME 24         // standing pose shown at game start (DOSBox capture, 100% match)
 
 // EGA plane -> colour-bit order, universal for tiles and sprites.
 static const int PLANE_ORDER[4] = {3, 2, 1, 0};
@@ -125,21 +126,22 @@ static void draw_spids(uint8_t *cv, const uint8_t *ega, size_t ega_len, int fram
 
 /* --------------------------------------------------------------- creatures */
 
-// Resolve a sprite (editor type + damage) to a SPIDS sheet + first frame.
+// Resolve a sprite (editor type + damage) to a SPIDS sheet + the frame the
+// game shows on room entry (matched against DOSBox captures of every room).
 // SHARK is overloaded by damage: 3 = Mysterio, 4 = Mary Jane, else shark.
 static void creature_frame(SpriteType type, uint8_t dmg, int *use_spids2, int *frame) {
     switch (type) {
-        case MUMMY:        *use_spids2 = 0; *frame = 32; return;
+        case MUMMY:        *use_spids2 = 0; *frame = 35; return;
         case BLUE_MAN:     *use_spids2 = 0; *frame = 38; return;
         case WOLF:         *use_spids2 = 0; *frame = 46; return;
         case R2D2:         *use_spids2 = 0; *frame = 50; return;
         case DINOSAUR:     *use_spids2 = 0; *frame = 53; return;
         case RAT:          *use_spids2 = 0; *frame = 58; return;
-        case SHOTGUN_LADY: *use_spids2 = 1; *frame = 0;  return;
+        case SHOTGUN_LADY: *use_spids2 = 1; *frame = 5;  return;
         case SHARK:
-            if (dmg == 3) { *use_spids2 = 1; *frame = 6;  return; }  // Mysterio
+            if (dmg == 3) { *use_spids2 = 1; *frame = 6;  return; }  // Mysterio (invisible until he materialises)
             if (dmg == 4) { *use_spids2 = 0; *frame = 62; return; }  // Mary Jane
-            *use_spids2 = 0; *frame = 43; return;                    // Shark
+            *use_spids2 = 0; *frame = 44; return;                    // Shark
         default:           *use_spids2 = 0; *frame = 0;  return;
     }
 }
@@ -407,14 +409,14 @@ static void render_room_base(RoomFile *file, int room_id, const char *dir,
         if (o->type != SPRITE) continue;
         int s2, frame;
         creature_frame(o->sprite.type, o->sprite.damage, &s2, &frame);
-        int dx = (o->x + 1 - SPRITE_X_PAD) * 8;
+        int dx = (o->x + 1 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE;
         int dy = (o->y + 1 + 1) * 8 - SPIDS_H;
         if (s2) draw_spids(cv, a->spids2, a->s2_len, frame, dx, dy);
         else    draw_spids(cv, a->spids1, a->s1_len, frame, dx, dy);
     }
     if (room_id == PLAYER_ROOM)
         draw_spids(cv, a->spids1, a->s1_len, PLAYER_FRAME,
-                   (3 - SPRITE_X_PAD) * 8, (20 + 1) * 8 - SPIDS_H);
+                   (3 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE, (20 + 1) * 8 - SPIDS_H);
     if (debug) draw_overlay(cv, room);
 }
 
