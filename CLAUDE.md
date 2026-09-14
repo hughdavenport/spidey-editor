@@ -5,10 +5,15 @@ A terminal-based map editor for "The Amazing Spider-Man" (1990 DOS game). Reads/
 
 ## Build
 ```sh
-make         # builds ./a.out with ASAN + debug
+make             # builds ./a.out with ASAN + debug; editor.so / gui.so are built on first use and hot-reload
+make release     # builds ./spidey-editor: one binary, editor + GUI linked in, static raylib, -O2, no hot reload
 ./a.out editor   # interactive editor
 ./a.out help     # show all patch commands
 ```
+`SPIDEY_RELEASE` (set by `make release`) selects the linked-in paths in editor.c (`editor_main`)
+and gui_host.c (`gui_main`); editor.c's `end`/`get_screen_dimensions` then serve the GUI too,
+checking `screen_headless`. The release binary sets `SPIDEY_NO_HOTRELOAD` itself; setting it by hand
+turns off source watching in the debug build.
 
 Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werror`.
 
@@ -133,7 +138,6 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   picker: put tile / creature at the room cursor; editor: paint), Esc returns to the room
   (and still reaches the editor). `u` after a mouse-driven room edit goes to the room undo.
 - The hint text lives in the Ctrl-? overlay (GUI lines appended under the editor's box).
-- `--release` (or `SPIDEY_NO_HOTRELOAD=1`) on `editor` / `gui` turns off source watching.
 - `gui_smoke_test.sh` runs in a sandbox copy (sources, binaries, Spider/, ROOMS.SPL) so it
   never touches the live files or a GUI you have open.
 - Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh swap the current room into

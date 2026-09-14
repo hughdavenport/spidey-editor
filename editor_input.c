@@ -47,7 +47,8 @@ static void fork_play(void) {
         if (sid == -1) exit(EXIT_FAILURE);
         if (sid > 0) exit(EXIT_SUCCESS);
         if (setsid() == -1) exit(EXIT_FAILURE);
-        execv("./play.sh", (char**){0});
+        char *play_argv[] = { "./play.sh", NULL };
+        execv("./play.sh", play_argv);
         exit(EXIT_FAILURE);
     }
 }

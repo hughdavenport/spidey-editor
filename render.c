@@ -578,6 +578,7 @@ void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, 
 }
 
 bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    if ((unsigned)src >= GFX_SOURCES) return false;
     size_t len;
     uint8_t *d = ctx ? gfx_data(ctx, src, &len) : NULL;
     size_t n = (size_t)GFX[src].bytes;
@@ -587,6 +588,7 @@ bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
 }
 
 void render_gfx_put(RenderCtx *ctx, GfxSource src, int idx, const uint8_t *in) {
+    if ((unsigned)src >= GFX_SOURCES) return;
     size_t len;
     uint8_t *d = ctx ? gfx_data(ctx, src, &len) : NULL;
     size_t n = (size_t)GFX[src].bytes;

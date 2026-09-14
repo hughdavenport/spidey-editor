@@ -44,12 +44,15 @@ bool any_source_newer(struct timespec test_time) {
     return false;
 }
 
+#include "gui_bridge.h"   /* GED_COLS / GED_ROWS: the GUI's text grid (release build) */
+
 game_state *state = NULL;
 
 void end() {
-    printf("\033[?1000l\033[?1006l" RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
+    /* screen_headless: the GUI owns the terminal, leave it alone */
+    if (!screen_headless) printf("\033[?1000l\033[?1006l" RESTORE_CURSOR SHOW_CURSOR RESTORE_SCREEN DISABLE_ALT_BUFFER);
     if (state != NULL) {
-        if (isatty(STDIN_FILENO))
+        if (!screen_headless && isatty(STDIN_FILENO))
             assert(tcsetattr(STDIN_FILENO, TCSANOW, &state->original_termios) == 0);
         if (state->clipboard.type == CLIP_OBJECT && state->clipboard.object.tiles) {
             free(state->clipboard.object.tiles);
@@ -88,6 +91,11 @@ bool debugany() {
 }
 
 void get_screen_dimensions() {
+    if (screen_headless) {               /* the GUI lays the text screen out on a fixed grid */
+        state->screen_dimensions.x = GED_COLS;
+        state->screen_dimensions.y = GED_ROWS;
+        return;
+    }
     struct winsize w = {0};
     int fds[] = { STDOUT_FILENO, STDERR_FILENO, STDIN_FILENO };
     for (size_t i = 0; i < C_ARRAY_LEN(fds); i++) {
@@ -233,6 +241,16 @@ game_state *loop_main(char *library, game_state *call_state) {
 }
 
 // If this function is edited, then you must rebuild the application
+#ifdef SPIDEY_RELEASE
+/* Release build: the editor is linked in, no editor.so, no rebuilding. */
+int editor_main() {
+    game_state *saved_state = NULL;
+    do {
+        saved_state = loop_main("/proc/self/exe", saved_state);
+    } while (saved_state != NULL);
+    return 0;
+}
+#else
 int editor_main() {
     char *basename = strdup(__FILE__);
     char *dot = strrchr(basename, '.');
@@ -269,3 +287,4 @@ int editor_main() {
     free(library);
     return 0;
 }
+#endif /* SPIDEY_RELEASE */

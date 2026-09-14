@@ -29,6 +29,18 @@ static bool build_gui_lib(void) {
     return true;
 }
 
+#ifdef SPIDEY_RELEASE
+/* Release build: gui.c is linked in with static raylib; no gui.so, no reloads. */
+static bool load_raylib(void) __attribute__((unused));
+static bool build_gui_lib(void) __attribute__((unused));
+int gui_main(RoomFile *file, const char *data_dir, int scale) {
+    void *state = NULL;
+    do {
+        state = gui_loop("/proc/self/exe", file, data_dir, scale, state);
+    } while (state != NULL);
+    return 0;
+}
+#else
 int gui_main(RoomFile *file, const char *data_dir, int scale) {
     if (!load_raylib()) return 1;
 
@@ -56,3 +68,4 @@ int gui_main(RoomFile *file, const char *data_dir, int scale) {
     }
     return 0;
 }
+#endif /* SPIDEY_RELEASE */

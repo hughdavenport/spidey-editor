@@ -150,6 +150,7 @@ static Rectangle pixed_button(GuiState *g, int i);
 static Rectangle attr_button(GuiState *g, int i);
 static Rectangle pick_button(GuiState *g);
 static int colour_under_mouse(void);
+static bool pixed_locked(GuiState *g);
 static void focus_move(GuiState *g, int dx, int dy);
 static void focus_apply(GuiState *g);
 static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh);
@@ -379,7 +380,7 @@ static void focus_apply(GuiState *g) {
                 ged_block_set_tile(bi, g->ecx, g->ecy, (uint8_t)(g->sel_tile | g->sel_attr));
                 g->paint_dirty = true; g->save_timer = 0.4f;
             }
-        } else {
+        } else if (!pixed_locked(g)) {
             int idx = pixed_index(g);
             if (render_gfx_pixel(g->rctx, g->pix_src, idx, g->ecx, g->ecy) != g->sel_colour) {
                 pix_undo_push(g, g->pix_src, idx);
@@ -671,7 +672,7 @@ static bool feed_mouse(GuiState *g) {
                 g->focus = FOCUS_EDITOR; g->ecx = tx; g->ecy = ty;
             }
             if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty); return true; }
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { g->pix_painting = true; pix_undo_push(g, g->pix_src, idx); }
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !pixed_locked(g)) { g->pix_painting = true; pix_undo_push(g, g->pix_src, idx); }
             if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
                     render_gfx_pixel(g->rctx, g->pix_src, idx, tx, ty) != g->sel_colour) {
                 render_gfx_set_pixel(g->rctx, g->pix_src, idx, tx, ty, g->sel_colour);
@@ -1195,6 +1196,10 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
     gtext(&g->font, g->font_loaded, "right-click picks; w/h resize; gfx = pixel editor", x0, ty + 2 * ch(g), fs, GRAY);
 }
 
+// Tile 0 of every tileset is "invisible": the game never draws it (the
+// background shows through), so editing its pixels would change nothing.
+static bool pixed_locked(GuiState *g) { return g->pix_src == GFX_TILES && g->sel_tile == 0; }
+
 // Zoomed view of the selected image; left click paints sel_colour, right
 // click picks a pixel's colour; the 16 palette swatches sit under it. The
 // transparent colour of sprites is drawn as a checker.
@@ -1239,7 +1244,9 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
           : g->sel_colour == key  ? TextFormat("%s frame 0x%02x  colour %d = transparent", render_gfx_name(g->pix_src), idx, g->sel_colour)
                                   : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->pix_src), idx, g->sel_colour),
           x0, ty, fs, RAYWHITE);
-    gtext(&g->font, g->font_loaded, "click paints, right-click picks", x0, ty + ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded,
+          pixed_locked(g) ? "tile 0 is never drawn by the game (background shows)" : "click paints, right-click picks",
+          x0, ty + ch(g), fs, pixed_locked(g) ? ORANGE : GRAY);
     gtext(&g->font, g->font_loaded, dirty ? "u undoes a stroke; saving..." : "u undoes a stroke",
           x0, ty + 2 * ch(g), fs, dirty ? ORANGE : GRAY);
     {
@@ -1409,13 +1416,27 @@ static void draw_drag(GuiState *g) {
     DrawRectangleLinesEx((Rectangle){b.x, b.y, s, s}, 2, (Color){255, 255, 255, 200});
 }
 
-// Ghost of the selected tile at the hovered cell while the paint modifier is held.
+// Ghost of what Shift+click would put at the hovered cell: the selected tile,
+// or, in the sprites view, the selected creature's frame drawn the way the
+// room shows it (an object at (x,y) stands with its feet on tile (x+1,y+1)).
 static void draw_hover_preview(GuiState *g) {
     int tx, ty;
     if (!(mods() & GK_MOD_SHIFT)) return;
     if (!mouse_tile(g, &tx, &ty)) return;
     Vector2 p = tile_pt(g, tx, ty);
     int s = 8 * g->scale;
+    if (g->sprites_view) {
+        int c = creature_of(g->pix_src, g->sel_img[g->pix_src]);
+        if (c < 0 || CREATURES[c].type < 0 || !g->sheet_loaded[g->pix_src]) return;
+        int f = g->sel_img[g->pix_src];
+        Rectangle src = { (f % 8) * SPIDS_FRAME_W, (f / 8) * SPIDS_FRAME_H, SPIDS_FRAME_W, SPIDS_FRAME_H };
+        Vector2 feet = tile_pt(g, tx + 1 - 2, ty + 2);          // box left = (feet_x - 2) tiles + 3 px
+        Rectangle dst = { feet.x + 3 * g->scale, feet.y - SPIDS_FRAME_H * g->scale,
+                          SPIDS_FRAME_W * g->scale, SPIDS_FRAME_H * g->scale };
+        DrawTexturePro(g->sheet_tex[g->pix_src], src, dst, (Vector2){0, 0}, 0, (Color){255, 255, 255, 170});
+        DrawRectangleLinesEx((Rectangle){p.x, p.y, s, s}, 2, YELLOW);
+        return;
+    }
     Rectangle dst = { p.x, p.y, s, s };
     Rectangle src = { (g->sel_tile % 8) * 8, (g->sel_tile / 8) * 8, 8, 8 };
     DrawTexturePro(g->pal_tex, src, dst, (Vector2){0, 0}, 0, (Color){255, 255, 255, 150});

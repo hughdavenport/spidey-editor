@@ -997,13 +997,16 @@ static void print_subcommands(FILE *out) {
     fprintf(out, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
     fprintf(out, "    find_sprite SPRITENAME               - Find a sprite\n");
     fprintf(out, "    render ROOMID|all|montage OUT|DIR    - Render room(s) to PNG (--debug --scale N --data-dir DIR)\n");
-    fprintf(out, "    gui [--data-dir DIR] [--scale N] [--release] - raylib GUI editor (terminal-editor keys)\n");
-    fprintf(out, "    editor [--release]                   - Start the text-mode editor\n");
-    fprintf(out, "      --release (or SPIDEY_NO_HOTRELOAD=1) turns off source watching / hot reload\n");
+    fprintf(out, "    gui [--data-dir DIR] [--scale N]     - raylib GUI editor (terminal-editor keys)\n");
+    fprintf(out, "    editor                               - Start the text-mode editor\n");
+    fprintf(out, "      (SPIDEY_NO_HOTRELOAD=1 turns off source watching in the debug build; `make release` has none)\n");
     fprintf(out, "    help                                 - Display this message\n");
 }
 
 int main(int argc, char **argv) {
+#ifdef SPIDEY_RELEASE
+    setenv("SPIDEY_NO_HOTRELOAD", "1", 1);   /* everything is linked in; nothing to rebuild */
+#endif
     char *fileName = ROOMS_FILE;
     RoomFile file = {0};
     PatchInstructionArray patches = {0};
@@ -1239,7 +1242,6 @@ int main(int argc, char **argv) {
             argv ++;
             argc = 0;
         } else if (strcasecmp(argv[0], "editor") == 0) {
-            if (argc >= 2 && strcmp(argv[1], "--release") == 0) setenv("SPIDEY_NO_HOTRELOAD", "1", 1);
             ARRAY_FREE(rooms);
             ARRAY_FREE(patches);
             freeRoomFile(&file);
@@ -1297,9 +1299,7 @@ int main(int argc, char **argv) {
             argv ++; argc --;
             const char *data_dir = ".";
             int scale = 0;
-            while (argc >= 1) {
-                if (strcmp(argv[0], "--release") == 0) { setenv("SPIDEY_NO_HOTRELOAD", "1", 1); argv++; argc--; continue; }
-                if (argc < 2) break;
+            while (argc >= 2) {
                 if (strcmp(argv[0], "--data-dir") == 0)   { data_dir = argv[1]; }
                 else if (strcmp(argv[0], "--scale") == 0) { scale = atoi(argv[1]); }
                 else break;

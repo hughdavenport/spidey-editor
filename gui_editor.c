@@ -6,12 +6,15 @@
 
 #include "editor_types.h"
 
-game_state *state = NULL;
-
 static bool quit_requested = false;
 static bool paint_pending = false;
 
-/* --- the terminal editor's process-level hooks, GUI flavour --------------- */
+/* --- the terminal editor's process-level hooks, GUI flavour ---------------
+ * gui.so has no editor.c, so it needs its own; the release build links
+ * editor.c in and its versions check screen_headless instead. */
+#ifndef SPIDEY_RELEASE
+game_state *state = NULL;
+
 
 // 'q' normally lands here via handle_normal() and must not return (the caller
 // follows it with UNREACHABLE()). The GUI intercepts plain 'q' before dispatch
@@ -50,6 +53,7 @@ bool debugany(void) {
         state->debug.unknowns ||
         state->debug.pos;
 }
+#endif /* !SPIDEY_RELEASE */
 
 /* --- lifecycle ------------------------------------------------------------ */
 

@@ -16,6 +16,8 @@ R=$(cd "$(dirname "$0")" && pwd)
 SB=$T/sandbox
 rm -rf "$SB"; mkdir -p "$SB"
 cp $R/*.c $R/*.h $R/a.out $R/gui.so $R/play.sh $R/ROOMS.SPL "$SB/"
+[ -x $R/spidey-editor ] && cp $R/spidey-editor "$SB/"
+BIN=${BIN:-./a.out}   # BIN=./spidey-editor tests the release build
 cp -r $R/Spider "$SB/Spider"
 ln -sfn $R/raylib-6.0_linux_amd64 "$SB/raylib-6.0_linux_amd64"
 cd "$SB"
@@ -25,7 +27,7 @@ Xvfb :97 -screen 0 1600x1200x24 -nolisten tcp >/dev/null 2>&1 &
 XV=$!
 sleep 1
 export DISPLAY=:97
-./a.out gui --data-dir Spider --scale 3 > $T/gui.log 2>&1 &
+$BIN gui --data-dir Spider --scale 3 > $T/gui.log 2>&1 &
 GP=$!
 ( sleep 90; kill -9 $GP 2>/dev/null ) &
 WD=$!
@@ -56,7 +58,8 @@ xdotool mousemove_relative 24 0; sleep 0.1; xdotool mousemove_relative 24 0; sle
 xdotool mouseup 1; sleep 0.6; snap s9c-dragged
 xdotool key u; sleep 0.5
 xdotool key r; sleep 0.2; xdotool type 02; sleep 0.5
-# tile pixel editor (right of the palette): pick colour 2 (red), paint pixel (1,1) of tile 0x12
+# tile pixel editor (right of the palette): select tile 0x12 (tile 0 is locked), pick colour 2 (red), paint pixel (1,1)
+xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 24 + 2*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool mousemove $((X + 776 + 192 + 16 + 2*9 + 4)) $((Y + 24 + 8*9 + 8 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.2
 xdotool mousemove $((X + 776 + 192 + 16 + 1*9 + 4)) $((Y + 24 + 1*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12b-pixel-edit
 xdotool key u; sleep 0.8; snap s12c-pixel-undo   # u undoes the stroke (most recent edit)
