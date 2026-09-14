@@ -513,6 +513,20 @@ static bool feed_mouse(GuiState *g) {
     uint8_t mod = mods();
     bool paint_btn = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (mod & GK_MOD_SHIFT);
 
+    // eyedropper: the click after "pick" reads the colour under the mouse, anywhere
+    if (g->eyedrop && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        int c = colour_under_mouse();
+        if (c >= 0) g->sel_colour = c;
+        g->eyedrop = false;
+        g->pix_op = true;
+        return true;
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, pick_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
+        g->eyedrop = !g->eyedrop;
+        g->pix_op = true;
+        return true;
+    }
+
     // middle click on the room: pick that tile into the palette (reverse picker)
     if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) && mouse_tile(g, &tx, &ty)) {
         g->sel_tile = (uint8_t)(ged_tile_at(tx, ty) & 0x3f);
@@ -590,20 +604,6 @@ static bool feed_mouse(GuiState *g) {
     if (wheel != 0 && m.x < pic_w(g) && m.y >= panel_top(g) && m.y < pinned_top(g)) {
         g->scroll -= (int)wheel * 3;
         if (g->scroll < 0) g->scroll = 0;
-        return true;
-    }
-
-    // eyedropper: the click after "pick" reads the colour under the mouse, anywhere
-    if (g->eyedrop && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        int c = colour_under_mouse();
-        if (c >= 0) g->sel_colour = c;
-        g->eyedrop = false;
-        g->pix_op = true;
-        return true;
-    }
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, pick_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
-        g->eyedrop = !g->eyedrop;
-        g->pix_op = true;
         return true;
     }
 
