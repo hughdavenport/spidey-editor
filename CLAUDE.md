@@ -105,7 +105,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Plain left press is held until release: a click moves the cursor, a drag moves the item
   and leaves the cursor (and Spider-Man) where it was.
 - World map right of the picture under the palette: every room rendered into one 8x8 atlas
-  texture (refreshed for the room being edited). Left click = go to that room; right click =
+  texture (refreshed for the room being edited). Left click = go to that room, creating it if the
+  file has no such room (`room_create()` in editor_actions.c: blank tiles, the current room's
+  tileset / background / gravity; the editor's `r` prompt creates absent rooms too); right click =
   `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
   or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
 - Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an
@@ -150,9 +152,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Block object under the cursor: its tile grid replaces the pixel editor (`ged_block_*`);
   click paints the picked tile (with the attribute buttons' bits), w+/w-/h+/h- call the
   editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block.
-- Keyboard focus (`g->focus`): Tab cycles room / picker / editor / colours / world map, or click
-  one; arrows and hjkl move that panel's selection (colours: moving selects the paint colour;
-  skipped while the block panel is up), Enter/Space applies it (world map: go there;
+- Keyboard focus (`g->focus`): Tab cycles room / picker / editor / colours / buttons / world map,
+  or click one; arrows and hjkl move that panel's selection (colours: moving selects the paint
+  colour; buttons: left/right, Enter/Space presses; both skipped while the block panel is up),
+  Enter/Space applies it (world map: go there;
   picker: put tile / creature at the room cursor; editor: paint). Esc, or any other key that
   is forwarded to the editor (`r`, `s`, digits, Ctrl-X, ...), returns focus to the room, so
   `r` then `h`/`l` types into the room prompt rather than moving the world-map selection. `u` after a mouse-driven room edit goes to the room undo.

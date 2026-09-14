@@ -40,7 +40,7 @@
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
 #define PALETTE_LINES 4         // text lines under the palette before the world map
 #define SWATCH_ROWS 2
-enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_WORLD, FOCUS_COUNT };
+enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
@@ -86,7 +86,8 @@ typedef struct {
     float saved_flash;      // seconds left to show "saved"
     float src_check;        // seconds until the next hot-reload source check
     bool pix_op;            // this frame's mouse event went to the pixel editor (for `u` routing)
-    int focus;              // which panel arrows / hjkl move: the room, the picker, the pixel editor, its colours, or the world map
+    int focus;              // which panel arrows / hjkl move: the room, the picker, the pixel editor, its colours, its buttons, or the world map
+    int btn_sel;            // FOCUS_BUTTONS: the reset / tiles / sprites / backs / block button the keyboard is on
     int block_hidden;       // block object whose panel was closed with "gfx" (-1 none)
     int ecx, ecy;           // keyboard cursor in the pixel / block editor grid
     bool eyedrop;           // next click anywhere picks that colour
@@ -158,6 +159,8 @@ static Rectangle pixed_button(GuiState *g, int i);
 static Rectangle attr_button(GuiState *g, int i);
 static Rectangle pick_button(GuiState *g);
 static Rectangle fill_button(GuiState *g);
+static int  pixed_button_count(GuiState *g);
+static void pixed_button_press(GuiState *g, int i);
 static void pix_fill(GuiState *g, int idx, int x, int y);
 static int colour_under_mouse(void);
 static bool pixed_locked(GuiState *g);
@@ -387,6 +390,9 @@ static void focus_move(GuiState *g, int dx, int dy) {
         g->world_sel = ((g->world_sel + dx + 8 * dy) % 64 + 64) % 64;
     } else if (g->focus == FOCUS_COLOURS) {           // the 8 x 2 swatches: moving selects
         g->sel_colour = ((g->sel_colour + dx + 8 * dy) % 16 + 16) % 16;
+    } else if (g->focus == FOCUS_BUTTONS) {           // a row of buttons: left / right
+        int n = pixed_button_count(g);
+        g->btn_sel = ((g->btn_sel + dx) % n + n) % n;
     } else if (g->focus == FOCUS_EDITOR) {
         int bi, bx, by, w, h;
         if (!block_panel(g, &bi, &bx, &by, &w, &h)) pixed_dims(g, &w, &h);
@@ -402,6 +408,8 @@ static void focus_apply(GuiState *g) {
     ged_new_input_batch();
     if (g->focus == FOCUS_WORLD) {
         ged_map_click(g->world_sel, false);
+    } else if (g->focus == FOCUS_BUTTONS) {
+        pixed_button_press(g, g->btn_sel);
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
         if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
@@ -502,7 +510,7 @@ static bool feed_keys(GuiState *g) {
         if (rk == KEY_TAB && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {      // GUI-only: cycle keyboard focus
             int step = (m & GK_MOD_SHIFT) ? FOCUS_COUNT - 1 : 1, bi, bx, by, bw, bh;
             g->focus = (g->focus + step) % FOCUS_COUNT;
-            if (g->focus == FOCUS_COLOURS && block_panel(g, &bi, &bx, &by, &bw, &bh))   // no swatches while the block panel is up
+            while ((g->focus == FOCUS_COLOURS || g->focus == FOCUS_BUTTONS) && block_panel(g, &bi, &bx, &by, &bw, &bh))   // hidden while the block panel is up
                 g->focus = (g->focus + step) % FOCUS_COUNT;
             any = true; continue;
         }
@@ -765,25 +773,9 @@ static bool feed_mouse(GuiState *g) {
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
         if (g->pix_painting) return false;
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && g->block_hidden >= 0 && CheckCollisionPointRec(m, pixed_button(g, 4))) {
-            g->block_hidden = -1;                                        // block: show its panel again
-            return true;
-        }
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            for (int i = 0; i < 4; i++) {
-                if (!CheckCollisionPointRec(m, pixed_button(g, i))) continue;
-                g->pix_op = true;
-                if (i == 0) {                                   // reset: the image as shipped
-                    uint8_t orig[GFX_MAX_BYTES];
-                    if (render_gfx_original(g->rctx, g->pix_src, idx, orig)) {
-                        pix_undo_push(g, g->pix_src, idx);
-                        render_gfx_put(g->rctx, g->pix_src, idx, orig);
-                        gfx_touched(g, g->pix_src);
-                    }
-                } else set_view(g, i == 1 ? VIEW_TILES : i == 2 ? VIEW_SPRITES : VIEW_BACKS);
-                return true;
-            }
-        }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+            for (int i = 0; i < pixed_button_count(g); i++)
+                if (CheckCollisionPointRec(m, pixed_button(g, i))) { pixed_button_press(g, i); return true; }
     }
 
     // world map: hover names, left = go there, right = move the thing / retarget the chunk
@@ -1032,9 +1024,9 @@ static void draw_help(GuiState *g) {
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
         "        (BACKS.SPL, shared by every room with that background number); middle-click picks",
         "wheel over room or picker: background; Shift+wheel / horizontal wheel: tileset",
-        "world map: click = go there; right-click = move the thing under the cursor there",
+        "world map: click = go there (an empty slot becomes a new room); right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
-        "focus: Tab cycles room / picker / editor / colours / world map (or click one); arrows, hjkl move it;",
+        "focus: Tab cycles room / picker / editor / colours / buttons / world map (or click one); arrows, hjkl move it;",
         "       Enter or Space applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
         "       key (r, s, o, ...) = back to the room",
         "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
@@ -1202,10 +1194,26 @@ static void draw_palette(GuiState *g) {
         gtext(&g->font, g->font_loaded, "saved", x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
 }
 
-// Buttons under the editor: reset, then one per source.
+// Buttons under the editor: reset, then one per view, then "block" while a
+// block object's panel has been closed with "gfx".
 static Rectangle pixed_button(GuiState *g, int i) {
     int bw = 9 * cw(g), gap = PAD;
     return (Rectangle){ pixed_x(g) + i * (bw + gap), pixed_buttons_y(g), bw, ch(g) + 4 };
+}
+static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 5 : 4; }
+
+static void pixed_button_press(GuiState *g, int i) {
+    g->pix_op = true;
+    if (i == 0) {                                   // reset: the image as shipped
+        int idx = pixed_index(g);
+        uint8_t orig[GFX_MAX_BYTES];
+        if (render_gfx_original(g->rctx, g->pix_src, idx, orig)) {
+            pix_undo_push(g, g->pix_src, idx);
+            render_gfx_put(g->rctx, g->pix_src, idx, orig);
+            gfx_touched(g, g->pix_src);
+        }
+    } else if (i <= 3) set_view(g, i == 1 ? VIEW_TILES : i == 2 ? VIEW_SPRITES : VIEW_BACKS);
+    else if (g->block_hidden >= 0) g->block_hidden = -1;   // block: show its panel again
 }
 
 // Remember the image as it is now, so the coming stroke (or reset) can be undone.
@@ -1454,11 +1462,13 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
             gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
         }
     const char *names[] = { "reset", "tiles", "sprites", "backs", "block" };
-    for (int i = 0; i < (block_available ? 5 : 4); i++) {
+    (void)block_available;
+    for (int i = 0; i < pixed_button_count(g); i++) {
         Rectangle rb = pixed_button(g, i);
         bool on = (i == 1 && !g->sprites_view && !g->backs_view) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view);
+        bool kbd = g->focus == FOCUS_BUTTONS && i == g->btn_sel;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-        DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
         gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
     }

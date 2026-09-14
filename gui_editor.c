@@ -234,7 +234,11 @@ int ged_item_at(int tx, int ty, int *idx) {
 }
 
 void ged_map_click(int room, bool right) {
-    if (room < 0 || room >= 64 || !state->rooms.rooms[room].valid) return;
+    if (room < 0 || room >= 64) return;
+    if (!state->rooms.rooms[room].valid) {
+        if (right) return;                          // nothing to move into a room that does not exist
+        room_create((size_t)room);                  // going to an empty slot on the map creates the room
+    }
     if (right) {
         if (state->current_state == EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS && state->current_switch) {
             struct SwitchObject *sw = cur_room()->switches + state->current_switch - 1;

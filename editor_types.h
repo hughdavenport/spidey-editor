@@ -267,6 +267,7 @@ extern size_t panel_oob_switch_n;
 
 /* GUI helpers (editor_actions.c) */
 bool transfer_item_to_room(size_t room_idx);
+bool room_create(size_t room_idx);   // make an absent room exist (blank tiles, the current room's tileset / background / gravity); false if it already does
 int  switch_add_chunk(size_t sw_idx, struct SwitchChunk chunk);
 
 /* Forward declarations for cross-module calls */
