@@ -1019,21 +1019,29 @@ static void draw_text_screen(GuiState *g) {
 static void draw_help(GuiState *g) {
     int stride;
     const GCell *cells = ged_cells(&stride);
+    // The editor's help box is the white-backed block: in the sidebar right
+    // of the map when it fits there, else centred over the whole screen. Only
+    // runs of white cells count, so the hex map's highlighted cells do not.
     int x0 = GED_COLS, x1 = -1, y0 = GED_ROWS, y1 = -1;
-    for (int y = 0; y < GED_ROWS; y++)
-        for (int x = GED_MAP_X + MAP_COLS; x < GED_COLS; x++) {
-            const GCell *c = &cells[y * stride + x];
-            if (!c->bg && !(c->ch && c->ch != ' ')) continue;
-            if (x < x0) x0 = x;
-            if (x > x1) x1 = x;
-            if (y < y0) y0 = y;
-            if (y > y1) y1 = y;
+    for (int y = 0; y < GED_ROWS; y++) {
+        int run = 0;
+        for (int x = 0; x <= GED_COLS; x++) {
+            bool white = x < GED_COLS && cells[y * stride + x].bg == 8;
+            if (white) { run++; continue; }
+            if (run >= 10) {
+                if (x - run < x0) x0 = x - run;
+                if (x - 1 > x1) x1 = x - 1;
+                if (y < y0) y0 = y;
+                if (y > y1) y1 = y;
+            }
+            run = 0;
         }
+    }
     if (x1 < 0) return;
     int cols = x1 - x0 + 1, rows = y1 - y0 + 1;
     static const char *gui_help[] = {
         "GUI  (mouse and keys on top of the editor's)",
-        "F2 hex map     F3 edit the .CGA / .EGA graphics     q quit     wheel over text: scroll",
+        "F2 hex map     F3 switch between the .EGA and .CGA graphics     q quit     wheel over text: scroll",
         "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
         "        that creature); middle-click on the room picks the tile",
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
@@ -1196,7 +1204,7 @@ static void draw_palette(GuiState *g) {
         : !g->sprites_view ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
                          : TextFormat("%s  frame 0x%02x", render_gfx_name(g->rctx, g->pix_src), g->sel_img[g->pix_src]),
         g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs())) : "",
-        g->cga ? "CGA graphics (F3: EGA)   Ctrl-? help" : "EGA graphics (F3: CGA)   Ctrl-? help",
+        g->cga ? "CGA graphics   Ctrl-? help (mouse and GUI keys too)" : "EGA graphics   Ctrl-? help (mouse and GUI keys too)",
     };
     for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
         gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
