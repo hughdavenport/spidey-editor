@@ -802,7 +802,6 @@ static void draw_palette(GuiState *g) {
         DrawRectangleLinesEx((Rectangle){x0 + sx * s, y0 + sy * s, s, s}, 2, GOLD);
     } else {
         GfxSource src = g->pix_src;
-        if (!g->sheet_loaded[src] || g->sheet_stale[src]) sheet_build(g, src);
         int w, h, n = render_gfx_count(src);
         render_gfx_size(src, &w, &h);
         float cellw = side / 8.0f, cellh = cellw * h / w;
@@ -1258,6 +1257,10 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             } else UpdateTexture(g->pal_tex, pbuf);
             g->pal_offset = toff;
         }
+
+        // textures must not be (re)built inside BeginDrawing: it corrupts the batch
+        if (g->pix_src != GFX_TILES && (!g->sheet_loaded[g->pix_src] || g->sheet_stale[g->pix_src]))
+            sheet_build(g, g->pix_src);
 
         if (g->saved_flash > 0) g->saved_flash -= dt;
         BeginDrawing();
