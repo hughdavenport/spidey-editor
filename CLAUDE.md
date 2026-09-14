@@ -106,8 +106,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   and leaves the cursor (and Spider-Man) where it was.
 - World map right of the picture under the palette: every room rendered into one 8x8 atlas
   texture (refreshed for the room being edited). Left click = go to that room, creating it if the
-  file has no such room (`room_create()` in editor_actions.c: blank tiles, the current room's
-  tileset / background / gravity; the editor's `r` prompt creates absent rooms too); right click =
+  file has no such room (`room_create()` in editor_actions.c: blank tiles and all settings 0;
+  the editor's `r` prompt creates absent rooms too); right click =
   `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
   or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
 - Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an

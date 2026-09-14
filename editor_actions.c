@@ -754,28 +754,17 @@ void shrink(int dx, int dy) {
 /* Move the switch (preamble at the cursor) or object (containing the cursor)
  * to room `room_idx`, keeping its coordinates: the GUI's "drop it on that room
  * in the world map". The cursor follows it. false = nothing to move. */
-// A room the file does not contain becomes a real, saved room: blank tiles,
-// no objects or switches, no exits, and the current room's tileset,
-// background, gravity and unknown bytes so the game treats it like its
-// neighbours. Rooms only exist in ROOMS.SPL once written, so write it now.
+// A room the file does not contain becomes a real, saved room, entirely
+// blank: zero tiles, every setting 0 (tileset 0, background 0, no gravity,
+// no damage, no exits), no objects or switches, a blank name. Rooms only
+// exist in ROOMS.SPL once written, so write it now.
 bool room_create(size_t room_idx) {
     if (room_idx >= C_ARRAY_LEN(state->rooms.rooms) || state->rooms.rooms[room_idx].valid) return false;
     Room *r = &state->rooms.rooms[room_idx];
-    struct DecompressedRoom *from = &state->rooms.rooms[state->current_level].data;
     ARRAY_FREE(r->rest); ARRAY_FREE(r->compressed); ARRAY_FREE(r->decompressed);
     memset(r, 0, sizeof *r);
     r->index = (uint8_t)room_idx;
     r->valid = true;
-    if (state->rooms.rooms[state->current_level].valid) {
-        r->data.tile_offset = from->tile_offset;
-        r->data.background = from->background;
-        r->data.gravity_vertical = from->gravity_vertical;
-        r->data.gravity_horizontal = from->gravity_horizontal;
-        r->data.UNKNOWN_b = from->UNKNOWN_b;
-        r->data.UNKNOWN_c = from->UNKNOWN_c;
-        r->data._num_switches = from->_num_switches & 0x3;
-        r->data.UNKNOWN_f = from->UNKNOWN_f;
-    }
     memset(r->data.name, ' ', sizeof r->data.name);
     snprintf(state->status_message, sizeof(state->status_message), "Created room %02zx", room_idx);
     assert(writeRooms(&state->rooms));
