@@ -205,7 +205,7 @@ static int pixed_h(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return h * pi
 static int swatch_px(GuiState *g) { return pixed_w(g) / 8; }
 static int swatch_y(GuiState *g) { return palette_y(g) + pixed_h(g) + PAD; }
 static int pixed_text_y(GuiState *g) { return swatch_y(g) + SWATCH_ROWS * swatch_px(g) + PAD; }
-static int pixed_buttons_y(GuiState *g) { return pixed_text_y(g) + 4 * ch(g) + 2; }
+static int pixed_buttons_y(GuiState *g) { return pixed_text_y(g) + 5 * ch(g) + 2; }   // 3 status lines + 2 creature lines
 static int pixed_bottom(GuiState *g) { return pixed_buttons_y(g) + 2 * ch(g) + 16; }
 // the picker's labels (and the world map) start below picker and editor alike
 static int labels_y(GuiState *g) {
@@ -1245,7 +1245,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
                                   : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->pix_src), idx, g->sel_colour),
           x0, ty, fs, RAYWHITE);
     gtext(&g->font, g->font_loaded,
-          pixed_locked(g) ? "tile 0 is never drawn by the game (background shows)" : "click paints, right-click picks",
+          pixed_locked(g) ? "tile 0 is always blank" : "click paints, right-click picks",
           x0, ty + ch(g), fs, pixed_locked(g) ? ORANGE : GRAY);
     gtext(&g->font, g->font_loaded, dirty ? "u undoes a stroke; saving..." : "u undoes a stroke",
           x0, ty + 2 * ch(g), fs, dirty ? ORANGE : GRAY);
@@ -1256,14 +1256,14 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         int tw = text_w(&g->font, g->font_loaded, "pick", fs);
         gtext(&g->font, g->font_loaded, "pick", (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + ((int)rb.height - fs) / 2, fs, RAYWHITE);
     }
-    if (g->pix_src != GFX_TILES) {                       // whose frame this is
+    if (g->pix_src != GFX_TILES) {                       // whose frame this is, on two lines
         int c = creature_of(g->pix_src, idx);
-        if (c >= 0)
-            gtext(&g->font, g->font_loaded,
-                  CREATURES[c].type >= 0
-                      ? TextFormat("%s (frames 0x%02x-0x%02x): Shift+click in the room places one", CREATURES[c].name, CREATURES[c].lo, CREATURES[c].hi)
-                      : TextFormat("%s (frames 0x%02x-0x%02x)", CREATURES[c].name, CREATURES[c].lo, CREATURES[c].hi),
+        if (c >= 0) {
+            gtext(&g->font, g->font_loaded, TextFormat("%s (frames 0x%02x-0x%02x)", CREATURES[c].name, CREATURES[c].lo, CREATURES[c].hi),
                   x0, ty + 3 * ch(g), fs, SKYBLUE);
+            if (CREATURES[c].type >= 0)
+                gtext(&g->font, g->font_loaded, "Shift+click in the room places one", x0, ty + 4 * ch(g), fs, SKYBLUE);
+        }
     }
     if (!g->sprites_view)
         for (int i = 0; i < 4; i++) {                    // attribute of painted tiles

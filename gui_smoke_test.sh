@@ -64,14 +64,14 @@ xdotool mousemove $((X + 776 + 192 + 16 + 2*9 + 4)) $((Y + 24 + 8*9 + 8 + 4)) mo
 xdotool mousemove $((X + 776 + 192 + 16 + 1*9 + 4)) $((Y + 24 + 1*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12b-pixel-edit
 xdotool key u; sleep 0.8; snap s12c-pixel-undo   # u undoes the stroke (most recent edit)
 # sprite editing: SPIDS1 button (2nd button under the editor), pick frame 0x18 (row 3, col 0), paint a pixel, snapshot, undo
-xdotool mousemove $((X + 984 + 2*116 + 30)) $((Y + 378 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4; snap s12d0-spids1-mode
+xdotool mousemove $((X + 984 + 2*116 + 30)) $((Y + 402 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4; snap s12d0-spids1-mode
 xdotool mousemove $((X + 776 + 12)) $((Y + 24 + 3*21 + 10)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4
 xdotool mousemove $((X + 776 + 192 + 16 + 5*9 + 4)) $((Y + 24 + 5*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12d-sprite-edit
 xdotool key u; sleep 0.8
-xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 381 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
+xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 405 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
-# labels start under the editor column (406+8=414), world map at 414 + 5 rows*24 + 8 = 542; thumbs 98x67 + 4 gap
-xdotool mousemove $((X + 776 + 1*102 + 40)) $((Y + 542 + 30)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
+# labels start under the editor column (430+8=438), world map at 438 + 5 rows*24 + 8 = 566; thumbs 98x67 + 4 gap
+xdotool mousemove $((X + 776 + 1*102 + 40)) $((Y + 566 + 30)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
 # wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
 xdotool mousemove $((X + 400)) $((Y + 24 + 200)) click 5; sleep 0.4; snap s13b-wheel-bkgrnd
 xdotool keydown shift; xdotool click 4; xdotool keyup shift; sleep 0.4; snap s13c-wheel-tileset
