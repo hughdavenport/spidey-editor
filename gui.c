@@ -184,6 +184,7 @@ static void link_hover(GuiState *g, Vector2 m);
 static bool link_hovered(GuiState *g, int room, int sw, int chunk);
 static Vector2 switch_anchor(GuiState *g, struct SwitchObject *sw);
 static int  exit_memory_offset(const struct SwitchChunk *ch);
+static Vector2 arrival_edge(GuiState *g, int ex);
 static void label(GuiState *g, const char *s, float x, float y, Color col, bool emph);
 static void draw_source_grid(GuiState *g, bool block_up);
 static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
@@ -2279,6 +2280,12 @@ static int collect_links(GuiState *g, LinkSeg *out, int max) {
             struct SwitchObject *sw = other->switches + i;
             for (size_t c = 1; c < sw->chunks.length && n < max; c++) {
                 struct SwitchChunk *ch = sw->chunks.data + c;
+                int ex = exit_memory_offset(ch);
+                if (ex >= 0 && (ch->off == cur || ch->on == cur)) {
+                    Rectangle d = world_cell(g, rid, tw, th);
+                    out[n++] = (LinkSeg){ (Vector2){ d.x + d.width / 2, d.y + d.height / 2 }, arrival_edge(g, ex), rid, i, (int)c, cur, -1, TOGGLE_BLOCK, -1, -1, -1 };
+                    continue;
+                }
                 if (ch->type != TOGGLE_BIT || ch->room_idx != cur || ch->switch_idx >= r->num_switches || r->switches[ch->switch_idx].chunks.length == 0) continue;
                 Rectangle d = world_cell(g, rid, tw, th);
                 out[n++] = (LinkSeg){ (Vector2){ d.x + d.width / 2, d.y + d.height / 2 }, switch_anchor(g, r->switches + ch->switch_idx), rid, i, (int)c, cur, ch->switch_idx, TOGGLE_BIT, -1, 0, 0 };
@@ -2365,6 +2372,10 @@ static bool link_click(GuiState *g, Vector2 m) {
             ged_select_chunk(l->to_sw, 0);
             cursor_to_switch(cur, l->to_sw);
         } else ged_select_chunk(l->sw, l->chunk);                       // (from the thing, the next click comes back to the chunk)
+    } else if (l->kind == TOGGLE_BLOCK) {                               // an exit rewritten to lead here: nothing here to select, go to that chunk
+        ged_map_click(l->room, false);
+        ged_select_chunk(l->sw, l->chunk);
+        cursor_to_switch(l->room, l->sw);
     } else {
         bool on_it = ged_current_switch() == l->to_sw && ged_current_chunk() == 0;
         if (on_it) {                                                    // follow an incoming arrow back to its switch
@@ -2387,6 +2398,18 @@ static int exit_memory_offset(const struct SwitchChunk *ch) {
     return point >= 2 && point <= 5 ? point : -1;
 }
 static const char *EXIT_NAMES[] = { "", "", "north", "east", "south", "west" };
+
+// Where a player arrives in this room when it becomes another room's exit
+// `ex`: their north exit leads onto our bottom edge, east onto our left, ...
+static Vector2 arrival_edge(GuiState *g, int ex) {
+    float mx = pic_x(g) + pic_w(g) / 2.0f, my = pic_y(g) + pic_h(g) / 2.0f;
+    switch (ex) {
+        case 2:  return (Vector2){ mx, pic_y(g) + pic_h(g) - 2 };   // their north exit: we are above them
+        case 3:  return (Vector2){ pic_x(g) + 2, my };              // their east exit: we are to their right, entered from our left
+        case 4:  return (Vector2){ mx, pic_y(g) + 2 };
+        default: return (Vector2){ pic_x(g) + pic_w(g) - 2, my };
+    }
+}
 
 // An arrow from `o` to `e` with its head at `e`.
 static void draw_arrow(Vector2 o, Vector2 e, float thick, float head, Color col) {
@@ -2429,6 +2452,19 @@ static void draw_world_links(GuiState *g) {
             struct SwitchObject *sw = other->switches + i;
             for (size_t c = 1; c < sw->chunks.length; c++) {
                 struct SwitchChunk *ch = sw->chunks.data + c;
+                int ex = exit_memory_offset(ch);
+                if (ex >= 0 && (ch->off == ged_room() || ch->on == ged_room())) {   // a switch there makes one of its exits lead here
+                    Rectangle d = world_cell(g, rid, tw, th);
+                    Vector2 from = { d.x + d.width / 2, d.y + d.height / 2 };
+                    bool hov = link_hovered(g, rid, i, (int)c);
+                    Color col = { 255, 150, 0, hov ? 255 : 200 };
+                    DrawRectangleRec(d, (Color){255, 150, 0, 60});
+                    DrawRectangleLinesEx(d, 3, col);
+                    draw_arrow(from, arrival_edge(g, ex), hov ? 2.5f : 1.5f, 10, col);
+                    const char *state_ = ch->off == ch->on ? "" : ch->on == ged_room() ? " on" : " off";
+                    label(g, TextFormat("%s%s -> here", EXIT_NAMES[ex], state_), d.x + 2, d.y + d.height - g->font_px - 2, col, false);
+                    continue;
+                }
                 if (ch->type != TOGGLE_BIT || ch->room_idx != ged_room() || ch->switch_idx >= r->num_switches) continue;
                 struct SwitchObject *target = r->switches + ch->switch_idx;
                 if (target->chunks.length == 0) continue;
