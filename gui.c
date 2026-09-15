@@ -38,10 +38,11 @@
 #define DEFAULT_SCALE 3
 #define MIN_PANEL_ROWS 12       // text rows kept visible under the picture when auto-scaling
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
-#define PALETTE_LINES 4         // text lines under the palette before the world map
 #define SWATCH_ROWS 2
 enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
+#define BLOCK_BUTTONS 7         // block panel: w+ w- h+ h- gfx import export
+#define BUTTON_ROWS 7           // under the picker, two per row: reset tiles / sprites backs / font screens / import export / block / pass solid / magnet slip
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
 };
@@ -174,6 +175,7 @@ static int  world_room_at(GuiState *g, Vector2 m);
 static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
 static Rectangle pixed_button(GuiState *g, int i);
 static Rectangle attr_button(GuiState *g, int i);
+static bool grid_row_valid(GuiState *g, int row);
 static Rectangle pick_button(GuiState *g);
 static Rectangle fill_button(GuiState *g);
 static int  pixed_button_count(GuiState *g);
@@ -197,6 +199,8 @@ static void draw_swatches(GuiState *g, int x0, int sy, int sp);
 static int  swatch_pick(GuiState *g, int x0, int sy, int sp, Vector2 m);
 static void import_png(GuiState *g, const char *path);
 static void export_png(GuiState *g);
+static void block_export_png(GuiState *g, int idx, int w, int h);
+static void block_import_png(GuiState *g, int idx, int w, int h, const char *path);
 static void gui_note(GuiState *g, const char *msg);
 static void gui_error(GuiState *g, const char *msg);
 static int  cur_backs(void);
@@ -255,13 +259,11 @@ static int pixed_h(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return h * pi
 static int swatch_px(GuiState *g) { return pixed_w(g) / 8; }
 static int swatch_y(GuiState *g) { return palette_y(g) + pixed_h(g) + PAD; }
 static int pixed_text_y(GuiState *g) { return swatch_y(g) + SWATCH_ROWS * swatch_px(g) + PAD; }
-static int pixed_buttons_y(GuiState *g) { return pixed_text_y(g) + 5 * ch(g) + 2; }   // 3 status lines + 2 creature lines
-static int pixed_bottom(GuiState *g) { return pixed_buttons_y(g) + 3 * ch(g) + 24; }   // two button rows + the attribute row
-// the picker's labels (and the world map) start below picker and editor alike
-static int labels_y(GuiState *g) {
-    int a = palette_y(g) + TILESET_PX * g->scale, b = pixed_bottom(g);
-    return (a > b ? a : b) + PAD;
-}
+static int pixed_bottom(GuiState *g) { return pixed_text_y(g) + 9 * ch(g); }   // status, creature / hint, the picker's labels, saved
+// The buttons sit under the picker, two per row, from below where the tallest
+// picker (the sprite sheets, 16 rows of frames) ends, so they never move.
+static int buttons_y0(GuiState *g) { return palette_y(g) + (int)(16 * (TILESET_PX * g->scale / 8.0f) * SPIDS_FRAME_H / SPIDS_FRAME_W) + PAD; }
+static int buttons_bottom(GuiState *g) { return buttons_y0(g) + BUTTON_ROWS * (ch(g) + 8); }
 // the image being edited: tiles are picked within the current tileset
 static int pixed_index(GuiState *g) {
     return g->pix_src == GFX_TILES ? g->sel_tile + g->pal_offset * 16 : g->sel_img[g->pix_src];
@@ -486,12 +488,15 @@ static void focus_move(GuiState *g, int dx, int dy) {
         g->sel_colour = ((g->sel_colour + dx + (n > 8 ? 8 : 0) * dy) % n + n) % n;
     } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {   // screen mode: pick fill / import export / room
         g->btn_sel = ((g->btn_sel + dx + 2 * dy) % 5 + 5) % 5;
-    } else if (g->focus == FOCUS_BUTTONS) {           // rows of buttons: left / right along a row, up / down between them
-        int rows = tiles_view(g) ? 3 : 2;                 // the attribute row exists in the tiles view only
-        if (dy) g->btn_row = ((g->btn_row + dy) % rows + rows) % rows;
-        if (g->btn_row >= rows) g->btn_row = 0;
-        int n = g->btn_row == 0 ? 4 : g->btn_row == 1 ? pixed_button_count(g) - 4 : 4;
-        g->btn_sel = ((g->btn_sel + dx) % n + n) % n;
+    } else if (g->focus == FOCUS_BUTTONS) {           // the button grid: left / right = column, up / down = next row that has buttons
+        int step = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        if (step) for (int tries = 0; tries < BUTTON_ROWS; tries++) {
+            g->btn_row = ((g->btn_row + step) % BUTTON_ROWS + BUTTON_ROWS) % BUTTON_ROWS;
+            if (grid_row_valid(g, g->btn_row)) break;
+        }
+        if (!grid_row_valid(g, g->btn_row)) g->btn_row = 0;
+        g->btn_sel = ((g->btn_sel + dx) % 2 + 2) % 2;
+        if (g->btn_row == 4) g->btn_sel = 0;              // "block" stands alone in its row
     } else if (g->focus == FOCUS_EDITOR) {
         int bi, bx, by, w, h;
         if (!block_panel(g, &bi, &bx, &by, &w, &h)) pixed_dims(g, &w, &h);
@@ -512,9 +517,8 @@ static void focus_apply(GuiState *g) {
     } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {
         smode_button_press(g, g->btn_sel % 5);
     } else if (g->focus == FOCUS_BUTTONS) {
-        if (g->btn_row == 2 && tiles_view(g)) g->sel_attr = ATTRS[g->btn_sel % 4].bits;
-        else if (g->btn_row == 1) pixed_button_press(g, 4 + g->btn_sel % (pixed_button_count(g) - 4));
-        else pixed_button_press(g, g->btn_sel % 4);
+        if (g->btn_row >= 5) g->sel_attr = ATTRS[(g->btn_row - 5) * 2 + g->btn_sel % 2].bits;
+        else if (g->btn_row * 2 + g->btn_sel % 2 < pixed_button_count(g)) pixed_button_press(g, g->btn_row * 2 + g->btn_sel % 2);
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
         if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
@@ -864,9 +868,11 @@ static bool feed_mouse(GuiState *g) {
             if (g->block_painting) return false;
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 static const int dxy[4][3] = { {1, 0, 1}, {1, 0, 0}, {0, 1, 1}, {0, 1, 0} };   // w+ w- h+ h-
-                for (int i = 0; i < 5; i++)
+                for (int i = 0; i < BLOCK_BUTTONS; i++)
                     if (CheckCollisionPointRec(m, block_button(g, i, bh, z))) {
                         if (i == 4) { g->block_hidden = bi; return true; }          // gfx: back to the pixel editor
+                        if (i == 5) { block_import_png(g, bi, bw, bh, NULL); return true; }
+                        if (i == 6) { block_export_png(g, bi, bw, bh); return true; }
                         ged_new_input_batch();
                         ged_block_resize(dxy[i][0], dxy[i][1], dxy[i][2]);
                         return true;
@@ -1480,31 +1486,34 @@ static void draw_palette(GuiState *g) {
         DrawRectangleLinesEx((Rectangle){x0 + (sel % 8) * cellw, y0 + (sel / 8) * cellh, cellw, cellh}, 2, GOLD);
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, cellh * 16 + 4}, 2, GOLD);
     }
-    int ly = labels_y(g), lh = ch(g);
+    int ly = pixed_text_y(g) + 5 * ch(g), lh = ch(g), lx = pixed_x(g);   // under the pixel editor's own lines
     const char *lines[] = {
         g->backs_view    ? TextFormat("background %d  scenery tile 0x%02x", cur_backs(), g->sel_img[GFX_SCENERY])
         : g->font_view   ? TextFormat("%s  tile 0x%02x", render_gfx_name(g->rctx, GFX_CHARSET), g->sel_img[GFX_CHARSET])
         : tiles_view(g)  ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
                          : TextFormat("%s  frame 0x%02x", render_gfx_name(g->rctx, g->pix_src), g->sel_img[g->pix_src]),
         g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs())) : "",
-        g->cga ? "CGA graphics   Ctrl-? help (mouse and GUI keys too)" : "EGA graphics   Ctrl-? help (mouse and GUI keys too)",
+        g->cga ? "CGA graphics   Ctrl-? help" : "EGA graphics   Ctrl-? help",
     };
     for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
-        gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
+        gtext(&g->font, g->font_loaded, lines[i], lx, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
 
     if (g->err_flash > 0)
-        gtext(&g->font, g->font_loaded, g->err, x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, g->err_col);
+        gtext(&g->font, g->font_loaded, g->err, lx, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, g->err_col);
     else if (g->saved_flash > 0)
-        gtext(&g->font, g->font_loaded, "saved", x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
+        gtext(&g->font, g->font_loaded, "saved", lx, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
 }
 
 // Buttons under the editor: reset, then one per view, then "block" while a
 // block object's panel has been closed with "gfx".
-// Row 0: reset tiles sprites backs. Row 1: font screens import export (block).
-static Rectangle pixed_button(GuiState *g, int i) {
-    int bw = 9 * cw(g), gap = PAD, row = i < 4 ? 0 : 1, col = i < 4 ? i : i - 4;
-    return (Rectangle){ pixed_x(g) + col * (bw + gap), pixed_buttons_y(g) + row * (ch(g) + 8), bw, ch(g) + 4 };
+// Button i of the grid under the picker: two columns, rows 0-3 the sources
+// (reset tiles / sprites backs / font screens / import export), row 4 "block"
+// while a block panel is hidden, rows 5-6 the tile attributes (tiles view).
+static Rectangle grid_button(GuiState *g, int row, int col) {
+    int bw = (TILESET_PX * g->scale - PAD) / 2;
+    return (Rectangle){ palette_x(g) + col * (bw + PAD), buttons_y0(g) + row * (ch(g) + 8), bw, ch(g) + 4 };
 }
+static Rectangle pixed_button(GuiState *g, int i) { return grid_button(g, i / 2, i % 2); }
 static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 9 : 8; }
 
 static void pixed_button_press(GuiState *g, int i) {
@@ -1524,6 +1533,67 @@ static void pixed_button_press(GuiState *g, int i) {
 }
 
 /* ----------------------------------------------------------- PNG import / export */
+
+// A block object's picture: <data dir>/BLOCK-<room>-<object>.png.
+static const char *block_png_path(GuiState *g, int idx) {
+    static char p[1400];
+    snprintf(p, sizeof p, "%s/BLOCK-%02x-%d.png", g->data_dir ? g->data_dir : ".", ged_room(), idx);
+    return p;
+}
+
+// The block's tiles rendered as one picture (w*8 x h*8), from the room's tileset.
+static void block_export_png(GuiState *g, int idx, int w, int h) {
+    uint8_t *buf = calloc((size_t)w * 8 * h * 8, 4), tile[8 * 8 * 4];
+    int toff = ged_rooms()->rooms[ged_room()].data.tile_offset;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            render_gfx_rgba(g->rctx, GFX_TILES, (ged_block_tile(idx, x, y) & 0x3f) + toff * 16, tile);
+            for (int r = 0; r < 8; r++) memcpy(buf + (((size_t)(y * 8 + r) * w * 8) + x * 8) * 4, tile + r * 8 * 4, 8 * 4);
+        }
+    Image img = { .data = buf, .width = w * 8, .height = h * 8, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    const char *p = block_png_path(g, idx);
+    if (ExportImage(img, p)) gui_note(g, TextFormat("exported %s", p));
+    else gui_error(g, TextFormat("could not write %s", p));
+    free(buf);
+    g->pix_op = true;
+}
+
+// A picture becomes block tiles: scaled to w*8 x h*8, then each 8x8 cell gets
+// the tile of the room's tileset that matches it best (least squared RGB
+// difference), with the current attribute bits. One room undo entry.
+static void block_import_png(GuiState *g, int idx, int w, int h, const char *path) {
+    if (path == NULL) path = block_png_path(g, idx);
+    g->pix_op = true;
+    if (!FileExists(path)) { gui_error(g, TextFormat("no %s to import", path)); return; }
+    Image img = LoadImage(path);
+    if (img.data == NULL) { gui_error(g, TextFormat("could not read %s", path)); return; }
+    if (img.width != w * 8 || img.height != h * 8) ImageResizeNN(&img, w * 8, h * 8);
+    ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    static uint8_t tiles[64][8 * 8 * 4];
+    int toff = ged_rooms()->rooms[ged_room()].data.tile_offset;
+    for (int t = 0; t < 64; t++) render_gfx_rgba(g->rctx, GFX_TILES, t + toff * 16, tiles[t]);
+    ged_paint_begin();
+    const uint8_t *px = img.data;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            long best = -1; int best_t = 0;
+            for (int t = 0; t < 64; t++) {
+                long d = 0;
+                for (int r = 0; r < 8 && (best < 0 || d < best); r++)
+                    for (int c = 0; c < 8; c++) {
+                        const uint8_t *a = px + (((size_t)(y * 8 + r) * w * 8) + x * 8 + c) * 4, *b = tiles[t] + (r * 8 + c) * 4;
+                        long dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+                        d += dr * dr + dg * dg + db * db;
+                    }
+                if (best < 0 || d < best) { best = d; best_t = t; }
+            }
+            ged_block_set_tile(idx, x, y, (uint8_t)(best_t | g->sel_attr));
+        }
+    UnloadImage(img);
+    g->paint_dirty = true; g->save_timer = 0.4f;
+    g->room_dirty = true;
+    gui_note(g, TextFormat("imported %s", path));
+}
 
 // <data dir>/<FILE>.png for a screen, <FILE>-<index>.png for one image of a
 // sheet (BLOCKS-012.png is tile 0x12 of BLOCKS.EGA or .CGA).
@@ -1755,8 +1825,9 @@ static int block_zoom(GuiState *g, int w, int h) {
     (void)w; (void)h;
     return 8 * g->scale * 3 / 2;             // fixed: resizing must not rescale the tiles
 }
+// w+ w- h+ h- gfx import export
 static Rectangle block_button(GuiState *g, int i, int h, int z) {
-    int bw = 5 * cw(g);
+    int bw = 6 * cw(g);
     return (Rectangle){ pixed_x(g) + i * (bw + 4), palette_y(g) + h * z + PAD, bw, ch(g) + 4 };
 }
 
@@ -1779,8 +1850,8 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
         DrawRectangleLinesEx((Rectangle){x0 + g->ecx * z, y0 + g->ecy * z, z, z}, 2, WHITE);
         DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * z + 4, h * z + 4}, 2, GOLD);
     }
-    const char *names[] = { "w+", "w-", "h+", "h-", "gfx" };
-    for (int i = 0; i < 5; i++) {
+    const char *names[BLOCK_BUTTONS] = { "w+", "w-", "h+", "h-", "gfx", "import", "export" };
+    for (int i = 0; i < BLOCK_BUTTONS; i++) {
         Rectangle rb = block_button(g, i, h, z);
         DrawRectangleRec(rb, (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, 1, GRAY);
@@ -1789,8 +1860,9 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
     }
     int ty = (int)block_button(g, 0, h, z).y + ch(g) + PAD;
     gtext(&g->font, g->font_loaded, TextFormat("block O%d at %d,%d  %dx%d", idx, bx, by, w, h), x0, ty, fs, RAYWHITE);
-    gtext(&g->font, g->font_loaded, "click paints the picked tile,", x0, ty + ch(g), fs, GRAY);
-    gtext(&g->font, g->font_loaded, "right-click picks; w/h resize; gfx = pixel editor", x0, ty + 2 * ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded, "click paints, right-click picks; w/h resize", x0, ty + ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded, "gfx: pixel editor (its block button returns)", x0, ty + 2 * ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded, TextFormat("import / export %s (best tiles)", GetFileName(block_png_path(g, idx))), x0, ty + 3 * ch(g), fs, GRAY);
 }
 
 // Tile 0 of every tileset is "invisible": the game never draws it (the
@@ -1839,6 +1911,8 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
           x0, ty + ch(g), fs, pixed_locked(g) ? ORANGE : GRAY);
     gtext(&g->font, g->font_loaded, dirty ? "u undoes a stroke; saving..." : "u undoes a stroke",
           x0, ty + 2 * ch(g), fs, dirty ? ORANGE : GRAY);
+    if (g->block_hidden >= 0 && !g->sprites_view)
+        gtext(&g->font, g->font_loaded, TextFormat("block O%d is under the cursor: \"block\" shows its tiles", g->block_hidden), x0, ty + 3 * ch(g), fs, SKYBLUE);
     {
         Rectangle rb = pick_button(g);
         DrawRectangleRec(rb, g->eyedrop ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
@@ -1864,7 +1938,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
             Rectangle rb = attr_button(g, i);
             bool on = ATTRS[i].bits == g->sel_attr;
-            bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 2 && i == g->btn_sel % 4;
+            bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 5 + i / 2 && g->btn_sel % 2 == i % 2;
             DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
             DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
             int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
@@ -1875,7 +1949,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     for (int i = 0; i < pixed_button_count(g); i++) {
         Rectangle rb = pixed_button(g, i);
         bool on = (i == 1 && tiles_view(g)) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view) || (i == 4 && g->font_view) || (i == 5 && g->screens_view);
-        bool kbd = g->focus == FOCUS_BUTTONS && (i < 4 ? (g->btn_row == 0 && i == g->btn_sel) : (g->btn_row == 1 && i - 4 == g->btn_sel));
+        bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == i / 2 && g->btn_sel % 2 == i % 2;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
@@ -1897,11 +1971,14 @@ static void spidey_build(GuiState *g) {
 
 /* -------------------------------------------------------------- world map */
 
-static int world_y(GuiState *g) { return labels_y(g) + PALETTE_LINES * ch(g) + PAD; }
+static int world_y(GuiState *g) { int a = buttons_bottom(g), b = pixed_bottom(g); return (a > b ? a : b) + PAD; }
 // attribute buttons (what painted tiles are): a row under the source buttons
-static Rectangle attr_button(GuiState *g, int i) {
-    int bw = 7 * cw(g);
-    return (Rectangle){ pixed_x(g) + i * (bw + 4), pixed_buttons_y(g) + 2 * (ch(g) + 8), bw, ch(g) + 4 };
+static Rectangle attr_button(GuiState *g, int i) { return grid_button(g, 5 + i / 2, i % 2); }
+// Which grid rows have buttons right now.
+static bool grid_row_valid(GuiState *g, int row) {
+    if (row < 4) return true;
+    if (row == 4) return g->block_hidden >= 0;
+    return row <= 6 && tiles_view(g);
 }
 
 // Thumbnail size: 8 columns across the space right of the picture, shrunk if
@@ -2213,7 +2290,11 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (feed_keys(g)) g->room_dirty = true;
         if (IsFileDropped()) {                             // a PNG dropped on the window replaces the current image
             FilePathList dropped = LoadDroppedFiles();
-            if (dropped.count > 0) import_png(g, dropped.paths[0]);
+            int bi, bx, by, bw, bh;
+            if (dropped.count > 0) {
+                if (block_panel(g, &bi, &bx, &by, &bw, &bh)) block_import_png(g, bi, bw, bh, dropped.paths[0]);
+                else import_png(g, dropped.paths[0]);
+            }
             UnloadDroppedFiles(dropped);
             g->room_dirty = true;
         }

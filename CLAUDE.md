@@ -171,8 +171,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   editor reports a masked pixel as colour 4, shows it as a 5th "transparent" swatch, and an
   undo record / reset / save of a CGA sprite covers its mask frame too (`has_mask`, `mask_of`).
   The two sets are separate files: an EGA edit is not mirrored into the CGA file or vice versa.
-- Two rows of buttons under the pixel editor: reset / tiles / sprites / backs, then font / screens /
-  import / export (/ block). "font" is CHARSET (128 tiles, 16 across). "screens" enters screen mode
+- The button grid sits under the picker (two per row, from below the sprite sheets' height so it
+  never moves): reset tiles / sprites backs / font screens / import export / block (while a block
+  panel is hidden) / pass solid / magnet slip (tiles view); the picker's labels moved into the
+  pixel-editor column under its own lines (`grid_button`, `buttons_y0`, `world_y`). "font" is CHARSET (128 tiles, 16 across). "screens" enters screen mode
   (`g->screens_view`): the whole window becomes the chosen full-screen picture (LOADSCRN, WINSCRN,
   PAGE1-4 320x200, HISCORE 320x38, SPIDFIGR / SKELFIGR 64x192; row-planar in EGA,
   `render_gfx_is_screen`) at the largest integer zoom left of a side panel with the screens list,
@@ -191,7 +193,11 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   retypes the object under the cursor or creates one).
 - Block object under the cursor: its tile grid replaces the pixel editor (`ged_block_*`);
   click paints the picked tile (with the attribute buttons' bits), w+/w-/h+/h- call the
-  editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block.
+  editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block (the button
+  grid then shows a "block" button, and the pixel editor a hint, to bring it back).
+  "export" renders the block's tiles to <data dir>/BLOCK-<room>-<object>.png; "import" (or a PNG
+  dropped while the panel shows) scales a picture to the block and gives each 8x8 cell the
+  best-matching tile of the room's tileset (`block_import_png`, one room undo entry).
 - Keyboard focus (`g->focus`): Tab cycles room / picker / editor / colours / buttons / world map,
   or click one; arrows and hjkl move that panel's selection (colours: moving selects the paint
   colour; buttons: left/right along the row, up/down to the pass/solid/magnet/slip row in the tiles
