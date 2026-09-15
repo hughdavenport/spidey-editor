@@ -57,8 +57,17 @@ int render_player_frame(void);
 // SPIDS1 / SPIDS2 (64 24x21 sprite frames, the last palette colour transparent:
 // 15 in EGA, 3 in CGA), SCENERY (256 8x8 background tiles); .EGA or .CGA
 // depending on the context's mode. Colours are palette indices, 0..15 or 0..3.
-typedef enum { GFX_TILES, GFX_SPIDS1, GFX_SPIDS2, GFX_SCENERY, GFX_SOURCES } GfxSource;
-#define GFX_MAX_BYTES 256                 // largest per-image record (an EGA SPIDS frame stride)
+// Sheets: BLOCKS, SPIDS1, SPIDS2, SCENERY, CHARSET (the 8x8 font, 128 tiles).
+// Screens: one full picture each, row-planar in EGA (LOADSCRN title, WINSCRN
+// ending, PAGE1-4 story, 320x200; HISCORE 320x38; SPIDFIGR / SKELFIGR health
+// figures, 64x192). The four sheets the rooms need must exist; the rest are
+// optional (render_gfx_available).
+typedef enum { GFX_TILES, GFX_SPIDS1, GFX_SPIDS2, GFX_SCENERY, GFX_CHARSET,
+               GFX_LOADSCRN, GFX_WINSCRN, GFX_PAGE1, GFX_PAGE2, GFX_PAGE3, GFX_PAGE4,
+               GFX_HISCORE, GFX_SPIDFIGR, GFX_SKELFIGR, GFX_SOURCES } GfxSource;
+#define GFX_MAX_BYTES 32000               // largest per-image record (an EGA 320x200 screen)
+bool render_gfx_is_screen(GfxSource src);             // a single picture rather than a sheet
+bool render_gfx_available(RenderCtx *ctx, GfxSource src);   // its file was found in the data dir
 const char *render_gfx_name(RenderCtx *ctx, GfxSource src);   // file name in this mode, e.g. "BLOCKS.CGA"
 int  render_gfx_count(GfxSource src);      // images in the file
 void render_gfx_size(GfxSource src, int *w, int *h);

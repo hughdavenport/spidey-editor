@@ -2,7 +2,7 @@
 
 SPIDEY_DIR=${SPIDEY_DIR:-Spider}
 # graphics and backgrounds edited in the GUI (in its data dir, here if that was .)
-for f in BLOCKS.EGA SPIDS1.EGA SPIDS2.EGA SCENERY.EGA BLOCKS.CGA SPIDS1.CGA SPIDS2.CGA SCENERY.CGA BACKS.SPL; do
+for f in *.EGA *.CGA BACKS.SPL; do
     if [ -f "$f" ] && [ "$f" -nt "$SPIDEY_DIR/$f" ]; then cp "$f" "$SPIDEY_DIR/"; fi
 done
 # PLAY_ROOM (set by the editor's Ctrl-P) = start in that room: it is swapped

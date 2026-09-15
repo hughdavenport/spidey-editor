@@ -66,6 +66,7 @@ typedef struct {
     bool cga;               // editing the .CGA graphics (F3) rather than the .EGA ones
     const char *data_dir;   // where the graphics live (main()'s argument, for reopening)
     bool world_stale;       // rebuild the world-map atlas before the next frame
+    bool world_pending;     // ... after the next graphics save (a file the rooms are drawn from changed)
     Texture2D tex;          // rendered room
     bool tex_loaded;
     bool room_dirty;        // re-render the room texture this frame
@@ -123,6 +124,13 @@ typedef struct {
     bool backs_view;
     bool backs_painting;        // background stroke in progress (Shift+drag in the backs view)
     bool backs_dirty;           // edited BACKS.SPL not yet written
+    bool font_view;             // picker shows the CHARSET font
+    bool screens_view;          // picker lists the full-screen pictures; the room area shows the chosen one
+    GfxSource screen_src;       // the screen last chosen in that list
+    Texture2D scr_tex;          // that screen, for the big view and the thumbnail
+    bool scr_loaded, scr_stale;
+    GfxSource scr_src;          // which screen scr_tex holds
+    Color err_col;              // colour of the err message (red for refusals, green for notes)
     int sel_sprite;
     int sel_img[GFX_SOURCES];   // selected image per source (tiles: index within the current tileset)
     int sel_colour;             // colour to paint with
@@ -132,7 +140,7 @@ typedef struct {
     Texture2D sheet_tex[GFX_SOURCES];   // sprite sheets as 8-across pickers (tiles use pal_tex)
     bool sheet_loaded[GFX_SOURCES];
     bool sheet_stale[GFX_SOURCES];
-    struct { int src; int idx; uint8_t data[BACKS_TILES]; } pix_undo[64];   // image (GfxSource) or background block (src UNDO_BACKS) before each stroke / reset
+    struct { int src; int idx; uint8_t data[GFX_MAX_BYTES]; } pix_undo[64];   // image (GfxSource) or background block (src UNDO_BACKS) before each stroke / reset
     int pix_undo_n;
     unsigned seq, pix_seq, key_seq;   // ordering of pixel strokes vs editor keys, for `u`
     Font panel_font;        // text under the picture: a touch smaller so PANEL_COLS fit its width
@@ -142,7 +150,10 @@ typedef struct {
 } GuiState;
 #define PANEL_COLS 84           // columns of panel text that fit across the picture
 #define UNDO_BACKS (-1)         // pix_undo.src: a BACKS block, idx = block id
-enum { VIEW_TILES, VIEW_SPRITES, VIEW_BACKS };
+enum { VIEW_TILES, VIEW_SPRITES, VIEW_BACKS, VIEW_FONT, VIEW_SCREENS };
+// The full-screen pictures, in the order the screens picker lists them.
+static const GfxSource SCREENS[] = { GFX_LOADSCRN, GFX_WINSCRN, GFX_PAGE1, GFX_PAGE2, GFX_PAGE3, GFX_PAGE4, GFX_HISCORE, GFX_SPIDFIGR, GFX_SKELFIGR };
+#define NSCREENS ((int)(sizeof SCREENS / sizeof SCREENS[0]))
 #define BACKS_COLS 16           // the scenery picker: 16 x 16 tiles in the picker square
 #define MOD_LATCH_FRAMES 3
 
@@ -174,6 +185,15 @@ static void focus_apply(GuiState *g);
 static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh);
 static void sync_sprite_sel(GuiState *g);
 static void set_view(GuiState *g, int view);
+static bool tiles_view(GuiState *g);
+static void screen_geom(GuiState *g, int *z, int *ox, int *oy, int *w, int *h);
+static bool mouse_screen_px(GuiState *g, int *x, int *y);
+static void screen_tex_build(GuiState *g);
+static void draw_screen_view(GuiState *g);
+static void import_png(GuiState *g, const char *path);
+static void export_png(GuiState *g);
+static void gui_note(GuiState *g, const char *msg);
+static void gui_error(GuiState *g, const char *msg);
 static int  cur_backs(void);
 static void backs_touched(GuiState *g);
 static void backs_undo_push(GuiState *g, int bid);
@@ -225,13 +245,13 @@ static int palette_y(GuiState *g) { return pic_y(g); }
 static int pixed_x(GuiState *g) { return palette_x(g) + TILESET_PX * g->scale + 2 * PAD; }
 static void pixed_dims(GuiState *g, int *w, int *h) { render_gfx_size(g->pix_src, w, h); }
 static int pixed_px(GuiState *g) { int w, h; pixed_dims(g, &w, &h); int p = TILESET_PX * g->scale / h; return p < 2 ? 2 : p; }
-static int pixed_w(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return w * pixed_px(g); }
-static int pixed_h(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return h * pixed_px(g); }
+static int pixed_w(GuiState *g) { if (g->screens_view) return TILESET_PX * g->scale; int w, h; pixed_dims(g, &w, &h); return w * pixed_px(g); }
+static int pixed_h(GuiState *g) { if (g->screens_view) return TILESET_PX * g->scale; int w, h; pixed_dims(g, &w, &h); return h * pixed_px(g); }
 static int swatch_px(GuiState *g) { return pixed_w(g) / 8; }
 static int swatch_y(GuiState *g) { return palette_y(g) + pixed_h(g) + PAD; }
 static int pixed_text_y(GuiState *g) { return swatch_y(g) + SWATCH_ROWS * swatch_px(g) + PAD; }
 static int pixed_buttons_y(GuiState *g) { return pixed_text_y(g) + 5 * ch(g) + 2; }   // 3 status lines + 2 creature lines
-static int pixed_bottom(GuiState *g) { return pixed_buttons_y(g) + 2 * ch(g) + 16; }
+static int pixed_bottom(GuiState *g) { return pixed_buttons_y(g) + 3 * ch(g) + 24; }   // two button rows + the attribute row
 // the picker's labels (and the world map) start below picker and editor alike
 static int labels_y(GuiState *g) {
     int a = palette_y(g) + TILESET_PX * g->scale, b = pixed_bottom(g);
@@ -374,9 +394,37 @@ static void sync_sprite_sel(GuiState *g) {
 static void set_view(GuiState *g, int view) {
     g->sprites_view = view == VIEW_SPRITES;
     g->backs_view = view == VIEW_BACKS;
+    g->font_view = view == VIEW_FONT;
+    g->screens_view = view == VIEW_SCREENS;
     if (view == VIEW_TILES) g->pix_src = GFX_TILES;
     else if (view == VIEW_BACKS) g->pix_src = GFX_SCENERY;
-    else sync_sprite_sel(g);
+    else if (view == VIEW_FONT) g->pix_src = GFX_CHARSET;
+    else if (view == VIEW_SCREENS) {
+        if (!render_gfx_is_screen(g->screen_src)) g->screen_src = GFX_LOADSCRN;
+        g->pix_src = g->screen_src;
+        g->scr_stale = true;
+    } else sync_sprite_sel(g);
+}
+static bool tiles_view(GuiState *g) { return !g->sprites_view && !g->backs_view && !g->font_view && !g->screens_view; }
+
+static int screen_index(GfxSource s) { for (int i = 0; i < NSCREENS; i++) if (SCREENS[i] == s) return i; return 0; }
+
+// The chosen screen fills the room's picture area at an integer zoom, centred.
+static void screen_geom(GuiState *g, int *z, int *ox, int *oy, int *w, int *h) {
+    render_gfx_size(g->pix_src, w, h);
+    int zx = pic_w(g) / *w, zy = pic_h(g) / *h;
+    *z = zx < zy ? zx : zy;
+    if (*z < 1) *z = 1;
+    *ox = pic_x(g) + (pic_w(g) - *w * *z) / 2;
+    *oy = pic_y(g) + (pic_h(g) - *h * *z) / 2;
+}
+static bool mouse_screen_px(GuiState *g, int *x, int *y) {
+    int z, ox, oy, w, h;
+    screen_geom(g, &z, &ox, &oy, &w, &h);
+    Vector2 m = GetMousePosition();
+    if (m.x < ox || m.y < oy || m.x >= ox + w * z || m.y >= oy + h * z) return false;
+    *x = (int)(m.x - ox) / z; *y = (int)(m.y - oy) / z;
+    return true;
 }
 
 // The background block the current room shows.
@@ -390,7 +438,12 @@ static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh
 // Arrow / hjkl movement for the panel that has keyboard focus.
 static void focus_move(GuiState *g, int dx, int dy) {
     if (g->focus == FOCUS_PICKER) {
-        if (g->backs_view) g->sel_img[GFX_SCENERY] = (g->sel_img[GFX_SCENERY] + dx + BACKS_COLS * dy + 256) % 256;
+        if (g->font_view) g->sel_img[GFX_CHARSET] = (g->sel_img[GFX_CHARSET] + dx + BACKS_COLS * dy + 128) % 128;
+        else if (g->screens_view) {
+            int i = ((screen_index(g->pix_src) + dx + dy) % NSCREENS + NSCREENS) % NSCREENS;
+            g->screen_src = g->pix_src = SCREENS[i]; g->scr_stale = true;
+        }
+        else if (g->backs_view) g->sel_img[GFX_SCENERY] = (g->sel_img[GFX_SCENERY] + dx + BACKS_COLS * dy + 256) % 256;
         else if (!g->sprites_view) g->sel_tile = (uint8_t)((g->sel_tile + dx + 8 * dy + 64) % 64);
         else { g->sel_sprite += dx + 8 * dy; sync_sprite_sel(g); }
     } else if (g->focus == FOCUS_WORLD) {
@@ -398,11 +451,11 @@ static void focus_move(GuiState *g, int dx, int dy) {
     } else if (g->focus == FOCUS_COLOURS) {           // the swatches (8 x 2, or 4 in CGA): moving selects
         int n = render_colours(g->rctx);
         g->sel_colour = ((g->sel_colour + dx + (n > 8 ? 8 : 0) * dy) % n + n) % n;
-    } else if (g->focus == FOCUS_BUTTONS) {           // two rows of buttons: left / right along a row, up / down between them
-        bool attrs = !g->sprites_view && !g->backs_view;  // the attribute row exists in the tiles view only
-        if (dy && attrs) g->btn_row = !g->btn_row;
-        if (!attrs) g->btn_row = 0;
-        int n = g->btn_row ? 4 : pixed_button_count(g);
+    } else if (g->focus == FOCUS_BUTTONS) {           // rows of buttons: left / right along a row, up / down between them
+        int rows = tiles_view(g) ? 3 : 2;                 // the attribute row exists in the tiles view only
+        if (dy) g->btn_row = ((g->btn_row + dy) % rows + rows) % rows;
+        if (g->btn_row >= rows) g->btn_row = 0;
+        int n = g->btn_row == 0 ? 4 : g->btn_row == 1 ? pixed_button_count(g) - 4 : 4;
         g->btn_sel = ((g->btn_sel + dx) % n + n) % n;
     } else if (g->focus == FOCUS_EDITOR) {
         int bi, bx, by, w, h;
@@ -420,8 +473,9 @@ static void focus_apply(GuiState *g) {
     if (g->focus == FOCUS_WORLD) {
         if (ged_map_click(g->world_sel, false)) g->focus = FOCUS_ROOM;   // answered a room prompt: back to the editor for the next one
     } else if (g->focus == FOCUS_BUTTONS) {
-        if (g->btn_row && !g->sprites_view && !g->backs_view) g->sel_attr = ATTRS[g->btn_sel % 4].bits;
-        else pixed_button_press(g, g->btn_sel % pixed_button_count(g));
+        if (g->btn_row == 2 && tiles_view(g)) g->sel_attr = ATTRS[g->btn_sel % 4].bits;
+        else if (g->btn_row == 1) pixed_button_press(g, 4 + g->btn_sel % (pixed_button_count(g) - 4));
+        else pixed_button_press(g, g->btn_sel % 4);
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
         if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
@@ -443,7 +497,9 @@ static void focus_apply(GuiState *g) {
     } else if (g->focus == FOCUS_PICKER) {
         int cx, cy;
         ged_cursor(&cx, &cy);
-        if (g->backs_view) {
+        if (g->font_view || g->screens_view) {
+            /* nothing to put in the room from these */
+        } else if (g->backs_view) {
             int bid = cur_backs();
             if (render_backs_tile(g->rctx, bid, cx, cy) != g->sel_img[GFX_SCENERY]) {
                 backs_undo_push(g, bid);
@@ -601,6 +657,31 @@ static bool feed_mouse(GuiState *g) {
         return true;
     }
 
+    // screens view: the picture area shows the chosen screen; left paints (or
+    // fills), right picks, drags paint. Clicks anywhere on the picture stop here.
+    if (g->screens_view) {
+        int sx, sy;
+        bool over_pic = m.x >= pic_x(g) && m.x < pic_x(g) + pic_w(g) && m.y >= pic_y(g) && m.y < pic_y(g) + pic_h(g);
+        if (mouse_screen_px(g, &sx, &sy) && render_gfx_available(g->rctx, g->pix_src)) {
+            g->pix_op = true;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, 0, sx, sy); return true; }
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                g->focus = FOCUS_EDITOR; g->ecx = sx; g->ecy = sy;
+                if (g->fill_armed) { pix_fill(g, 0, sx, sy); return true; }
+                g->pix_painting = true;
+                pix_undo_push(g, g->pix_src, 0);
+            }
+            if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && render_gfx_pixel(g->rctx, g->pix_src, 0, sx, sy) != g->sel_colour) {
+                render_gfx_set_pixel(g->rctx, g->pix_src, 0, sx, sy, g->sel_colour);
+                gfx_touched(g, g->pix_src);
+                return true;
+            }
+        }
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
+        if (g->pix_painting) return false;
+        if (over_pic && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) || IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE))) return false;
+    }
+
     // middle click on the room: pick that tile into the palette (reverse
     // picker); in the backs view it picks the background tile there
     if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) && mouse_tile(g, &tx, &ty)) {
@@ -662,10 +743,25 @@ static bool feed_mouse(GuiState *g) {
         return any;
     }
 
-    // picker: pick a tile, a scenery tile, or a sprite frame
+    // picker: pick a tile, a scenery tile, a font tile, a screen, or a sprite frame
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int side = TILESET_PX * g->scale, px0 = palette_x(g), py0 = palette_y(g);
-        if (g->backs_view) {
+        if (g->font_view) {
+            int c = side / BACKS_COLS;
+            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + 8 * c) {
+                g->sel_img[GFX_CHARSET] = ((int)(m.y - py0) / c) * BACKS_COLS + (int)(m.x - px0) / c;
+                g->focus = FOCUS_PICKER;
+                return true;
+            }
+        } else if (g->screens_view) {
+            int rh = side / NSCREENS;
+            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + rh * NSCREENS) {
+                g->screen_src = g->pix_src = SCREENS[(int)(m.y - py0) / rh];
+                g->scr_stale = true;
+                g->focus = FOCUS_PICKER;
+                return true;
+            }
+        } else if (g->backs_view) {
             int c = side / BACKS_COLS;
             if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + side) {
                 g->sel_img[GFX_SCENERY] = ((int)(m.y - py0) / c) * BACKS_COLS + (int)(m.x - px0) / c;
@@ -713,7 +809,7 @@ static bool feed_mouse(GuiState *g) {
     }
 
     // attribute buttons under the source buttons (tiles view)
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !g->sprites_view && !g->backs_view)
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && tiles_view(g))
         for (int i = 0; i < 4; i++)
             if (CheckCollisionPointRec(m, attr_button(g, i))) { g->sel_attr = ATTRS[i].bits; return true; }
 
@@ -759,7 +855,7 @@ static bool feed_mouse(GuiState *g) {
     {
         int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g), w, h;
         pixed_dims(g, &w, &h);
-        bool in_grid = m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;
+        bool in_grid = !g->screens_view && m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;   // (screens: a thumbnail, painted on the big view)
         bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             int c = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
@@ -1056,6 +1152,9 @@ static void draw_help(GuiState *g) {
         "        pick = then click any colour on screen (room, picker, world map); fill = a mode: clicks on",
         "        the image (or Space at the editor cursor) flood that region with the colour; click fill again",
         "        (or f while the pixel editor has focus) to leave",
+        "font / screens buttons: the CHARSET font, and the title, story, ending, high-score and health-figure",
+        "        pictures (painted on the big picture); import / export = <name>.png in the data dir, or drop a PNG",
+        "        on the window: it is scaled to the image and snapped to the palette",
         "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize",
         "info text: click a switch / chunk / object / room field line to edit it",
     };
@@ -1114,7 +1213,40 @@ static void draw_cursor(GuiState *g) {
 }
 
 // Build the 8-across picker texture of a sprite sheet (RGBA, key transparent).
-static int sheet_cols(GfxSource src) { return src == GFX_SCENERY ? BACKS_COLS : 8; }
+static int sheet_cols(GfxSource src) { return src == GFX_SCENERY || src == GFX_CHARSET ? BACKS_COLS : 8; }
+
+// The chosen screen as a texture (the big view and the thumbnail draw it).
+static void screen_tex_build(GuiState *g) {
+    static uint8_t buf[320 * 200 * 4];
+    int w, h;
+    render_gfx_size(g->pix_src, &w, &h);
+    render_gfx_rgba(g->rctx, g->pix_src, 0, buf);
+    Image img = { .data = buf, .width = w, .height = h, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    if (g->scr_loaded) UnloadTexture(g->scr_tex);
+    g->scr_tex = LoadTextureFromImage(img);
+    SetTextureFilter(g->scr_tex, TEXTURE_FILTER_POINT);
+    g->scr_loaded = true; g->scr_src = g->pix_src; g->scr_stale = false;
+}
+
+// The screens view over the room's picture area.
+static void draw_screen_view(GuiState *g) {
+    int z, ox, oy, w, h;
+    screen_geom(g, &z, &ox, &oy, &w, &h);
+    DrawRectangle(pic_x(g), pic_y(g), pic_w(g), pic_h(g), BLACK);
+    if (!render_gfx_available(g->rctx, g->pix_src)) {
+        gtext(&g->font, g->font_loaded, TextFormat("%s is not in the data dir", render_gfx_name(g->rctx, g->pix_src)), pic_x(g) + PAD, pic_y(g) + PAD, g->font_px, ORANGE);
+        return;
+    }
+    if (g->scr_loaded && g->scr_src == g->pix_src)
+        DrawTexturePro(g->scr_tex, (Rectangle){0, 0, w, h}, (Rectangle){ox, oy, w * z, h * z}, (Vector2){0, 0}, 0, WHITE);
+    DrawRectangleLinesEx((Rectangle){ox - 1, oy - 1, w * z + 2, h * z + 2}, 1, GRAY);
+    if (g->focus == FOCUS_EDITOR) {
+        if (g->ecx >= w) g->ecx = w - 1;
+        if (g->ecy >= h) g->ecy = h - 1;
+        DrawRectangleLinesEx((Rectangle){ox + g->ecx * z - 1, oy + g->ecy * z - 1, z + 2, z + 2}, 1, WHITE);
+        DrawRectangleLinesEx((Rectangle){ox - 3, oy - 3, w * z + 6, h * z + 6}, 2, GOLD);
+    }
+}
 static void sheet_build(GuiState *g, GfxSource src) {
     int w, h, n = render_gfx_count(src);
     render_gfx_size(src, &w, &h);
@@ -1164,6 +1296,30 @@ static void draw_palette(GuiState *g) {
         }
         DrawRectangleLinesEx((Rectangle){x0 + (sel % BACKS_COLS) * c, y0 + (sel / BACKS_COLS) * c, c, c}, 2, GOLD);
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, side + 4}, 2, GOLD);
+    } else if (g->font_view) {                        // CHARSET: 16 x 8 tiles
+        int c = side / BACKS_COLS, sel = g->sel_img[GFX_CHARSET], rows = 8;
+        DrawRectangle(x0, y0, side, c * rows, (Color){45, 45, 35, 255});
+        if (g->sheet_loaded[GFX_CHARSET])
+            DrawTexturePro(g->sheet_tex[GFX_CHARSET], (Rectangle){0, 0, g->sheet_tex[GFX_CHARSET].width, g->sheet_tex[GFX_CHARSET].height},
+                           (Rectangle){x0, y0, side, c * rows}, (Vector2){0, 0}, 0, WHITE);
+        for (int i = 0; i <= BACKS_COLS; i++) DrawLine(x0 + i * c, y0, x0 + i * c, y0 + c * rows, (Color){80, 80, 80, 255});
+        for (int i = 0; i <= rows; i++) DrawLine(x0, y0 + i * c, x0 + side, y0 + i * c, (Color){80, 80, 80, 255});
+        DrawRectangleLinesEx((Rectangle){x0 + (sel % BACKS_COLS) * c, y0 + (sel / BACKS_COLS) * c, c, c}, 2, GOLD);
+        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, c * rows + 4}, 2, GOLD);
+    } else if (g->screens_view) {                     // the screens, one row each
+        int rh = side / NSCREENS;
+        for (int i = 0; i < NSCREENS; i++) {
+            bool on = SCREENS[i] == g->pix_src, avail = render_gfx_available(g->rctx, SCREENS[i]);
+            int w, h;
+            render_gfx_size(SCREENS[i], &w, &h);
+            DrawRectangle(x0, y0 + i * rh, side, rh - 2, on ? (Color){90, 70, 20, 255} : (Color){40, 40, 48, 255});
+            char name[32];
+            snprintf(name, sizeof name, "%s", render_gfx_name(g->rctx, SCREENS[i]));
+            *strrchr(name, '.') = '\0';
+            int nfs = fs < rh - 2 ? fs : rh - 2;
+            gtext(&g->font, g->font_loaded, TextFormat("%-9s %dx%d", name, w, h), x0 + 4, y0 + i * rh + (rh - 2 - nfs) / 2, nfs, avail ? RAYWHITE : GRAY);
+        }
+        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, rh * NSCREENS + 4}, 2, GOLD);
     } else if (g->pix_src == GFX_TILES) {
         DrawTexturePro(g->pal_tex, (Rectangle){0, 0, TILESET_PX, TILESET_PX},
                        (Rectangle){x0, y0, side, side}, (Vector2){0, 0}, 0, WHITE);
@@ -1201,7 +1357,9 @@ static void draw_palette(GuiState *g) {
     int ly = labels_y(g), lh = ch(g);
     const char *lines[] = {
         g->backs_view    ? TextFormat("background %d  scenery tile 0x%02x", cur_backs(), g->sel_img[GFX_SCENERY])
-        : !g->sprites_view ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
+        : g->font_view   ? TextFormat("%s  tile 0x%02x", render_gfx_name(g->rctx, GFX_CHARSET), g->sel_img[GFX_CHARSET])
+        : g->screens_view ? TextFormat("%s: click the picture to paint", render_gfx_name(g->rctx, g->pix_src))
+        : tiles_view(g)  ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
                          : TextFormat("%s  frame 0x%02x", render_gfx_name(g->rctx, g->pix_src), g->sel_img[g->pix_src]),
         g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs())) : "",
         g->cga ? "CGA graphics   Ctrl-? help (mouse and GUI keys too)" : "EGA graphics   Ctrl-? help (mouse and GUI keys too)",
@@ -1210,18 +1368,19 @@ static void draw_palette(GuiState *g) {
         gtext(&g->font, g->font_loaded, lines[i], x0, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
 
     if (g->err_flash > 0)
-        gtext(&g->font, g->font_loaded, g->err, x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, RED);
+        gtext(&g->font, g->font_loaded, g->err, x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, g->err_col);
     else if (g->saved_flash > 0)
         gtext(&g->font, g->font_loaded, "saved", x0, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
 }
 
 // Buttons under the editor: reset, then one per view, then "block" while a
 // block object's panel has been closed with "gfx".
+// Row 0: reset tiles sprites backs. Row 1: font screens import export (block).
 static Rectangle pixed_button(GuiState *g, int i) {
-    int bw = 9 * cw(g), gap = PAD;
-    return (Rectangle){ pixed_x(g) + i * (bw + gap), pixed_buttons_y(g), bw, ch(g) + 4 };
+    int bw = 9 * cw(g), gap = PAD, row = i < 4 ? 0 : 1, col = i < 4 ? i : i - 4;
+    return (Rectangle){ pixed_x(g) + col * (bw + gap), pixed_buttons_y(g) + row * (ch(g) + 8), bw, ch(g) + 4 };
 }
-static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 5 : 4; }
+static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 9 : 8; }
 
 static void pixed_button_press(GuiState *g, int i) {
     g->pix_op = true;
@@ -1233,8 +1392,74 @@ static void pixed_button_press(GuiState *g, int i) {
             render_gfx_put(g->rctx, g->pix_src, idx, orig);
             gfx_touched(g, g->pix_src);
         }
-    } else if (i <= 3) set_view(g, i == 1 ? VIEW_TILES : i == 2 ? VIEW_SPRITES : VIEW_BACKS);
+    } else if (i <= 5) set_view(g, i == 1 ? VIEW_TILES : i == 2 ? VIEW_SPRITES : i == 3 ? VIEW_BACKS : i == 4 ? VIEW_FONT : VIEW_SCREENS);
+    else if (i == 6) import_png(g, NULL);
+    else if (i == 7) export_png(g);
     else if (g->block_hidden >= 0) g->block_hidden = -1;   // block: show its panel again
+}
+
+/* ----------------------------------------------------------- PNG import / export */
+
+// <data dir>/<FILE>.png for a screen, <FILE>-<index>.png for one image of a
+// sheet (BLOCKS-012.png is tile 0x12 of BLOCKS.EGA or .CGA).
+static const char *png_path(GuiState *g) {
+    static char p[1400];
+    char base[32];
+    snprintf(base, sizeof base, "%s", render_gfx_name(g->rctx, g->pix_src));
+    char *dot = strrchr(base, '.');
+    if (dot) *dot = '\0';
+    const char *dir = g->data_dir ? g->data_dir : ".";
+    if (render_gfx_is_screen(g->pix_src)) snprintf(p, sizeof p, "%s/%s.png", dir, base);
+    else snprintf(p, sizeof p, "%s/%s-%03x.png", dir, base, pixed_index(g));
+    return p;
+}
+
+static void export_png(GuiState *g) {
+    static uint8_t buf[320 * 200 * 4];
+    int w, h;
+    pixed_dims(g, &w, &h);
+    render_gfx_rgba(g->rctx, g->pix_src, pixed_index(g), buf);
+    Image img = { .data = buf, .width = w, .height = h, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    const char *p = png_path(g);
+    if (ExportImage(img, p)) gui_note(g, TextFormat("exported %s", p));
+    else gui_error(g, TextFormat("could not write %s", p));
+    g->pix_op = true;
+}
+
+// Replace the current image with a PNG: scaled to the image's size (nearest
+// neighbour) and each pixel snapped to the nearest palette colour; transparent
+// pixels become the sprite key colour. NULL path = the export name.
+static void import_png(GuiState *g, const char *path) {
+    if (path == NULL) path = png_path(g);
+    g->pix_op = true;
+    if (!FileExists(path)) { gui_error(g, TextFormat("no %s to import", path)); return; }
+    if (pixed_locked(g)) { gui_error(g, "tile 0 is always blank"); return; }
+    Image img = LoadImage(path);
+    if (img.data == NULL) { gui_error(g, TextFormat("could not read %s", path)); return; }
+    int w, h, idx = pixed_index(g);
+    pixed_dims(g, &w, &h);
+    if (img.width != w || img.height != h) ImageResizeNN(&img, w, h);
+    ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    const uint8_t (*pal)[3] = render_palette(g->rctx);
+    int n = render_colours(g->rctx), key = render_gfx_key(g->rctx, g->pix_src);
+    pix_undo_push(g, g->pix_src, idx);
+    const uint8_t *px = img.data;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++, px += 4) {
+            int c = key;
+            if (key < 0 || px[3] >= 128) {
+                long best = -1;
+                for (int i = 0; i < n; i++) {
+                    if (i == key) continue;                          // opaque pixels never land on the key colour
+                    long dr = px[0] - pal[i][0], dg = px[1] - pal[i][1], db = px[2] - pal[i][2], d = dr * dr + dg * dg + db * db;
+                    if (best < 0 || d < best) { best = d; c = i; }
+                }
+            }
+            render_gfx_set_pixel(g->rctx, g->pix_src, idx, x, y, c);
+        }
+    UnloadImage(img);
+    gfx_touched(g, g->pix_src);
+    gui_note(g, TextFormat("imported %s", path));
 }
 
 // Remember the image as it is now, so the coming stroke (or reset) can be undone.
@@ -1258,11 +1483,17 @@ static void backs_undo_push(GuiState *g, int bid) {
 static void gui_error(GuiState *g, const char *msg) {
     snprintf(g->err, sizeof g->err, "%s", msg);
     g->err_flash = 4.0f;
+    g->err_col = RED;
     fprintf(stderr, "gui: %s\n", msg);
+}
+static void gui_note(GuiState *g, const char *msg) {
+    snprintf(g->err, sizeof g->err, "%s", msg);
+    g->err_flash = 3.0f;
+    g->err_col = GREEN;
 }
 
 static void backs_touched(GuiState *g) {
-    g->backs_dirty = true; g->gfx_timer = 0.6f;
+    g->backs_dirty = true; g->gfx_timer = 0.6f; g->world_pending = true;
     g->room_dirty = true;
 }
 
@@ -1280,6 +1511,7 @@ static void set_gfx_mode(GuiState *g, bool cga) {
     g->pix_undo_n = 0; g->pix_seq = 0;                   // the undo entries belong to the other files
     g->pal_offset = -1;                                   // palette texture
     for (int i = 0; i < GFX_SOURCES; i++) g->sheet_stale[i] = true;
+    g->scr_stale = true;
     spidey_build(g);
     g->world_stale = true;
     if (g->sel_colour >= render_colours(g->rctx)) g->sel_colour = render_colours(g->rctx) - 1;
@@ -1288,7 +1520,9 @@ static void set_gfx_mode(GuiState *g, bool cga) {
 
 static void gfx_touched(GuiState *g, GfxSource src) {
     g->gfx_dirty[src] = true; g->gfx_timer = 0.6f;
-    if (src == GFX_TILES) g->pal_offset = -1;              // rebuild the palette texture
+    if (src == GFX_TILES || src == GFX_SCENERY || src == GFX_SPIDS1 || src == GFX_SPIDS2) g->world_pending = true;
+    if (render_gfx_is_screen(src)) g->scr_stale = true;
+    else if (src == GFX_TILES) g->pal_offset = -1;         // rebuild the palette texture
     else g->sheet_stale[src] = true;
     g->room_dirty = true;
 }
@@ -1355,7 +1589,8 @@ static void pix_fill(GuiState *g, int idx, int x, int y) {
     int from = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
     if (from == g->sel_colour) return;
     pix_undo_push(g, g->pix_src, idx);
-    int stack[SPIDS_FRAME_W * SPIDS_FRAME_H][2], n = 0;      // the largest image; each pixel is pushed at most once
+    static int stack[320 * 200][2];                          // the largest image; each pixel is pushed at most once
+    int n = 0;
     stack[n][0] = x; stack[n][1] = y; n++;
     render_gfx_set_pixel(g->rctx, g->pix_src, idx, x, y, g->sel_colour);
     while (n > 0) {
@@ -1447,20 +1682,30 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     pixed_dims(g, &w, &h);
     int key = render_gfx_key(g->rctx, g->pix_src);
     const uint8_t (*pal)[3] = render_palette(g->rctx);
-    for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++) {
-            int c = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
-            Color col = c == key ? ((x + y) & 1 ? (Color){70, 70, 70, 255} : (Color){50, 50, 50, 255})
-                                 : (Color){pal[c][0], pal[c][1], pal[c][2], 255};
-            DrawRectangle(x0 + x * px, y0 + y * px, px, px, col);
+    if (g->screens_view) {                               // a thumbnail; the big view is where it is painted
+        int side = TILESET_PX * g->scale;
+        DrawRectangle(x0, y0, side, side, (Color){30, 30, 30, 255});
+        if (g->scr_loaded && g->scr_src == g->pix_src) {
+            float sc = (float)side / w < (float)side / h ? (float)side / w : (float)side / h;
+            DrawTexturePro(g->scr_tex, (Rectangle){0, 0, w, h},
+                           (Rectangle){x0 + (side - w * sc) / 2, y0 + (side - h * sc) / 2, w * sc, h * sc}, (Vector2){0, 0}, 0, WHITE);
         }
-    for (int i = 0; i <= w; i++) DrawLine(x0 + i * px, y0, x0 + i * px, y0 + h * px, (Color){70, 70, 70, 255});
-    for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * px, x0 + w * px, y0 + i * px, (Color){70, 70, 70, 255});
-    if (g->focus == FOCUS_EDITOR) {
-        if (g->ecx >= w) g->ecx = w - 1;
-        if (g->ecy >= h) g->ecy = h - 1;
-        DrawRectangleLinesEx((Rectangle){x0 + g->ecx * px, y0 + g->ecy * px, px, px}, 2, WHITE);
-        DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * px + 4, h * px + 4}, 2, GOLD);
+    } else {
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                int c = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
+                Color col = c == key ? ((x + y) & 1 ? (Color){70, 70, 70, 255} : (Color){50, 50, 50, 255})
+                                     : (Color){pal[c][0], pal[c][1], pal[c][2], 255};
+                DrawRectangle(x0 + x * px, y0 + y * px, px, px, col);
+            }
+        for (int i = 0; i <= w; i++) DrawLine(x0 + i * px, y0, x0 + i * px, y0 + h * px, (Color){70, 70, 70, 255});
+        for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * px, x0 + w * px, y0 + i * px, (Color){70, 70, 70, 255});
+        if (g->focus == FOCUS_EDITOR) {
+            if (g->ecx >= w) g->ecx = w - 1;
+            if (g->ecy >= h) g->ecy = h - 1;
+            DrawRectangleLinesEx((Rectangle){x0 + g->ecx * px, y0 + g->ecy * px, px, px}, 2, WHITE);
+            DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * px + 4, h * px + 4}, 2, GOLD);
+        }
     }
     int sp = swatch_px(g), sy = swatch_y(g);
     for (int c = 0; c < render_colours(g->rctx); c++) {
@@ -1482,6 +1727,8 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     gtext(&g->font, g->font_loaded,
           g->pix_src == GFX_TILES ? TextFormat("tile 0x%02x  colour %d", idx, g->sel_colour)
           : g->pix_src == GFX_SCENERY ? TextFormat("scenery tile 0x%02x  colour %d", idx, g->sel_colour)
+          : g->pix_src == GFX_CHARSET ? TextFormat("font tile 0x%02x  colour %d", idx, g->sel_colour)
+          : render_gfx_is_screen(g->pix_src) ? TextFormat("%s %dx%d  colour %d", render_gfx_name(g->rctx, g->pix_src), w, h, g->sel_colour)
           : g->sel_colour == key  ? TextFormat("%s frame 0x%02x  colour %d = transparent", render_gfx_name(g->rctx, g->pix_src), idx, g->sel_colour)
                                   : TextFormat("%s frame 0x%02x  colour %d", render_gfx_name(g->rctx, g->pix_src), idx, g->sel_colour),
           x0, ty, fs, RAYWHITE);
@@ -1511,22 +1758,22 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
                 gtext(&g->font, g->font_loaded, "Shift+click in the room places one", x0, ty + 4 * ch(g), fs, SKYBLUE);
         }
     }
-    if (!g->sprites_view && !g->backs_view)
+    if (tiles_view(g))
         for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
             Rectangle rb = attr_button(g, i);
             bool on = ATTRS[i].bits == g->sel_attr;
-            bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 1 && i == g->btn_sel % 4;
+            bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 2 && i == g->btn_sel % 4;
             DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
             DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
             int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
             gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
         }
-    const char *names[] = { "reset", "tiles", "sprites", "backs", "block" };
+    const char *names[] = { "reset", "tiles", "sprites", "backs", "font", "screens", "import", "export", "block" };
     (void)block_available;
     for (int i = 0; i < pixed_button_count(g); i++) {
         Rectangle rb = pixed_button(g, i);
-        bool on = (i == 1 && !g->sprites_view && !g->backs_view) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view);
-        bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 0 && i == g->btn_sel;
+        bool on = (i == 1 && tiles_view(g)) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view) || (i == 4 && g->font_view) || (i == 5 && g->screens_view);
+        bool kbd = g->focus == FOCUS_BUTTONS && (i < 4 ? (g->btn_row == 0 && i == g->btn_sel) : (g->btn_row == 1 && i - 4 == g->btn_sel));
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
@@ -1552,7 +1799,7 @@ static int world_y(GuiState *g) { return labels_y(g) + PALETTE_LINES * ch(g) + P
 // attribute buttons (what painted tiles are): a row under the source buttons
 static Rectangle attr_button(GuiState *g, int i) {
     int bw = 7 * cw(g);
-    return (Rectangle){ pixed_x(g) + i * (bw + 4), pixed_buttons_y(g) + ch(g) + 8, bw, ch(g) + 4 };
+    return (Rectangle){ pixed_x(g) + i * (bw + 4), pixed_buttons_y(g) + 2 * (ch(g) + 8), bw, ch(g) + 4 };
 }
 
 // Thumbnail size: 8 columns across the space right of the picture, shrunk if
@@ -1805,6 +2052,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->spidey_loaded) UnloadTexture(g->spidey);
         for (int i = 0; i < GFX_SOURCES; i++) if (g->sheet_loaded[i]) UnloadTexture(g->sheet_tex[i]);
         if (g->atlas_loaded) UnloadTexture(g->atlas);
+        if (g->scr_loaded) UnloadTexture(g->scr_tex);
         if (g->font_loaded) UnloadFont(g->font);
         if (g->help_font_loaded) UnloadFont(g->help_font);
         if (g->panel_font_loaded) UnloadFont(g->panel_font);
@@ -1861,6 +2109,12 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         }
 
         if (feed_keys(g)) g->room_dirty = true;
+        if (IsFileDropped()) {                             // a PNG dropped on the window replaces the current image
+            FilePathList dropped = LoadDroppedFiles();
+            if (dropped.count > 0) import_png(g, dropped.paths[0]);
+            UnloadDroppedFiles(dropped);
+            g->room_dirty = true;
+        }
         if (g->world_stale) { world_build(g, ged_rooms(), buf); g->world_stale = false; }
         g->pix_op = false;
         if (feed_mouse(g)) {
@@ -1874,7 +2128,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             g->gfx_timer -= dt;
             if (g->gfx_timer <= 0) {
                 if (gfx_save_all(g)) g->saved_flash = 1.2f;
-                world_build(g, ged_rooms(), buf);          // every room may use the edited image
+                if (g->world_pending) { world_build(g, ged_rooms(), buf); g->world_pending = false; }   // every room may use the edited image
                 g->room_dirty = true;
             }
         }
@@ -1928,13 +2182,17 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             for (int k = GFX_SPIDS1; k <= GFX_SPIDS2; k++)
                 if (!g->sheet_loaded[k] || g->sheet_stale[k]) sheet_build(g, (GfxSource)k);
         if (g->backs_view && (!g->sheet_loaded[GFX_SCENERY] || g->sheet_stale[GFX_SCENERY])) sheet_build(g, GFX_SCENERY);
+        if (g->font_view && (!g->sheet_loaded[GFX_CHARSET] || g->sheet_stale[GFX_CHARSET])) sheet_build(g, GFX_CHARSET);
+        if (g->screens_view && render_gfx_available(g->rctx, g->pix_src) && (!g->scr_loaded || g->scr_stale || g->scr_src != g->pix_src))
+            screen_tex_build(g);
 
         if (g->saved_flash > 0) g->saved_flash -= dt;
         if (g->err_flash > 0) g->err_flash -= dt;
         BeginDrawing();
         ClearBackground(BLACK);
         draw_text_screen(g);
-        if (!g->text_map && !ged_map_is_text()) {   // room-list states show the editor's text instead
+        if (g->screens_view) draw_screen_view(g);
+        else if (!g->text_map && !ged_map_is_text()) {   // room-list states show the editor's text instead
             DrawTexturePro(g->tex, (Rectangle){0, 0, ROOM_PX_W, ROOM_PX_H},
                            (Rectangle){pic_x(g), pic_y(g), pic_w(g), pic_h(g)},
                            (Vector2){0, 0}, 0, WHITE);
@@ -1968,6 +2226,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     if (g->spidey_loaded) UnloadTexture(g->spidey);
     for (int i = 0; i < GFX_SOURCES; i++) if (g->sheet_loaded[i]) UnloadTexture(g->sheet_tex[i]);
     if (g->atlas_loaded) UnloadTexture(g->atlas);
+    if (g->scr_loaded) UnloadTexture(g->scr_tex);
     if (g->font_loaded) UnloadFont(g->font);
     if (g->help_font_loaded) UnloadFont(g->help_font);
     if (g->panel_font_loaded) UnloadFont(g->panel_font);

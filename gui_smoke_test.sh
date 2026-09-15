@@ -67,6 +67,7 @@ xdotool key u; sleep 0.8; snap s12c-pixel-undo   # u undoes the stroke (most rec
 xdotool mousemove $((X + 1264 + 36)) $((Y + 224 + 24)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool mousemove $((X + 776 + 192 + 16 + 6*9 + 4)) $((Y + 24 + 6*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12c2-pixel-fill
 xdotool key u; sleep 0.8
+xdotool mousemove $((X + 1264 + 36)) $((Y + 224 + 24)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3   # fill is a mode: turn it off again
 # sprite editing: SPIDS1 button (2nd button under the editor), pick frame 0x18 (row 3, col 0), paint a pixel, snapshot, undo
 xdotool mousemove $((X + 984 + 2*116 + 30)) $((Y + 402 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4; snap s12d0-spids1-mode
 xdotool mousemove $((X + 776 + 12)) $((Y + 24 + 3*21 + 10)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4
@@ -82,9 +83,23 @@ for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done
 xdotool mouseup 1; xdotool keyup shift; sleep 1.2; snap s12f-backs-painted
 xdotool key u; sleep 0.8; snap s12g-backs-undo
 xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 405 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
+# font (row 1 of the buttons, y 434): the CHARSET picker; pick tile 0x41, paint pixel (3,3) red, undo
+xdotool mousemove $((X + 984 + 0*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12h-font-view
+xdotool mousemove $((X + 776 + 1*12 + 6)) $((Y + 24 + 4*12 + 6)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
+xdotool mousemove $((X + 984 + 2*24 + 12)) $((Y + 224 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.2
+xdotool mousemove $((X + 984 + 3*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12i-font-edit
+xdotool key u; sleep 1.5   # (the undo's debounced write lands ~0.6 s later; a click inside that long frame would be lost)
+# screens: LOADSCRN fills the picture at 2x (origin 64,88); paint pixel (100,50) red, export, undo, import the export back, back to tiles
+xdotool mousemove $((X + 984 + 1*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s12j-screens-view
+xdotool mousemove $((X + 64 + 100*2 + 1)) $((Y + 88 + 50*2 + 1)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12k-screen-edit
+xdotool mousemove $((X + 984 + 3*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6   # export
+xdotool key u; sleep 0.8
+xdotool mousemove $((X + 984 + 2*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12l-screen-import   # import
+xdotool key u; sleep 0.6
+xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 405 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
-# labels start under the editor column (430+8=438), world map at 438 + 5 rows*24 + 8 = 566; thumbs 68x47 + 4 gap (height-limited)
-xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 566 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
+# labels start under the editor column (462+8=470), world map at 470 + 5 rows*24 + 8 = 598; thumbs 62x43 + 4 gap (height-limited)
+xdotool mousemove $((X + 776 + 1*66 + 30)) $((Y + 598 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
 # wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
 xdotool mousemove $((X + 400)) $((Y + 24 + 200)) click 5; sleep 0.4; snap s13b-wheel-bkgrnd
 xdotool keydown shift; xdotool click 4; xdotool keyup shift; sleep 0.4; snap s13c-wheel-tileset
@@ -119,4 +134,7 @@ kill $WD 2>/dev/null; kill $XV 2>/dev/null
 [ -e Spider/BLOCKS.EGA.orig ] && echo "BLOCKS.EGA was written by the pixel edit (expected)" || echo "BLOCKS.EGA never written (pixel edit did not save!)"
 [ -e Spider/SPIDS1.EGA.orig ] && echo "SPIDS1.EGA was written by the sprite edit (expected)" || echo "SPIDS1.EGA never written (sprite edit did not save!)"
 [ -e Spider/BACKS.SPL.orig ] && echo "BACKS.SPL was written by the background edit (expected)" || echo "BACKS.SPL never written (background edit did not save!)"
+[ -e Spider/CHARSET.EGA.orig ] && echo "CHARSET.EGA was written by the font edit (expected)" || echo "CHARSET.EGA never written (font edit did not save!)"
+[ -e Spider/LOADSCRN.EGA.orig ] && echo "LOADSCRN.EGA was written by the screen edit (expected)" || echo "LOADSCRN.EGA never written (screen edit did not save!)"
+[ -e Spider/LOADSCRN.png ] && echo "LOADSCRN.png was exported (expected)" || echo "LOADSCRN.png never exported!"
 tail -8 $T/gui.log

@@ -168,6 +168,15 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   `img_set_pixel` handle both layouts, `render_palette(ctx)` / `render_colours(ctx)` give the
   mode's palette, and the swatches show only its colours. BACKS.SPL is shared by both modes.
   The two sets are separate files: an EGA edit is not mirrored into the CGA file or vice versa.
+- Two rows of buttons under the pixel editor: reset / tiles / sprites / backs, then font / screens /
+  import / export (/ block). "font" is CHARSET (128 tiles, 16 across). "screens" lists the full-screen
+  pictures (LOADSCRN, WINSCRN, PAGE1-4 320x200, HISCORE 320x38, SPIDFIGR / SKELFIGR 64x192; row-planar
+  in EGA, `render_gfx_is_screen`); the chosen one replaces the room picture at an integer zoom
+  (`draw_screen_view`, texture `scr_tex`) and is painted there directly (click, drag, right-click
+  picks, fill mode); the editor box shows a thumbnail. Undo entries hold a whole image (GFX_MAX_BYTES).
+  "export" writes the current image as <data dir>/<FILE>.png (screens) or <FILE>-<idx>.png (sheet
+  images); "import" reads that file back, or any PNG dropped on the window: scaled to the image with
+  nearest neighbour and snapped to the mode's palette, transparent pixels -> the sprite key colour.
 - Sprite frames map to creatures (`CREATURES[]` in gui.c, ranges verified against the game);
   with a sprite selected, Shift+click in the room places that creature (`ged_place_sprite`:
   retypes the object under the cursor or creates one).

@@ -120,9 +120,16 @@ static void check_backs_store(const char *data_dir) {
     char dir[1024];
     snprintf(dir, sizeof dir, "%s/spl_check.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
     if (mkdtemp(dir) == NULL) { CHECK(false, "mkdtemp failed"); return; }
-    const char *files[] = { "BACKS.SPL", "BLOCKS.EGA", "SCENERY.EGA", "SPIDS1.EGA", "SPIDS2.EGA",
-                            "BLOCKS.CGA", "SCENERY.CGA", "SPIDS1.CGA", "SPIDS2.CGA" };
-    for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
+    // every graphics file in both modes, plus the backgrounds
+    static const char *GFX_FILES[] = { "BLOCKS", "SCENERY", "SPIDS1", "SPIDS2", "CHARSET", "LOADSCRN", "WINSCRN",
+                                       "PAGE1", "PAGE2", "PAGE3", "PAGE4", "HISCORE", "SPIDFIGR", "SKELFIGR" };
+    static const char *EXTS[] = { "EGA", "CGA" };
+    char files[32][32];
+    int nfiles = 0;
+    snprintf(files[nfiles++], 32, "BACKS.SPL");
+    for (size_t i = 0; i < sizeof GFX_FILES / sizeof GFX_FILES[0]; i++)
+        for (int e = 0; e < 2; e++) snprintf(files[nfiles++], 32, "%s.%s", GFX_FILES[i], EXTS[e]);
+    for (int i = 0; i < nfiles; i++) {
         char from[1200], to[1200];
         snprintf(from, sizeof from, "%s/%s", data_dir, files[i]);
         snprintf(to, sizeof to, "%s/%s", dir, files[i]);
@@ -222,10 +229,48 @@ static void check_backs_store(const char *data_dir) {
         CHECK(stat(p, &st) == 0, "BLOCKS.CGA.orig not written");
         printf("cga mode: decode, edit, save OK\n");
     }
+    // the font and the full screens, in both modes: sizes, and a pixel round trip
+    // through every colour on a row-planar picture and a tall narrow one
+    for (int mode = 0; mode < 2; mode++) {
+        bool cga = mode == 1;
+        ctx = render_open(dir, cga);
+        CHECK(ctx != NULL, "render_open(%s) for the screens", cga ? "cga" : "ega");
+        if (ctx == NULL) continue;
+        CHECK(render_gfx_count(GFX_CHARSET) == 128 && render_gfx_bytes(ctx, GFX_CHARSET) == (cga ? 16 : 32), "charset geometry");
+        CHECK(render_gfx_available(ctx, GFX_CHARSET) && render_gfx_available(ctx, GFX_LOADSCRN) && render_gfx_available(ctx, GFX_SPIDFIGR), "screens present");
+        int w, h;
+        render_gfx_size(GFX_LOADSCRN, &w, &h);
+        CHECK(w == 320 && h == 200 && render_gfx_is_screen(GFX_LOADSCRN) && !render_gfx_is_screen(GFX_CHARSET), "screen geometry");
+        CHECK(render_gfx_bytes(ctx, GFX_LOADSCRN) == (cga ? 16000 : 32000), "screen bytes %d", render_gfx_bytes(ctx, GFX_LOADSCRN));
+        GfxSource pics[] = { GFX_LOADSCRN, GFX_SPIDFIGR, GFX_HISCORE, GFX_CHARSET };
+        for (size_t k = 0; k < sizeof pics / sizeof pics[0]; k++) {
+            GfxSource s = pics[k];
+            int idx = s == GFX_CHARSET ? 0x41 : 0, px = 13, py = 9;
+            int left = render_gfx_pixel(ctx, s, idx, px - 1, py), right = render_gfx_pixel(ctx, s, idx, px + 1, py);
+            int above = render_gfx_pixel(ctx, s, idx, px, py - 1), was = render_gfx_pixel(ctx, s, idx, px, py);
+            if (s == GFX_CHARSET) { px = 3; py = 4; left = render_gfx_pixel(ctx, s, idx, 2, 4); right = render_gfx_pixel(ctx, s, idx, 4, 4); above = render_gfx_pixel(ctx, s, idx, 3, 3); was = render_gfx_pixel(ctx, s, idx, 3, 4); }
+            for (int col = 0; col < render_colours(ctx); col++) {
+                render_gfx_set_pixel(ctx, s, idx, px, py, col);
+                CHECK(render_gfx_pixel(ctx, s, idx, px, py) == col, "%s %s: set %d read %d", cga ? "cga" : "ega", render_gfx_name(ctx, s), col, render_gfx_pixel(ctx, s, idx, px, py));
+            }
+            CHECK(render_gfx_pixel(ctx, s, idx, px - 1, py) == left && render_gfx_pixel(ctx, s, idx, px + 1, py) == right && render_gfx_pixel(ctx, s, idx, px, py - 1) == above,
+                  "%s %s: a neighbour changed", cga ? "cga" : "ega", render_gfx_name(ctx, s));
+            render_gfx_set_pixel(ctx, s, idx, px, py, was);
+        }
+        // a real picture decodes to more than one colour (a layout mistake gives noise or a flat field)
+        int hist[16] = {0};
+        for (int y = 0; y < 200; y++) for (int x = 0; x < 320; x++) hist[render_gfx_pixel(ctx, GFX_LOADSCRN, 0, x, y)]++;
+        int used = 0;
+        for (int i = 0; i < 16; i++) used += hist[i] > 0;
+        CHECK(used >= 3, "%s LOADSCRN uses only %d colours", cga ? "cga" : "ega", used);
+        render_close(ctx);
+        printf("%s screens: geometry and pixel round trips OK\n", cga ? "cga" : "ega");
+    }
     if (failures == 0) {
-        const char *all[] = { "BACKS.SPL", "BACKS.SPL.orig", "BLOCKS.EGA", "SCENERY.EGA", "SCENERY.EGA.orig", "SPIDS1.EGA", "SPIDS2.EGA",
-                              "BLOCKS.CGA", "BLOCKS.CGA.orig", "SCENERY.CGA", "SPIDS1.CGA", "SPIDS2.CGA" };
-        for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) { snprintf(p, sizeof p, "%s/%s", dir, all[i]); unlink(p); }
+        for (int i = 0; i < nfiles; i++) {
+            snprintf(p, sizeof p, "%s/%s", dir, files[i]); unlink(p);
+            snprintf(p, sizeof p, "%s/%s.orig", dir, files[i]); unlink(p);
+        }
         rmdir(dir);
     }
 }

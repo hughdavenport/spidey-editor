@@ -48,26 +48,33 @@ static int spids_stride(bool cga) { return cga ? CGA_SPIDS_STRIDE : SPIDS_STRIDE
 static int sprite_key(bool cga) { return cga ? CGA_SPRITE_KEY : SPRITE_KEY; }
 static const uint8_t (*palette(bool cga))[3] { return cga ? CGA_PAL : PAL; }
 
+// Byte holding plane p of pixel (x,y) in a w x h EGA image: plane-major (all
+// rows of plane 0, then plane 1, ...: tiles and sprites) or row-planar (each
+// row's four planes in turn: the screens).
+static size_t ega_offset(int w, int h, int p, int x, int y, bool rowplanar) {
+    size_t bpr = (size_t)(w / 8);
+    return rowplanar ? ((size_t)y * 4 + p) * bpr + x / 8 : p * bpr * h + (size_t)y * bpr + x / 8;
+}
+
 // Colour of pixel (x,y) of the w x h image at `img` (`avail` bytes readable).
-// EGA: plane-major, 4 planes of (w/8)*h bytes. CGA: packed 2 bpp rows, 4 pixels
-// per byte, most significant pair leftmost.
-static int img_pixel(const uint8_t *img, size_t avail, int w, int h, int x, int y, bool cga) {
+// EGA: four 1-bit planes (see ega_offset). CGA: packed 2 bpp rows, 4 pixels
+// per byte, most significant pair leftmost, for every kind of image.
+static int img_pixel(const uint8_t *img, size_t avail, int w, int h, int x, int y, bool cga, bool rowplanar) {
     if (x < 0 || y < 0 || x >= w || y >= h) return 0;
     if (cga) {
         size_t o = (size_t)y * (w / 4) + x / 4;
         return o < avail ? (img[o] >> (6 - 2 * (x % 4))) & 3 : 0;
     }
-    size_t plane = (size_t)(w / 8) * h;
     int c = 0;
     for (int p = 0; p < 4; p++) {
-        size_t o = p * plane + (size_t)y * (w / 8) + x / 8;
+        size_t o = ega_offset(w, h, p, x, y, rowplanar);
         if (o >= avail) return 0;
         c |= ((img[o] >> (7 - x % 8)) & 1) << PLANE_ORDER[p];
     }
     return c;
 }
 
-static void img_set_pixel(uint8_t *img, size_t avail, int w, int h, int x, int y, int colour, bool cga) {
+static void img_set_pixel(uint8_t *img, size_t avail, int w, int h, int x, int y, int colour, bool cga, bool rowplanar) {
     if (x < 0 || y < 0 || x >= w || y >= h) return;
     if (cga) {
         size_t o = (size_t)y * (w / 4) + x / 4;
@@ -75,9 +82,8 @@ static void img_set_pixel(uint8_t *img, size_t avail, int w, int h, int x, int y
         if (o < avail) img[o] = (uint8_t)((img[o] & ~(3 << shift)) | ((colour & 3) << shift));
         return;
     }
-    size_t plane = (size_t)(w / 8) * h;
     for (int p = 0; p < 4; p++) {
-        size_t o = p * plane + (size_t)y * (w / 8) + x / 8;
+        size_t o = ega_offset(w, h, p, x, y, rowplanar);
         if (o >= avail) return;
         uint8_t mask = (uint8_t)(1 << (7 - x % 8));
         if ((colour >> PLANE_ORDER[p]) & 1) img[o] |= mask; else img[o] &= (uint8_t)~mask;
@@ -154,7 +160,7 @@ static void draw_tile(uint8_t *cv, const uint8_t *data, size_t len, int idx, int
     if (base + tile_bytes(cga) > len) return;
     for (int y = 0; y < 8; y++)
         for (int x = 0; x < 8; x++)
-            put_px(cv, dx + x, dy + y, palette(cga)[img_pixel(data + base, len - base, 8, 8, x, y, cga)]);
+            put_px(cv, dx + x, dy + y, palette(cga)[img_pixel(data + base, len - base, 8, 8, x, y, cga, false)]);
 }
 
 // One 24x21 SPIDS frame, its key colour left undrawn.
@@ -163,7 +169,7 @@ static void draw_spids(uint8_t *cv, const uint8_t *data, size_t len, int frame, 
     if (base >= len) return;
     for (int y = 0; y < SPIDS_H; y++)
         for (int x = 0; x < SPIDS_W; x++) {
-            int c = img_pixel(data + base, len - base, SPIDS_W, SPIDS_H, x, y, cga);
+            int c = img_pixel(data + base, len - base, SPIDS_W, SPIDS_H, x, y, cga, false);
             if (c != sprite_key(cga)) put_px(cv, dx + x, dy + y, palette(cga)[c]);
         }
 }
@@ -382,27 +388,49 @@ static bool write_png(const char *path, const uint8_t *rgb, int w, int h) {
 
 typedef struct {
     bool cga;                                   // .CGA files (packed 2 bpp) rather than .EGA
-    uint8_t *blocks, *scenery, *spids1, *spids2;
-    size_t blocks_len, scenery_len, s1_len, s2_len;
+    uint8_t *data[GFX_SOURCES];                 // each graphics file, NULL if absent
+    size_t len[GFX_SOURCES];
     uint8_t backs[BACKS_BLOCKS][BACKS_TILES];   // BACKS.SPL decoded (absent blocks: zeros)
     bool backs_present[BACKS_BLOCKS];
 } Assets;
 
+// The graphics files, one per source. `count` images of w x h; sheets are
+// tiles (plane-major 8x8) or sprite frames, screens a single row-planar picture.
+enum { KIND_TILES, KIND_SPRITE, KIND_SCREEN };
+static const struct { const char *file; int count, w, h, kind; bool required; } GFX[GFX_SOURCES] = {
+    [GFX_TILES]    = { "BLOCKS",   512, 8, 8, KIND_TILES, true },
+    [GFX_SPIDS1]   = { "SPIDS1",   64, SPIDS_W, SPIDS_H, KIND_SPRITE, true },
+    [GFX_SPIDS2]   = { "SPIDS2",   64, SPIDS_W, SPIDS_H, KIND_SPRITE, true },
+    [GFX_SCENERY]  = { "SCENERY",  256, 8, 8, KIND_TILES, true },
+    [GFX_CHARSET]  = { "CHARSET",  128, 8, 8, KIND_TILES, false },
+    [GFX_LOADSCRN] = { "LOADSCRN", 1, 320, 200, KIND_SCREEN, false },
+    [GFX_WINSCRN]  = { "WINSCRN",  1, 320, 200, KIND_SCREEN, false },
+    [GFX_PAGE1]    = { "PAGE1",    1, 320, 200, KIND_SCREEN, false },
+    [GFX_PAGE2]    = { "PAGE2",    1, 320, 200, KIND_SCREEN, false },
+    [GFX_PAGE3]    = { "PAGE3",    1, 320, 200, KIND_SCREEN, false },
+    [GFX_PAGE4]    = { "PAGE4",    1, 320, 200, KIND_SCREEN, false },
+    [GFX_HISCORE]  = { "HISCORE",  1, 320, 38, KIND_SCREEN, false },
+    [GFX_SPIDFIGR] = { "SPIDFIGR", 1, 64, 192, KIND_SCREEN, false },
+    [GFX_SKELFIGR] = { "SKELFIGR", 1, 64, 192, KIND_SCREEN, false },
+};
+
 static bool load_assets(const char *dir, Assets *a, bool cga) {
     const char *ext = cga ? "CGA" : "EGA";
-    char name[32];
+    bool ok = true;
     a->cga = cga;
-    snprintf(name, sizeof name, "BLOCKS.%s", ext);  a->blocks  = read_asset(dir, name, &a->blocks_len);
-    snprintf(name, sizeof name, "SCENERY.%s", ext); a->scenery = read_asset(dir, name, &a->scenery_len);
-    snprintf(name, sizeof name, "SPIDS1.%s", ext);  a->spids1  = read_asset(dir, name, &a->s1_len);
-    snprintf(name, sizeof name, "SPIDS2.%s", ext);  a->spids2  = read_asset(dir, name, &a->s2_len);
+    for (int s = 0; s < GFX_SOURCES; s++) {
+        char name[32];
+        snprintf(name, sizeof name, "%s.%s", GFX[s].file, ext);
+        a->data[s] = read_asset(dir, name, &a->len[s]);
+        if (a->data[s] == NULL && GFX[s].required) ok = false;
+    }
     char path[1024];
     snprintf(path, sizeof path, "%s/%s", dir, "BACKS.SPL");
     load_backs_file(path, a->backs, a->backs_present);     // missing file: black backgrounds
-    return a->blocks && a->scenery && a->spids1 && a->spids2;
+    return ok;
 }
 static void free_assets(Assets *a) {
-    free(a->blocks); free(a->scenery); free(a->spids1); free(a->spids2);
+    for (int s = 0; s < GFX_SOURCES; s++) free(a->data[s]);
 }
 
 // Effective foreground tile at (x,y), mirroring dumpRoom's resolution: a BLOCK
@@ -444,12 +472,12 @@ static void render_room_base(RoomFile *file, int room_id,
     for (int ty = 0; ty < HEIGHT_TILES; ty++)
         for (int tx = 0; tx < WIDTH_TILES; tx++) {
             int v = bg[ty * WIDTH_TILES + tx];
-            if (v) draw_tile(cv, a->scenery, a->scenery_len, v, tx * 8, ty * 8, a->cga);
+            if (v) draw_tile(cv, a->data[GFX_SCENERY], a->len[GFX_SCENERY], v, tx * 8, ty * 8, a->cga);
         }
     for (int ty = 0; ty < HEIGHT_TILES; ty++)
         for (int tx = 0; tx < WIDTH_TILES; tx++) {
             int v = effective_tile(room, tx, ty) & 0x3f;
-            if (v) draw_tile(cv, a->blocks, a->blocks_len, v + room->tile_offset * 16, tx * 8, ty * 8, a->cga);
+            if (v) draw_tile(cv, a->data[GFX_TILES], a->len[GFX_TILES], v + room->tile_offset * 16, tx * 8, ty * 8, a->cga);
         }
     for (int i = 0; i < room->num_objects; i++) {
         struct RoomObject *o = room->objects + i;
@@ -458,11 +486,11 @@ static void render_room_base(RoomFile *file, int room_id,
         creature_frame(o->sprite.type, o->sprite.damage, &s2, &frame);
         int dx = (o->x + 1 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE;
         int dy = (o->y + 1 + 1) * 8 - SPIDS_H;
-        if (s2) draw_spids(cv, a->spids2, a->s2_len, frame, dx, dy, a->cga);
-        else    draw_spids(cv, a->spids1, a->s1_len, frame, dx, dy, a->cga);
+        if (s2) draw_spids(cv, a->data[GFX_SPIDS2], a->len[GFX_SPIDS2], frame, dx, dy, a->cga);
+        else    draw_spids(cv, a->data[GFX_SPIDS1], a->len[GFX_SPIDS1], frame, dx, dy, a->cga);
     }
     if (player && room_id == PLAYER_ROOM)
-        draw_spids(cv, a->spids1, a->s1_len, PLAYER_FRAME,
+        draw_spids(cv, a->data[GFX_SPIDS1], a->len[GFX_SPIDS1], PLAYER_FRAME,
                    (3 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE, (20 + 1) * 8 - SPIDS_H, a->cga);
     if (debug) draw_overlay(cv, room);
 }
@@ -572,13 +600,6 @@ int render_colours(RenderCtx *ctx) { return render_is_cga(ctx) ? 4 : 16; }
 
 /* --- graphic sources -------------------------------------------------- */
 
-static const struct { const char *file; int count, w, h; bool sprite; } GFX[GFX_SOURCES] = {
-    [GFX_TILES]   = { "BLOCKS",  512, 8, 8, false },
-    [GFX_SPIDS1]  = { "SPIDS1",  64, SPIDS_W, SPIDS_H, true },
-    [GFX_SPIDS2]  = { "SPIDS2",  64, SPIDS_W, SPIDS_H, true },
-    [GFX_SCENERY] = { "SCENERY", 256, 8, 8, false },
-};
-
 const char *render_gfx_name(RenderCtx *ctx, GfxSource src) {
     static char name[GFX_SOURCES][32];
     snprintf(name[src], sizeof name[src], "%s.%s", GFX[src].file, render_is_cga(ctx) ? "CGA" : "EGA");
@@ -586,19 +607,22 @@ const char *render_gfx_name(RenderCtx *ctx, GfxSource src) {
 }
 int render_gfx_count(GfxSource src) { return GFX[src].count; }
 void render_gfx_size(GfxSource src, int *w, int *h) { *w = GFX[src].w; *h = GFX[src].h; }
+bool render_gfx_is_screen(GfxSource src) { return GFX[src].kind == KIND_SCREEN; }
+bool render_gfx_available(RenderCtx *ctx, GfxSource src) { return ctx != NULL && ctx->a.data[src] != NULL; }
 int render_gfx_bytes(RenderCtx *ctx, GfxSource src) {
-    return GFX[src].sprite ? spids_stride(render_is_cga(ctx)) : tile_bytes(render_is_cga(ctx));
+    bool cga = render_is_cga(ctx);
+    switch (GFX[src].kind) {
+        case KIND_SPRITE: return spids_stride(cga);
+        case KIND_SCREEN: return GFX[src].w * GFX[src].h / (cga ? 4 : 2);
+        default:          return tile_bytes(cga);
+    }
 }
-int render_gfx_key(RenderCtx *ctx, GfxSource src) { return GFX[src].sprite ? sprite_key(render_is_cga(ctx)) : -1; }
+int render_gfx_key(RenderCtx *ctx, GfxSource src) { return GFX[src].kind == KIND_SPRITE ? sprite_key(render_is_cga(ctx)) : -1; }
 
 static uint8_t *gfx_data(RenderCtx *ctx, GfxSource src, size_t *len) {
-    switch (src) {
-        case GFX_TILES:  *len = ctx->a.blocks_len; return ctx->a.blocks;
-        case GFX_SPIDS1: *len = ctx->a.s1_len;     return ctx->a.spids1;
-        case GFX_SPIDS2: *len = ctx->a.s2_len;     return ctx->a.spids2;
-        case GFX_SCENERY: *len = ctx->a.scenery_len; return ctx->a.scenery;
-        default: *len = 0; return NULL;
-    }
+    if ((unsigned)src >= GFX_SOURCES) { *len = 0; return NULL; }
+    *len = ctx->a.len[src];
+    return ctx->a.data[src];
 }
 
 // Start of image idx in its file, with the bytes available from there; NULL if out of range.
@@ -614,13 +638,14 @@ static uint8_t *gfx_image(RenderCtx *ctx, GfxSource src, int idx, size_t *avail)
 int render_gfx_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y) {
     size_t avail;
     uint8_t *img = gfx_image(ctx, src, idx, &avail);
-    return img ? img_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, ctx->a.cga) : 0;
+    return img ? img_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, ctx->a.cga, GFX[src].kind == KIND_SCREEN) : 0;
 }
 
 void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, int colour) {
     size_t avail;
     uint8_t *img = gfx_image(ctx, src, idx, &avail);
-    if (img && colour >= 0 && colour < render_colours(ctx)) img_set_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, colour, ctx->a.cga);
+    if (img && colour >= 0 && colour < render_colours(ctx))
+        img_set_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, colour, ctx->a.cga, GFX[src].kind == KIND_SCREEN);
 }
 
 bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
