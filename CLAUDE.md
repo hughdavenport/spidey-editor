@@ -125,8 +125,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
   or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
 - A switch's TOGGLE_BIT chunks into other rooms are drawn only as green arrows from the switch to
-  those rooms' thumbnails on the world map, the thumbnails framed green (`draw_world_links`, outside
-  the picture clip; thick while the switch is selected or under the cursor). Green is theirs alone
+  those rooms' thumbnails on the world map, the thumbnails tinted and framed green; switches in
+  other rooms that toggle a switch here are violet arrows the other way, from their room's tinted
+  thumbnail to the switch (`draw_world_links`, drawn over the map; thick while the switch here is
+  selected or under the cursor). Green is theirs alone
   on the map: yellow frames this room, blue its neighbours. Links to a switch in the same room are
   still lines inside the picture. A hot switch's links (cursor on it, or selected) keep their colour
   and thicken; yellow is only for goto mode. Overlay colours: magenta switch markers, orange TOGGLE_BLOCK,

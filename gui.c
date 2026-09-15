@@ -1245,6 +1245,26 @@ static void draw_help(GuiState *g) {
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++)
             draw_cell(&cells[y * stride + x], ox + (x - x0) * hcw, oy + (y - y0) * hch, hcw, hch, font, have, fpx);
+    // the overlay's colour legend, right of the editor's box
+    static const struct { Color col; const char *what; } legend[] = {
+        { {0, 0, 0, 0},      "Overlay colours" },
+        { MAGENTA,           "switch marker S#" },
+        { ORANGE,            "block toggle: the tile run it flips" },
+        { {96, 160, 255, 255}, "object toggle: line to the object" },
+        { SKYBLUE,           "block object outline; map: neighbour room" },
+        { GREEN,             "switch toggle; other room: arrow to its map room" },
+        { {150, 80, 220, 255}, "a switch elsewhere toggling one here: arrow back" },
+        { YELLOW,            "sprite object; goto emphasis; map: this room" },
+        { GOLD,              "keyboard focus" },
+        { WHITE,             "mouse hover on the map; thick = the hot switch" },
+    };
+    int lx = ox + (x1 - x0 + 3) * hcw, nleg = (int)(sizeof legend / sizeof legend[0]);
+    if (lx + 52 * hcw <= ox + w && nleg <= rows)
+        for (int i = 0; i < nleg; i++) {
+            int yy = oy + i * hch;
+            if (legend[i].col.a) DrawRectangle(lx, yy + 2, hch - 4, hch - 4, legend[i].col);
+            gtext(font, have, legend[i].what, lx + (legend[i].col.a ? hch : 0), yy + (hch - fpx) / 2, fpx, i == 0 ? GOLD : RAYWHITE);
+        }
     for (int i = 0; i < nextra; i++) {
         int yy = oy + (rows + 1 + i) * hch;
         DrawRectangle(ox, yy, w, hch, (Color){40, 40, 48, 255});
@@ -2181,22 +2201,65 @@ static void draw_hover_preview(GuiState *g) {
     DrawRectangleLinesEx(dst, 2, GOLD);
 }
 
-// A switch's TOGGLE_BIT chunks that reach another room: an arrow from the
-// switch to that room's thumbnail on the world map, and the thumbnail framed,
-// in green (the map's other frames are yellow = this room, blue = neighbours).
-// Drawn outside the picture's clip; thick while the switch is hot.
+// An arrow from `o` to `e` with its head at `e`.
+static void draw_arrow(Vector2 o, Vector2 e, float thick, float head, Color col) {
+    DrawLineEx(o, e, thick, col);
+    float dx = e.x - o.x, dy = e.y - o.y, len = sqrtf(dx * dx + dy * dy);
+    if (len < 1) return;
+    float ux = dx / len, uy = dy / len;
+    Vector2 a = { e.x - ux * head - uy * head * 0.5f, e.y - uy * head + ux * head * 0.5f };
+    Vector2 b = { e.x - ux * head + uy * head * 0.5f, e.y - uy * head - ux * head * 0.5f };
+    DrawTriangle(e, b, a, col);
+}
+
+// Where a switch of this room is drawn from / to: its marker, or the picture's
+// bottom edge for an out-of-bounds one.
+static Vector2 switch_anchor(GuiState *g, struct SwitchObject *sw) {
+    Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
+    if (o.y >= pic_y(g) + pic_h(g)) o.y = pic_y(g) + pic_h(g) - 2;
+    return o;
+}
+
+// Switch links across rooms, drawn over the world map. Outgoing: a switch's
+// TOGGLE_BIT chunks into another room run as green arrows to that room's
+// thumbnail, tinted and framed green. Incoming: a switch elsewhere that
+// toggles a switch of this room runs as a violet arrow from its room's
+// thumbnail, tinted violet, to the switch here. (The map's own frames are
+// yellow = this room, blue = neighbours.) Thick while the switch here is hot.
 static void draw_world_links(GuiState *g) {
     if (!ged_show_switches() && ged_goto_kind() != 2) return;
-    struct DecompressedRoom *r = &ged_rooms()->rooms[ged_room()].data;
+    RoomFile *rooms = ged_rooms();
+    struct DecompressedRoom *r = &rooms->rooms[ged_room()].data;
     int tw, th, cx, cy, cur_idx, sel_sw = ged_current_switch();
     world_geom(g, &tw, &th);
     ged_cursor(&cx, &cy);
     if (ged_item_at(cx, cy, &cur_idx) == 1) sel_sw = cur_idx;
+    // incoming
+    for (int rid = 0; rid < 64; rid++) {
+        if (rid == ged_room() || !rooms->rooms[rid].valid) continue;
+        struct DecompressedRoom *other = &rooms->rooms[rid].data;
+        for (int i = 0; i < other->num_switches; i++) {
+            struct SwitchObject *sw = other->switches + i;
+            for (size_t c = 1; c < sw->chunks.length; c++) {
+                struct SwitchChunk *ch = sw->chunks.data + c;
+                if (ch->type != TOGGLE_BIT || ch->room_idx != ged_room() || ch->switch_idx >= r->num_switches) continue;
+                struct SwitchObject *target = r->switches + ch->switch_idx;
+                if (target->chunks.length == 0) continue;
+                bool hot = (int)ch->switch_idx == sel_sw;
+                Rectangle d = world_cell(g, rid, tw, th);
+                Vector2 from = { d.x + d.width / 2, d.y + d.height / 2 };
+                Color col = hot ? (Color){200, 140, 255, 255} : (Color){150, 80, 220, 200};
+                DrawRectangleRec(d, (Color){150, 80, 220, hot ? 90 : 60});
+                DrawRectangleLinesEx(d, hot ? 4 : 3, col);
+                draw_arrow(from, switch_anchor(g, target), hot ? 3 : 1.5f, hot ? 14 : 10, col);
+            }
+        }
+    }
+    // outgoing
     for (int i = 0; i < r->num_switches; i++) {
         struct SwitchObject *sw = r->switches + i;
         if (sw->chunks.length == 0) continue;
-        Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
-        if (o.y >= pic_y(g) + pic_h(g)) o.y = pic_y(g) + pic_h(g) - 2;    // out-of-bounds switch: start at the picture's edge
+        Vector2 o = switch_anchor(g, sw);
         bool hot = i == sel_sw;
         for (size_t c = 1; c < sw->chunks.length; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
@@ -2204,16 +2267,9 @@ static void draw_world_links(GuiState *g) {
             Rectangle d = world_cell(g, ch->room_idx, tw, th);
             Vector2 e = { d.x + d.width / 2, d.y + d.height / 2 };
             Color col = hot ? (Color){120, 255, 120, 255} : (Color){0, 200, 80, 200};
-            DrawLineEx(o, e, hot ? 3 : 1.5f, col);
-            // arrowhead at the thumbnail
-            float dx = e.x - o.x, dy = e.y - o.y, len = sqrtf(dx * dx + dy * dy);
-            if (len > 1) {
-                float ux = dx / len, uy = dy / len, ah = hot ? 14 : 10;
-                Vector2 tip = e, a = { e.x - ux * ah - uy * ah * 0.5f, e.y - uy * ah + ux * ah * 0.5f }, b = { e.x - ux * ah + uy * ah * 0.5f, e.y - uy * ah - ux * ah * 0.5f };
-                DrawTriangle(tip, b, a, col);
-            }
             DrawRectangleRec(d, (Color){0, 200, 80, hot ? 90 : 60});   // the target room, tinted and framed
             DrawRectangleLinesEx(d, hot ? 4 : 3, col);
+            draw_arrow(o, e, hot ? 3 : 1.5f, hot ? 14 : 10, col);
         }
     }
 }
