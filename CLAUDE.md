@@ -113,8 +113,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   latched for a few frames (`mod_latch`) because a fast Ctrl-X can straddle a frame boundary.
 - Text cells are 4*scale x 8*scale px so the 64x22 hex map is exactly the picture; the
   scale follows the window size unless `--scale` pins it. Help is drawn as an overlay. The
-  text under the picture scrolls with the wheel (scrollbar on the picture's right edge); the
-  editor's last row (macro overlay) is pinned to the window bottom.
+  text under the picture scrolls with the wheel (scrollbar on the picture's right edge) and, when
+  it overflows, sits at its bottom by default until the wheel moves it (`scroll_pinned`; any other
+  input lets it follow the bottom again); the editor's last row (macro overlay) is pinned to the
+  window bottom.
 - Plain left press is held until release: a click moves the cursor, a drag moves the item
   and leaves the cursor (and Spider-Man) where it was.
 - World map right of the picture under the palette: every room rendered into one 8x8 atlas
@@ -132,9 +134,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   thumbnail to the switch (`draw_world_links`, drawn over the map; thick while the switch here is
   selected or under the cursor). A left click within 4 px of any link line or arrow (not near the
   switch marker) selects what it stands for (`link_click` / `collect_links`, `ged_select_chunk`);
-  a cross-room arrow takes two clicks: first its end in this room, then, while that is selected,
-  follow it to the other room's switch / chunk, the cursor landing on that switch (clamped into the
-  room for an out-of-bounds one). Works in switch editing too. The link nearest the mouse (within
+  a second click on a link whose chunk is already selected goes to what it toggles: the object
+  (`ged_goto_object`, as o<n>), the first tile of a block run (cursor), or the other room's switch /
+  chunk for a cross-room arrow, the cursor landing on that switch (clamped into the room for an
+  out-of-bounds one); a further click selects the chunk again, so clicks walk back and forth. Works in switch editing too. The link nearest the mouse (within
   6 px) is drawn a little fatter as the click target (`link_hover`). Clicks on a thumbnail still go
   to the room. Any other plain click on the room picture first leaves whatever switch /
   chunk / room editing mode is active (`ged_cancel`). Green is theirs alone

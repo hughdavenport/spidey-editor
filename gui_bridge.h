@@ -104,6 +104,7 @@ int   ged_item_at(int tx, int ty, int *idx);               // 1 switch preamble,
 // `chunk` (0 = the switch itself), as s<id>, Ctrl-S, c<n> would.
 void  ged_select_chunk(int sw, int chunk);
 int   ged_current_chunk(void);     // the chunk selected for editing (0 = none / the switch itself)
+void  ged_goto_object(int idx);    // leave editing and put the cursor on object idx (as o<n> does)
 void  ged_cancel(void);            // leave any switch / chunk / room editing mode (Escape until plain)
 void  ged_left_room(int prev);     // the GUI moved from room `prev`: a still-blank room is removed again
 

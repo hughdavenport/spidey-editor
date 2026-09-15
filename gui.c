@@ -110,6 +110,8 @@ typedef struct {
     int lpress_col, lpress_row;
     int mod_latch[3];       // frames a Shift/Alt/Ctrl press still counts as held (see feed_keys)
     int scroll;             // text rows scrolled off the top of the panel under the picture
+    bool scroll_pinned;     // the user scrolled it: leave it; otherwise it follows the bottom
+    bool scrolled;          // this frame's mouse input was a panel scroll
     Texture2D atlas;        // world map: every room rendered, 8x8 grid of ROOM_PX_W x ROOM_PX_H
     bool atlas_loaded;
     int hover_room;         // world-map thumbnail under the mouse, or -1
@@ -857,6 +859,7 @@ static bool feed_mouse(GuiState *g) {
     if (wheel != 0 && m.x < pic_w(g) && m.y >= panel_top(g) && m.y < pinned_top(g)) {
         g->scroll -= (int)wheel * 3;
         if (g->scroll < 0) g->scroll = 0;
+        g->scroll_pinned = true; g->scrolled = true;
         return true;
     }
 
@@ -1226,7 +1229,8 @@ static void draw_help(GuiState *g) {
         "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize, import / export",
         "        = BLOCK-<room>-<n>.png; the grid's 5th slot reads gfx (show the pixel editor instead) or block (back)",
         "info text: click a switch / chunk / object / room field line to edit it; click a link line to select its",
-        "        chunk (a cross-room arrow: first its end here, again to follow it); a plain click on the room leaves any mode",
+        "        chunk; clicking it again goes to what it toggles (object, tile run, or the other room's switch) and again",
+        "        back to the chunk; a plain click on the room leaves any mode",
     };
     int nextra = (int)(sizeof gui_help / sizeof gui_help[0]);
     for (int i = 0; i < nextra; i++) { int l = (int)strlen(gui_help[i]) + 2; if (l > cols) cols = l; }
@@ -2219,7 +2223,13 @@ static void draw_hover_preview(GuiState *g) {
 // other rooms' thumbnails on the map) and the incoming arrows from other rooms'
 // switches. `room` / `sw` / `chunk` name the chunk. Mirrors the geometry that
 // draw_overlay and draw_world_links draw.
-typedef struct { Vector2 a, b; int room, sw, chunk; int to_room, to_sw; } LinkSeg;   // to_*: the switch a TOGGLE_BIT link reaches (to_room = -1 for block / object links)
+typedef struct {
+    Vector2 a, b;
+    int room, sw, chunk;        // the chunk this segment stands for
+    int to_room, to_sw;         // a TOGGLE_BIT link: the switch it reaches (to_room -1 otherwise)
+    int kind;                   // the chunk's type
+    int obj, bx, by;            // TOGGLE_OBJECT: the object; TOGGLE_BLOCK: the run's first tile
+} LinkSeg;
 static int collect_links(GuiState *g, LinkSeg *out, int max) {
     RoomFile *rooms = ged_rooms();
     int cur = ged_room(), n = 0, tw, th;
@@ -2232,11 +2242,12 @@ static int collect_links(GuiState *g, LinkSeg *out, int max) {
         for (size_t c = 1; c < sw->chunks.length && n < max; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
             Vector2 e;
-            int to_room = -1, to_sw = -1;
+            int to_room = -1, to_sw = -1, obj = -1, bx = ch->x, by = ch->y;
             if (ch->type == TOGGLE_BLOCK) e = tile_pt(g, ch->x + 0.5f, ch->y + 0.5f);
             else if (ch->type == TOGGLE_OBJECT && ch->index < r->num_objects) {
                 struct RoomObject *t = r->objects + ch->index;
                 e = tile_pt(g, t->x + (t->type == BLOCK ? t->block.width / 2.0f : 0.5f), t->y + (t->type == BLOCK ? t->block.height / 2.0f : 0.5f));
+                obj = ch->index;
             } else if (ch->type == TOGGLE_BIT && ch->room_idx == cur && ch->switch_idx < r->num_switches && r->switches[ch->switch_idx].chunks.length) {
                 struct SwitchChunk *p = r->switches[ch->switch_idx].chunks.data;
                 e = tile_pt(g, p->x + 0.5f, p->y + 0.5f);
@@ -2247,7 +2258,7 @@ static int collect_links(GuiState *g, LinkSeg *out, int max) {
                 o = switch_anchor(g, sw);
                 to_room = ch->room_idx; to_sw = ch->switch_idx;
             } else continue;
-            out[n++] = (LinkSeg){ o, e, cur, i, (int)c, to_room, to_sw };
+            out[n++] = (LinkSeg){ o, e, cur, i, (int)c, to_room, to_sw, ch->type, obj, bx, by };
         }
     }
     for (int rid = 0; rid < 64 && n < max; rid++) {
@@ -2259,7 +2270,7 @@ static int collect_links(GuiState *g, LinkSeg *out, int max) {
                 struct SwitchChunk *ch = sw->chunks.data + c;
                 if (ch->type != TOGGLE_BIT || ch->room_idx != cur || ch->switch_idx >= r->num_switches || r->switches[ch->switch_idx].chunks.length == 0) continue;
                 Rectangle d = world_cell(g, rid, tw, th);
-                out[n++] = (LinkSeg){ (Vector2){ d.x + d.width / 2, d.y + d.height / 2 }, switch_anchor(g, r->switches + ch->switch_idx), rid, i, (int)c, cur, ch->switch_idx };
+                out[n++] = (LinkSeg){ (Vector2){ d.x + d.width / 2, d.y + d.height / 2 }, switch_anchor(g, r->switches + ch->switch_idx), rid, i, (int)c, cur, ch->switch_idx, TOGGLE_BIT, -1, 0, 0 };
             }
         }
     }
@@ -2332,7 +2343,15 @@ static bool link_click(GuiState *g, Vector2 m) {
             ged_map_click(l->to_room, false);
             ged_select_chunk(l->to_sw, 0);
             cursor_to_switch(l->to_room, l->to_sw);
-        } else ged_select_chunk(l->sw, l->chunk);
+        } else if (on_it && l->kind == TOGGLE_OBJECT && l->obj >= 0) {   // chunk selected: over to the object it toggles
+            ged_goto_object(l->obj);
+        } else if (on_it && l->kind == TOGGLE_BLOCK) {                  // ... or onto the tile run
+            ged_cancel();
+            ged_set_cursor(l->bx, l->by);
+        } else if (on_it && l->kind == TOGGLE_BIT && l->to_room == cur) {   // ... or the switch in this room it toggles
+            ged_select_chunk(l->to_sw, 0);
+            cursor_to_switch(cur, l->to_sw);
+        } else ged_select_chunk(l->sw, l->chunk);                       // (from the thing, the next click comes back to the chunk)
     } else {
         bool on_it = ged_current_switch() == l->to_sw && ged_current_chunk() == 0;
         if (on_it) {                                                    // follow an incoming arrow back to its switch
@@ -2571,7 +2590,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             if (want != g->scale) { g->scale = want; load_fonts(g); }
         }
 
-        if (feed_keys(g)) g->room_dirty = true;
+        if (feed_keys(g)) { g->room_dirty = true; g->scroll_pinned = false; }   // new input: the panel's text changes, follow its bottom again
         if (IsFileDropped()) {                             // a PNG dropped on the window replaces the current image
             FilePathList dropped = LoadDroppedFiles();
             int bi, bx, by, bw, bh;
@@ -2583,10 +2602,11 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             g->room_dirty = true;
         }
         if (g->world_stale) { world_build(g, ged_rooms(), buf); g->world_stale = false; }
-        g->pix_op = false;
+        g->pix_op = false; g->scrolled = false;
         if (feed_mouse(g)) {
             g->room_dirty = true;
             if (!g->pix_op) g->key_seq = ++g->seq;      // a room edit by mouse: `u` goes to the editor
+            if (!g->scrolled) g->scroll_pinned = false;
         }
 
         bool gfx_dirty = g->backs_dirty;
@@ -2609,6 +2629,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         }
 
         ged_redraw();                                      // the editor lays out its text screen
+        if (!g->scroll_pinned) g->scroll = panel_max_scroll(g);   // an overflowing panel shows its end (the newest / deepest detail) unless scrolled by hand
 
         RoomFile *rooms = ged_rooms();
         int room = ged_room();

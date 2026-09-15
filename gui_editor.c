@@ -318,6 +318,12 @@ void ged_select_chunk(int sw, int chunk) {
 }
 
 int ged_current_chunk(void) { return (int)state->current_chunk; }
+void ged_goto_object(int idx) {
+    if (idx < 0 || idx > 15) return;
+    editor_cancel_to_plain();
+    editor_handle_key((Key){ .code = KEY_CHAR, .ch = 'o', .mod = MOD_NONE });
+    editor_handle_key((Key){ .code = KEY_CHAR, .ch = "0123456789abcdef"[idx], .mod = MOD_NONE });
+}
 void ged_cancel(void) { editor_cancel_to_plain(); }
 void ged_left_room(int prev) { if (prev >= 0 && prev < 64) room_prune_blank((size_t)prev); }
 
