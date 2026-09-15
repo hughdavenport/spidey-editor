@@ -2107,12 +2107,15 @@ static void draw_world_map(GuiState *g) {
             DrawRectangleRec(d, (Color){25, 25, 30, 255});
         } else {
             DrawTexturePro(g->atlas, (Rectangle){(r % 8) * ROOM_PX_W, (r / 8) * ROOM_PX_H, ROOM_PX_W, ROOM_PX_H}, d, (Vector2){0, 0}, 0, WHITE);
-            const char *side = r == cur->room_north ? "N" : r == cur->room_south ? "S" :
-                               r == cur->room_west ? "W" : r == cur->room_east ? "E" : NULL;
+            char side[5] = "";                       // every exit of this room that leads here, e.g. "SW"
+            if (r == cur->room_north) strcat(side, "N");
+            if (r == cur->room_south) strcat(side, "S");
+            if (r == cur->room_west) strcat(side, "W");
+            if (r == cur->room_east) strcat(side, "E");
             if (r == ged_room()) DrawRectangleLinesEx(d, 2, YELLOW);
-            else if (side) {
+            else if (side[0]) {
                 DrawRectangleLinesEx(d, 2, SKYBLUE);
-                DrawRectangle((int)d.x, (int)d.y, cw(g) + 2, ch(g), (Color){0, 0, 0, 170});
+                DrawRectangle((int)d.x, (int)d.y, (int)strlen(side) * cw(g) + 2, ch(g), (Color){0, 0, 0, 170});
                 gtext(&g->font, g->font_loaded, side, (int)d.x + 1, (int)d.y, fs, SKYBLUE);
             }
         }
