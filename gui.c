@@ -850,14 +850,16 @@ static bool feed_mouse(GuiState *g) {
         }
     }
 
-    // wheel over the picture or the palette: background up/down; horizontal (or Shift+wheel): tileset
+    // wheel over the picture: background up/down; horizontal (or Shift+wheel): tileset.
+    // Over the tile picker any wheel changes the tileset; only the room changes the background.
     Vector2 wv = GetMouseWheelMoveV();
     bool over_pic = m.x >= pic_x(g) && m.x < pic_x(g) + pic_w(g) && m.y >= pic_y(g) && m.y < panel_top(g);
-    bool over_pal = m.x >= palette_x(g) && m.x < palette_x(g) + TILESET_PX * g->scale &&
+    bool over_pal = g->pix_src == GFX_TILES && !g->backs_view && !g->font_view &&
+                    m.x >= palette_x(g) && m.x < palette_x(g) + TILESET_PX * g->scale &&
                     m.y >= palette_y(g) && m.y < palette_y(g) + TILESET_PX * g->scale;
     if ((wv.x != 0 || wv.y != 0) && (over_pic || over_pal)) {
         int dt = wv.x > 0 ? 1 : wv.x < 0 ? -1 : 0, db = wv.y > 0 ? 1 : wv.y < 0 ? -1 : 0;
-        if (mod & GK_MOD_SHIFT) { dt = db; db = 0; }
+        if (over_pal || (mod & GK_MOD_SHIFT)) { if (db) dt = db; db = 0; }
         ged_new_input_batch();
         ged_adjust_room(db, dt);
         return true;
@@ -1220,7 +1222,7 @@ static void draw_help(GuiState *g) {
         "        that creature); middle-click on the room picks the tile",
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
         "        (BACKS.SPL, shared by every room with that background number); middle-click picks",
-        "wheel over room or picker: background; Shift+wheel / horizontal wheel: tileset",
+        "wheel over room: background; Shift+wheel / horizontal wheel, or wheel over the tile picker: tileset",
         "world map: click = go there (an empty slot becomes a new room); right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
         "focus: Tab cycles room / picker / editor / colours / pick+fill / attributes / buttons / world map (or click one);",

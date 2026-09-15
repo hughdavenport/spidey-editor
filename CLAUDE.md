@@ -165,7 +165,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   or the world map types that room number instead.
 - The out-of-bounds switch list is pinned at the bottom of the panel with S# badges (redraw()
   records its rows in `panel_oob_*`); the editor's own out-of-bounds map markers are hidden.
-- Wheel over the picture or the palette: background +-1; horizontal or Shift+wheel: tileset +-4
+- Wheel over the picture: background +-1; horizontal or Shift+wheel, or any wheel over the tile picker
+  (tiles view only): tileset +-4; nothing but the picture changes the background
   (`ged_adjust_room`). Middle-click on a room tile picks it into the palette.
 - Pixel editor right of the picker, for a "graphics source" (`GfxSource` in render.h): the
   BLOCKS tiles, or the sprite frames (24x21, colour 15 transparent, drawn as a checker; the

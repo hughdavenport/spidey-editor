@@ -107,7 +107,9 @@ xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 584 + 20)) mousedown 1; sleep 
 # wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
 xdotool mousemove $((X + 400)) $((Y + 24 + 200)) click 5; sleep 0.4; snap s13b-wheel-bkgrnd
 xdotool keydown shift; xdotool click 4; xdotool keyup shift; sleep 0.4; snap s13c-wheel-tileset
-xdotool key u; sleep 0.3; xdotool key u; sleep 0.3
+# wheel over the tile picker: tileset +4 again, the background stays; then undo all three
+xdotool mousemove $((X + 776 + 100)) $((Y + 24 + 100)) click 4; sleep 0.4; snap s13d-wheel-picker-tileset
+xdotool key u; sleep 0.3; xdotool key u; sleep 0.3; xdotool key u; sleep 0.3
 # wheel over the text panel scrolls it (room 1 has a short panel: no-op is fine)
 xdotool mousemove $((X + 200)) $((Y + 24 + 528 + 40)) click 5 click 5; sleep 0.3; snap s14-scrolled
 # block editor: cursor onto block O0 (helicopter) with o0; the panel shows its 6x2 tiles.
