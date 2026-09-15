@@ -124,9 +124,14 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   mean "none" and walking to room 0 must not conjure one; right click =
   `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
   or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
-- A switch's TOGGLE_BIT chunks into other rooms are drawn as lines from the switch to those rooms'
-  thumbnails on the world map (`draw_world_links`, outside the picture clip; thick while the
-  switch is selected or under the cursor), as well as the stub to the exit edge inside the picture.
+- A switch's TOGGLE_BIT chunks into other rooms are drawn only as green arrows from the switch to
+  those rooms' thumbnails on the world map, the thumbnails framed green (`draw_world_links`, outside
+  the picture clip; thick while the switch is selected or under the cursor). Green is theirs alone
+  on the map: yellow frames this room, blue its neighbours. Links to a switch in the same room are
+  still lines inside the picture. A hot switch's links (cursor on it, or selected) keep their colour
+  and thicken; yellow is only for goto mode. Overlay colours: magenta switch markers, orange TOGGLE_BLOCK,
+  blue TOGGLE_OBJECT lines (light blue = block object outlines and the map's neighbour frames), green
+  TOGGLE_BIT, yellow sprite outlines / goto emphasis / the current room on the map, gold keyboard focus.
 - Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an
   object -> TOGGLE_OBJECT chunk, right-click another switch -> TOGGLE_BIT chunk, right-drag a
   run of tiles -> TOGGLE_BLOCK chunk covering it; all via `switch_add_chunk()`, which selects

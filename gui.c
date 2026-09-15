@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 
 #include "gui.h"
@@ -2180,9 +2181,10 @@ static void draw_hover_preview(GuiState *g) {
     DrawRectangleLinesEx(dst, 2, GOLD);
 }
 
-// A switch's TOGGLE_BIT chunks that reach another room: a line from the switch
-// to that room's thumbnail on the world map (drawn outside the picture's clip;
-// the picture itself shows the exit-edge stub). Thick while the switch is hot.
+// A switch's TOGGLE_BIT chunks that reach another room: an arrow from the
+// switch to that room's thumbnail on the world map, and the thumbnail framed,
+// in green (the map's other frames are yellow = this room, blue = neighbours).
+// Drawn outside the picture's clip; thick while the switch is hot.
 static void draw_world_links(GuiState *g) {
     if (!ged_show_switches() && ged_goto_kind() != 2) return;
     struct DecompressedRoom *r = &ged_rooms()->rooms[ged_room()].data;
@@ -2201,8 +2203,17 @@ static void draw_world_links(GuiState *g) {
             if (ch->type != TOGGLE_BIT || ch->room_idx == ged_room() || ch->room_idx >= 64) continue;
             Rectangle d = world_cell(g, ch->room_idx, tw, th);
             Vector2 e = { d.x + d.width / 2, d.y + d.height / 2 };
-            if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, (Color){0, 200, 80, 170});
-            DrawRectangleLinesEx(d, hot ? 3 : 1, hot ? YELLOW : GREEN);
+            Color col = hot ? (Color){120, 255, 120, 255} : (Color){0, 200, 80, 200};
+            DrawLineEx(o, e, hot ? 3 : 1.5f, col);
+            // arrowhead at the thumbnail
+            float dx = e.x - o.x, dy = e.y - o.y, len = sqrtf(dx * dx + dy * dy);
+            if (len > 1) {
+                float ux = dx / len, uy = dy / len, ah = hot ? 14 : 10;
+                Vector2 tip = e, a = { e.x - ux * ah - uy * ah * 0.5f, e.y - uy * ah + ux * ah * 0.5f }, b = { e.x - ux * ah + uy * ah * 0.5f, e.y - uy * ah - ux * ah * 0.5f };
+                DrawTriangle(tip, b, a, col);
+            }
+            DrawRectangleRec(d, (Color){0, 200, 80, hot ? 90 : 60});   // the target room, tinted and framed
+            DrawRectangleLinesEx(d, hot ? 4 : 3, col);
         }
     }
 }
@@ -2244,7 +2255,8 @@ static void draw_overlay(GuiState *g) {
     if (!ged_show_switches() && !emph_sw) return;
     // Which links to draw thick: every chunk of the switch under the cursor (or
     // the one selected, e.g. an out-of-bounds switch chosen with s7), and every
-    // chunk that targets the object or tile under the cursor.
+    // chunk that targets the object or tile under the cursor. Hot links keep
+    // their colour and thicken; only goto mode paints things yellow.
     int cx, cy, cur_idx, cur_kind, sel_sw = ged_current_switch();
     ged_cursor(&cx, &cy);
     cur_kind = ged_item_at(cx, cy, &cur_idx);
@@ -2254,8 +2266,8 @@ static void draw_overlay(GuiState *g) {
         if (sw->chunks.length == 0) continue;
         Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
         bool hot_sw = i == sel_sw;
-        DrawCircleV(o, emph_sw || hot_sw ? 6 : 4, emph_sw || hot_sw ? YELLOW : C_SW);
-        label(g, TextFormat("S%d", i), o.x + 6, o.y - fs / 2, C_SW, emph_sw || hot_sw);
+        DrawCircleV(o, emph_sw || hot_sw ? 6 : 4, emph_sw ? YELLOW : C_SW);
+        label(g, TextFormat("S%d", i), o.x + 6, o.y - fs / 2, C_SW, emph_sw);
         for (size_t c = 1; c < sw->chunks.length; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
             bool hot = hot_sw;
@@ -2264,32 +2276,23 @@ static void draw_overlay(GuiState *g) {
                 int h = ch->dir == VERTICAL ? ch->size : 1;
                 if (cx >= ch->x && cx < ch->x + w && cy >= ch->y && cy < ch->y + h) hot = true;
                 Vector2 t = tile_pt(g, ch->x, ch->y);
-                DrawRectangleLinesEx((Rectangle){t.x, t.y, w * s, h * s}, hot ? 3 : 1, hot ? YELLOW : C_TBLK);
+                DrawRectangleLinesEx((Rectangle){t.x, t.y, w * s, h * s}, hot ? 3 : 1, C_TBLK);
                 Vector2 e = tile_pt(g, ch->x + 0.5f, ch->y + 0.5f);
-                if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, C_TBLK);
+                DrawLineEx(o, e, hot ? 3 : 1, C_TBLK);
             } else if (ch->type == TOGGLE_OBJECT && ch->index < r->num_objects) {
                 struct RoomObject *t = r->objects + ch->index;
                 if (cur_kind == 2 && cur_idx == ch->index) hot = true;
                 float cw = t->type == BLOCK ? t->block.width / 2.0f : 0.5f;
                 float chh = t->type == BLOCK ? t->block.height / 2.0f : 0.5f;
                 Vector2 e = tile_pt(g, t->x + cw, t->y + chh);
-                if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, C_OBJ);
-            } else if (ch->type == TOGGLE_BIT) {
-                Vector2 e = o;
-                int rid = ch->room_idx;
-                if (rid == r->room_north) e = tile_pt(g, sw->chunks.data[0].x + 0.5f, 0);
-                else if (rid == r->room_south) e = tile_pt(g, sw->chunks.data[0].x + 0.5f, HEIGHT_TILES);
-                else if (rid == r->room_west) e = tile_pt(g, 0, sw->chunks.data[0].y + 0.5f);
-                else if (rid == r->room_east) e = tile_pt(g, WIDTH_TILES, sw->chunks.data[0].y + 0.5f);
-                else if (rid == ged_room() && ch->switch_idx < r->num_switches) {   // a switch in this room
-                    struct SwitchObject *ts = r->switches + ch->switch_idx;
-                    if (ts->chunks.length) e = tile_pt(g, ts->chunks.data[0].x + 0.5f, ts->chunks.data[0].y + 0.5f);
-                    if (cur_kind == 1 && cur_idx == (int)ch->switch_idx) hot = true;
-                }
-                if (e.x != o.x || e.y != o.y) {
-                    if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, C_BIT);
-                    if (rid != ged_room()) label(g, TextFormat("R%d", rid), e.x - 8, e.y - 7, C_BIT, false);
-                }
+                DrawLineEx(o, e, hot ? 3 : 1, C_OBJ);
+            } else if (ch->type == TOGGLE_BIT && ch->room_idx == ged_room() && ch->switch_idx < r->num_switches) {
+                // a switch in this room; links into other rooms are drawn to the world map (draw_world_links)
+                struct SwitchObject *ts = r->switches + ch->switch_idx;
+                if (ts->chunks.length == 0) continue;
+                Vector2 e = tile_pt(g, ts->chunks.data[0].x + 0.5f, ts->chunks.data[0].y + 0.5f);
+                if (cur_kind == 1 && cur_idx == (int)ch->switch_idx) hot = true;
+                DrawLineEx(o, e, hot ? 3 : 1, C_BIT);
             }
         }
     }
@@ -2471,7 +2474,6 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             draw_link_drag(g);
             draw_cursor(g);
             EndScissorMode();
-            draw_world_links(g);                     // switch links into other rooms run to the world map
         }
         draw_palette(g);
         {
@@ -2484,6 +2486,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             draw_source_grid(g, on_block && bi != g->block_hidden);
         }
         draw_world_map(g);
+        if (!g->text_map && !ged_map_is_text()) draw_world_links(g);   // over the map: switch links into other rooms
         if (ged_help_shown()) draw_help(g);
         EndDrawing();
     }
