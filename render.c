@@ -31,7 +31,9 @@ static const uint8_t CGA_PAL[4][3] = { {0, 0, 0}, {85, 255, 255}, {255, 85, 255}
 #define EGA_TILE_BYTES 32
 #define CGA_TILE_BYTES 16
 #define SPRITE_KEY 15           // SPIDS transparency colour (EGA)
-#define CGA_SPRITE_KEY 3        // ... and in the CGA files (white)
+#define CGA_SPRITE_KEY 3        // ... in the CGA files without a MASKS file (never the case for the shipped game)
+#define MASK_KEEP 3             // CGA mask value: keep the background (the sprite is transparent here)
+#define CGA_MASK_COLOUR 4       // the virtual colour a masked-out CGA sprite pixel reports
 #define SPRITE_X_PAD 2          // figure sits ~2 tiles in from the box's left
 #define SPRITE_X_NUDGE 3        // ...plus 3 px (measured on the player and Mary Jane in DOSBox)
 #define PLAYER_ROOM 1
@@ -164,15 +166,19 @@ static void draw_tile(uint8_t *cv, const uint8_t *data, size_t len, int idx, int
 }
 
 // One 24x21 SPIDS frame, its key colour left undrawn.
-static void draw_spids(uint8_t *cv, const uint8_t *data, size_t len, int frame, int dx, int dy, bool cga) {
+static void draw_spids(uint8_t *cv, const uint8_t *data, size_t len, const uint8_t *mask, size_t mask_len, int frame, int dx, int dy, bool cga) {
     size_t base = (size_t)frame * spids_stride(cga);
     if (base >= len) return;
+    bool masked = cga && mask != NULL && base < mask_len;
     for (int y = 0; y < SPIDS_H; y++)
         for (int x = 0; x < SPIDS_W; x++) {
             int c = img_pixel(data + base, len - base, SPIDS_W, SPIDS_H, x, y, cga, false);
-            if (c != sprite_key(cga)) put_px(cv, dx + x, dy + y, palette(cga)[c]);
+            bool clear = masked ? img_pixel(mask + base, mask_len - base, SPIDS_W, SPIDS_H, x, y, true, false) == MASK_KEEP
+                                : c == sprite_key(cga);
+            if (!clear) put_px(cv, dx + x, dy + y, palette(cga)[c]);
         }
 }
+
 
 /* --------------------------------------------------------------- creatures */
 
@@ -412,7 +418,18 @@ static const struct { const char *file; int count, w, h, kind; bool required; } 
     [GFX_HISCORE]  = { "HISCORE",  1, 320, 38, KIND_SCREEN, false },
     [GFX_SPIDFIGR] = { "SPIDFIGR", 1, 64, 192, KIND_SCREEN, false },
     [GFX_SKELFIGR] = { "SKELFIGR", 1, 64, 192, KIND_SCREEN, false },
+    [GFX_MASKS1]   = { "MASKS1",   64, SPIDS_W, SPIDS_H, KIND_SPRITE, false },   // CGA only
+    [GFX_MASKS2]   = { "MASKS2",   64, SPIDS_W, SPIDS_H, KIND_SPRITE, false },
 };
+
+// The mask file of a sprite sheet (CGA), or GFX_SOURCES when it has none.
+static GfxSource mask_of(GfxSource src) {
+    return src == GFX_SPIDS1 ? GFX_MASKS1 : src == GFX_SPIDS2 ? GFX_MASKS2 : GFX_SOURCES;
+}
+static bool has_mask(const Assets *a, GfxSource src) {
+    return a->cga && mask_of(src) != GFX_SOURCES && a->data[mask_of(src)] != NULL;
+}
+
 
 static bool load_assets(const char *dir, Assets *a, bool cga) {
     const char *ext = cga ? "CGA" : "EGA";
@@ -431,6 +448,12 @@ static bool load_assets(const char *dir, Assets *a, bool cga) {
 }
 static void free_assets(Assets *a) {
     for (int s = 0; s < GFX_SOURCES; s++) free(a->data[s]);
+}
+
+// One frame of a sprite sheet of an asset set, through its CGA mask if any.
+static void draw_sprite(uint8_t *cv, const Assets *a, GfxSource src, int frame, int dx, int dy) {
+    GfxSource m = mask_of(src);
+    draw_spids(cv, a->data[src], a->len[src], a->cga && m != GFX_SOURCES ? a->data[m] : NULL, m != GFX_SOURCES ? a->len[m] : 0, frame, dx, dy, a->cga);
 }
 
 // Effective foreground tile at (x,y), mirroring dumpRoom's resolution: a BLOCK
@@ -486,12 +509,10 @@ static void render_room_base(RoomFile *file, int room_id,
         creature_frame(o->sprite.type, o->sprite.damage, &s2, &frame);
         int dx = (o->x + 1 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE;
         int dy = (o->y + 1 + 1) * 8 - SPIDS_H;
-        if (s2) draw_spids(cv, a->data[GFX_SPIDS2], a->len[GFX_SPIDS2], frame, dx, dy, a->cga);
-        else    draw_spids(cv, a->data[GFX_SPIDS1], a->len[GFX_SPIDS1], frame, dx, dy, a->cga);
+        draw_sprite(cv, a, s2 ? GFX_SPIDS2 : GFX_SPIDS1, frame, dx, dy);
     }
     if (player && room_id == PLAYER_ROOM)
-        draw_spids(cv, a->data[GFX_SPIDS1], a->len[GFX_SPIDS1], PLAYER_FRAME,
-                   (3 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE, (20 + 1) * 8 - SPIDS_H, a->cga);
+        draw_sprite(cv, a, GFX_SPIDS1, PLAYER_FRAME, (3 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE, (20 + 1) * 8 - SPIDS_H);
     if (debug) draw_overlay(cv, room);
 }
 
@@ -617,7 +638,11 @@ int render_gfx_bytes(RenderCtx *ctx, GfxSource src) {
         default:          return tile_bytes(cga);
     }
 }
-int render_gfx_key(RenderCtx *ctx, GfxSource src) { return GFX[src].kind == KIND_SPRITE ? sprite_key(render_is_cga(ctx)) : -1; }
+int render_gfx_key(RenderCtx *ctx, GfxSource src) {
+    if (GFX[src].kind != KIND_SPRITE || mask_of(src) == GFX_SOURCES) return -1;    // the mask files themselves have no key
+    if (ctx && has_mask(&ctx->a, src)) return CGA_MASK_COLOUR;
+    return sprite_key(render_is_cga(ctx));
+}
 
 static uint8_t *gfx_data(RenderCtx *ctx, GfxSource src, size_t *len) {
     if ((unsigned)src >= GFX_SOURCES) { *len = 0; return NULL; }
@@ -638,41 +663,69 @@ static uint8_t *gfx_image(RenderCtx *ctx, GfxSource src, int idx, size_t *avail)
 int render_gfx_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y) {
     size_t avail;
     uint8_t *img = gfx_image(ctx, src, idx, &avail);
-    return img ? img_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, ctx->a.cga, GFX[src].kind == KIND_SCREEN) : 0;
+    if (img == NULL) return 0;
+    if (has_mask(&ctx->a, src)) {
+        size_t mavail;
+        uint8_t *m = gfx_image(ctx, mask_of(src), idx, &mavail);
+        if (m && img_pixel(m, mavail, GFX[src].w, GFX[src].h, x, y, true, false) == MASK_KEEP) return CGA_MASK_COLOUR;
+    }
+    return img_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, ctx->a.cga, GFX[src].kind == KIND_SCREEN);
 }
 
 void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, int colour) {
     size_t avail;
     uint8_t *img = gfx_image(ctx, src, idx, &avail);
-    if (img && colour >= 0 && colour < render_colours(ctx))
+    if (img == NULL || colour < 0) return;
+    if (has_mask(&ctx->a, src)) {                       // CGA sprite: the mask carries transparency
+        size_t mavail;
+        uint8_t *m = gfx_image(ctx, mask_of(src), idx, &mavail);
+        if (m == NULL || colour > CGA_MASK_COLOUR) return;
+        bool clear = colour == CGA_MASK_COLOUR;
+        img_set_pixel(m, mavail, GFX[src].w, GFX[src].h, x, y, clear ? MASK_KEEP : 0, true, false);
+        img_set_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, clear ? 0 : colour, true, false);
+        return;
+    }
+    if (colour < render_colours(ctx))
         img_set_pixel(img, avail, GFX[src].w, GFX[src].h, x, y, colour, ctx->a.cga, GFX[src].kind == KIND_SCREEN);
 }
 
-bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
-    if ((unsigned)src >= GFX_SOURCES) return false;
+// One image's record: its bytes in the file, followed by its mask frame for a
+// masked CGA sprite (so undo and reset restore transparency too).
+static bool record_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    if (ctx == NULL || (unsigned)src >= GFX_SOURCES) return false;
     size_t len;
-    uint8_t *d = ctx ? gfx_data(ctx, src, &len) : NULL;
+    uint8_t *d = gfx_data(ctx, src, &len);
     size_t n = (size_t)render_gfx_bytes(ctx, src);
     if (d == NULL || idx < 0 || (size_t)(idx + 1) * n > len) return false;
     memcpy(out, d + (size_t)idx * n, n);
     return true;
 }
-
-void render_gfx_put(RenderCtx *ctx, GfxSource src, int idx, const uint8_t *in) {
-    if ((unsigned)src >= GFX_SOURCES) return;
+static void record_put(RenderCtx *ctx, GfxSource src, int idx, const uint8_t *in) {
+    if (ctx == NULL || (unsigned)src >= GFX_SOURCES) return;
     size_t len;
-    uint8_t *d = ctx ? gfx_data(ctx, src, &len) : NULL;
+    uint8_t *d = gfx_data(ctx, src, &len);
     size_t n = (size_t)render_gfx_bytes(ctx, src);
     if (d == NULL || idx < 0 || (size_t)(idx + 1) * n > len) return;
     memcpy(d + (size_t)idx * n, in, n);
 }
 
-bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
-    if (ctx == NULL || idx < 0) return false;
+bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    if (!record_get(ctx, src, idx, out)) return false;
+    if (has_mask(&ctx->a, src)) record_get(ctx, mask_of(src), idx, out + render_gfx_bytes(ctx, src));
+    return true;
+}
+
+void render_gfx_put(RenderCtx *ctx, GfxSource src, int idx, const uint8_t *in) {
+    record_put(ctx, src, idx, in);
+    if (ctx && has_mask(&ctx->a, src)) record_put(ctx, mask_of(src), idx, in + render_gfx_bytes(ctx, src));
+}
+
+// Image idx as shipped: from <file>.orig if a save has been made, else the file.
+static bool original_record(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
     char path[1200];
     snprintf(path, sizeof path, "%s/%s.orig", ctx->dir, render_gfx_name(ctx, src));
     FILE *f = fopen(path, "rb");
-    if (f == NULL) {                                // nothing saved yet: the file on disk is original
+    if (f == NULL) {
         snprintf(path, sizeof path, "%s/%s", ctx->dir, render_gfx_name(ctx, src));
         f = fopen(path, "rb");
     }
@@ -681,6 +734,13 @@ bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
     bool ok = fseek(f, (long)idx * (long)n, SEEK_SET) == 0 && fread(out, 1, n, f) == n;
     fclose(f);
     return ok;
+}
+
+bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    if (ctx == NULL || idx < 0) return false;
+    if (!original_record(ctx, src, idx, out)) return false;
+    if (has_mask(&ctx->a, src)) return original_record(ctx, mask_of(src), idx, out + render_gfx_bytes(ctx, src));
+    return true;
 }
 
 // Before the first write of a data file, copy it to <file>.orig (kept forever
@@ -698,8 +758,7 @@ static void keep_original(const char *path, const char *orig) {
     if (out) fclose(out);
 }
 
-bool render_gfx_save(RenderCtx *ctx, GfxSource src) {
-    if (ctx == NULL) return false;
+static bool save_source(RenderCtx *ctx, GfxSource src) {
     size_t len;
     uint8_t *d = gfx_data(ctx, src, &len);
     if (d == NULL) return false;
@@ -711,6 +770,13 @@ bool render_gfx_save(RenderCtx *ctx, GfxSource src) {
     if (f == NULL) { fprintf(stderr, "render: cannot write %s: %s\n", path, strerror(errno)); return false; }
     bool ok = fwrite(d, 1, len, f) == len;
     fclose(f);
+    return ok;
+}
+
+bool render_gfx_save(RenderCtx *ctx, GfxSource src) {
+    if (ctx == NULL) return false;
+    bool ok = save_source(ctx, src);
+    if (ok && has_mask(&ctx->a, src)) ok = save_source(ctx, mask_of(src));   // a CGA sprite's transparency lives in its mask file
     return ok;
 }
 

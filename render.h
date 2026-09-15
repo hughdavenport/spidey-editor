@@ -62,9 +62,14 @@ int render_player_frame(void);
 // ending, PAGE1-4 story, 320x200; HISCORE 320x38; SPIDFIGR / SKELFIGR health
 // figures, 64x192). The four sheets the rooms need must exist; the rest are
 // optional (render_gfx_available).
+// CGA only: MASKS1 / MASKS2 hold one AND mask per SPIDS frame (3 = keep the
+// background, 0 = the sprite's pixel is drawn), since CGA has no spare colour
+// to key on. In CGA mode a sprite pixel's colour is 4 = "transparent" when its
+// mask says so; painting colour 4 sets the mask, any other colour clears it.
+// The masks travel with the sprites: undo records, reset and save cover both.
 typedef enum { GFX_TILES, GFX_SPIDS1, GFX_SPIDS2, GFX_SCENERY, GFX_CHARSET,
                GFX_LOADSCRN, GFX_WINSCRN, GFX_PAGE1, GFX_PAGE2, GFX_PAGE3, GFX_PAGE4,
-               GFX_HISCORE, GFX_SPIDFIGR, GFX_SKELFIGR, GFX_SOURCES } GfxSource;
+               GFX_HISCORE, GFX_SPIDFIGR, GFX_SKELFIGR, GFX_MASKS1, GFX_MASKS2, GFX_SOURCES } GfxSource;
 #define GFX_MAX_BYTES 32000               // largest per-image record (an EGA 320x200 screen)
 bool render_gfx_is_screen(GfxSource src);             // a single picture rather than a sheet
 bool render_gfx_available(RenderCtx *ctx, GfxSource src);   // its file was found in the data dir
@@ -72,7 +77,7 @@ const char *render_gfx_name(RenderCtx *ctx, GfxSource src);   // file name in th
 int  render_gfx_count(GfxSource src);      // images in the file
 void render_gfx_size(GfxSource src, int *w, int *h);
 int  render_gfx_bytes(RenderCtx *ctx, GfxSource src);     // bytes per image record
-int  render_gfx_key(RenderCtx *ctx, GfxSource src);       // transparent colour, or -1
+int  render_gfx_key(RenderCtx *ctx, GfxSource src);       // transparent colour (15 EGA sprites, 4 = "masked" CGA sprites), or -1
 int  render_gfx_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y);
 void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, int colour);
 // Raw record (for undo), the record as shipped (<file>.orig, or the unedited

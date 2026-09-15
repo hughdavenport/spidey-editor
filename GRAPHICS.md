@@ -31,7 +31,15 @@ Same pictures, same tile/frame/row structure, **packed 2 bits per pixel**
 (native CGA framebuffer bytes, 4 pixels per byte, MSB pair = leftmost), half
 the bytes of the EGA file. Not two bit-planes: the planar guess scored 68% on
 Midnight in CGA mode, packed scores 100%. Palette is CGA mode 4, palette 1,
-high intensity: black, light cyan, light magenta, white. Sprite key = 3.
+high intensity: black, light cyan, light magenta, white.
+
+CGA sprites have no key colour. `MASKS1.CGA` / `MASKS2.CGA` hold one AND mask
+per `SPIDS1` / `SPIDS2` frame (same 128-byte stride and packed layout): value 3
+keeps the background, 0 lets the sprite's pixel through, and the mask is the
+figure's silhouette dilated by about a pixel. The sprite pixels are drawn on
+black; white (3) is a real colour (the eyes). An earlier note here that colour
+3 was the key was wrong: the editor (render.c) uses the masks, `spidey_gfx.py`
+still keys on 3 when it dumps CGA sprite sheets.
 
 ## Palette
 

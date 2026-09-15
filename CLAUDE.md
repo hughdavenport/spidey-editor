@@ -167,6 +167,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   sprite frames, key colour 3) with the 4-colour CGA palette; render.c's `img_pixel` /
   `img_set_pixel` handle both layouts, `render_palette(ctx)` / `render_colours(ctx)` give the
   mode's palette, and the swatches show only its colours. BACKS.SPL is shared by both modes.
+  CGA sprites carry their transparency in MASKS1/2.CGA (AND masks, 3 = keep background); the
+  editor reports a masked pixel as colour 4, shows it as a 5th "transparent" swatch, and an
+  undo record / reset / save of a CGA sprite covers its mask frame too (`has_mask`, `mask_of`).
   The two sets are separate files: an EGA edit is not mirrored into the CGA file or vice versa.
 - Two rows of buttons under the pixel editor: reset / tiles / sprites / backs, then font / screens /
   import / export (/ block). "font" is CHARSET (128 tiles, 16 across). "screens" lists the full-screen

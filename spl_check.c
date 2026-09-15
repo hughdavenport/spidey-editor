@@ -124,9 +124,11 @@ static void check_backs_store(const char *data_dir) {
     static const char *GFX_FILES[] = { "BLOCKS", "SCENERY", "SPIDS1", "SPIDS2", "CHARSET", "LOADSCRN", "WINSCRN",
                                        "PAGE1", "PAGE2", "PAGE3", "PAGE4", "HISCORE", "SPIDFIGR", "SKELFIGR" };
     static const char *EXTS[] = { "EGA", "CGA" };
-    char files[32][32];
+    char files[40][32];
     int nfiles = 0;
     snprintf(files[nfiles++], 32, "BACKS.SPL");
+    snprintf(files[nfiles++], 32, "MASKS1.CGA");
+    snprintf(files[nfiles++], 32, "MASKS2.CGA");
     for (size_t i = 0; i < sizeof GFX_FILES / sizeof GFX_FILES[0]; i++)
         for (int e = 0; e < 2; e++) snprintf(files[nfiles++], 32, "%s.%s", GFX_FILES[i], EXTS[e]);
     for (int i = 0; i < nfiles; i++) {
@@ -207,7 +209,26 @@ static void check_backs_store(const char *data_dir) {
     if (ctx != NULL) {
         CHECK(render_is_cga(ctx) && render_colours(ctx) == 4, "cga mode flags");
         CHECK(render_gfx_bytes(ctx, GFX_TILES) == 16 && render_gfx_bytes(ctx, GFX_SPIDS1) == 128, "cga record sizes");
-        CHECK(render_gfx_key(ctx, GFX_SPIDS1) == 3, "cga sprite key");
+        CHECK(render_gfx_key(ctx, GFX_SPIDS1) == 4, "cga sprite key is the mask colour, got %d", render_gfx_key(ctx, GFX_SPIDS1));
+        CHECK(render_gfx_available(ctx, GFX_MASKS1) && render_gfx_available(ctx, GFX_MASKS2), "MASKS1/2.CGA loaded");
+        // frame 24 (Spider-Man standing): a corner is masked out, a body pixel is drawn black,
+        // painting "transparent" and back moves the mask, and a record carries both frames
+        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0) == 4, "cga sprite corner not masked: %d", render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0));
+        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8) != 4, "cga sprite body masked out");
+        uint8_t rec[GFX_MAX_BYTES], rec2[GFX_MAX_BYTES];
+        CHECK(render_gfx_get(ctx, GFX_SPIDS1, 24, rec), "cga sprite record");
+        int body = render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8);
+        render_gfx_set_pixel(ctx, GFX_SPIDS1, 24, 16, 8, 4);
+        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8) == 4, "cga sprite pixel not made transparent");
+        render_gfx_set_pixel(ctx, GFX_SPIDS1, 24, 0, 0, 1);
+        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0) == 1, "cga sprite corner not painted over the mask: %d", render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0));
+        render_gfx_put(ctx, GFX_SPIDS1, 24, rec);
+        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8) == body && render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0) == 4, "cga sprite record did not restore the mask");
+        CHECK(render_gfx_get(ctx, GFX_SPIDS1, 24, rec2) && memcmp(rec, rec2, 256) == 0, "cga sprite record differs after put");
+        render_gfx_set_pixel(ctx, GFX_SPIDS1, 24, 0, 0, 1);
+        CHECK(render_gfx_save(ctx, GFX_SPIDS1), "cga sprite save");
+        snprintf(p, sizeof p, "%s/MASKS1.CGA.orig", dir);
+        CHECK(stat(p, &st) == 0, "MASKS1.CGA.orig not written with the sprite save");
         CHECK(strcmp(render_gfx_name(ctx, GFX_SCENERY), "SCENERY.CGA") == 0, "cga file name: %s", render_gfx_name(ctx, GFX_SCENERY));
         // a pixel of tile 0x12: set to each colour and read back, the neighbours untouched
         int t = 0x12;

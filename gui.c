@@ -186,6 +186,7 @@ static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh
 static void sync_sprite_sel(GuiState *g);
 static void set_view(GuiState *g, int view);
 static bool tiles_view(GuiState *g);
+static void clamp_colour(GuiState *g);
 static void screen_geom(GuiState *g, int *z, int *ox, int *oy, int *w, int *h);
 static bool mouse_screen_px(GuiState *g, int *x, int *y);
 static void screen_tex_build(GuiState *g);
@@ -404,8 +405,16 @@ static void set_view(GuiState *g, int view) {
         g->pix_src = g->screen_src;
         g->scr_stale = true;
     } else sync_sprite_sel(g);
+    clamp_colour(g);
 }
 static bool tiles_view(GuiState *g) { return !g->sprites_view && !g->backs_view && !g->font_view && !g->screens_view; }
+
+// The paint colour must exist for the current image (the CGA sprites' 5th,
+// "transparent" colour does not elsewhere).
+static void clamp_colour(GuiState *g) {
+    int n = render_colours(g->rctx), key = render_gfx_key(g->rctx, g->pix_src);
+    if (g->sel_colour >= n && g->sel_colour != key) g->sel_colour = n - 1;
+}
 
 static int screen_index(GfxSource s) { for (int i = 0; i < NSCREENS; i++) if (SCREENS[i] == s) return i; return 0; }
 
@@ -448,8 +457,9 @@ static void focus_move(GuiState *g, int dx, int dy) {
         else { g->sel_sprite += dx + 8 * dy; sync_sprite_sel(g); }
     } else if (g->focus == FOCUS_WORLD) {
         g->world_sel = ((g->world_sel + dx + 8 * dy) % 64 + 64) % 64;
-    } else if (g->focus == FOCUS_COLOURS) {           // the swatches (8 x 2, or 4 in CGA): moving selects
-        int n = render_colours(g->rctx);
+    } else if (g->focus == FOCUS_COLOURS) {           // the swatches (8 x 2, or 4 in CGA, + transparent for CGA sprites): moving selects
+        int n = render_colours(g->rctx), key = render_gfx_key(g->rctx, g->pix_src);
+        if (key >= n) n = key + 1;
         g->sel_colour = ((g->sel_colour + dx + (n > 8 ? 8 : 0) * dy) % n + n) % n;
     } else if (g->focus == FOCUS_BUTTONS) {           // rows of buttons: left / right along a row, up / down between them
         int rows = tiles_view(g) ? 3 : 2;                 // the attribute row exists in the tiles view only
@@ -859,7 +869,8 @@ static bool feed_mouse(GuiState *g) {
         bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             int c = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
-            if (c < render_colours(g->rctx)) g->sel_colour = c;
+            int key = render_gfx_key(g->rctx, g->pix_src);
+            if (c < render_colours(g->rctx) || c == key) g->sel_colour = c;
             g->pix_op = true;
             return true;
         }
@@ -1514,7 +1525,7 @@ static void set_gfx_mode(GuiState *g, bool cga) {
     g->scr_stale = true;
     spidey_build(g);
     g->world_stale = true;
-    if (g->sel_colour >= render_colours(g->rctx)) g->sel_colour = render_colours(g->rctx) - 1;
+    clamp_colour(g);
     g->room_dirty = true;
 }
 
@@ -1708,7 +1719,8 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         }
     }
     int sp = swatch_px(g), sy = swatch_y(g);
-    for (int c = 0; c < render_colours(g->rctx); c++) {
+    int nsw = key >= render_colours(g->rctx) ? key + 1 : render_colours(g->rctx);   // CGA sprites: a 5th "transparent" swatch
+    for (int c = 0; c < nsw; c++) {
         int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
         if (c == key) {                          // the game draws this colour as transparent in sprites
             DrawRectangle(sx, yy, sp, sp, (Color){50, 50, 50, 255});
