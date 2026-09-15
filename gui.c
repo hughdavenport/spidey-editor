@@ -518,7 +518,7 @@ static void focus_apply(GuiState *g) {
     ged_new_input_batch();
     if (g->focus == FOCUS_WORLD) {
         ged_map_click(g->world_sel, false);
-        g->focus = FOCUS_ROOM;                        // in the room now (or a prompt answered): the cursor keys work the room
+        g->focus = FOCUS_ROOM;                        // went there by keyboard (or answered a prompt): the cursor keys work the room
     } else if (g->focus == FOCUS_PICKER && g->screens_view) {
         g->focus = FOCUS_EDITOR;                      // the list's choice is showing: over to the picture
     } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {
@@ -946,9 +946,8 @@ static bool feed_mouse(GuiState *g) {
     g->hover_room = world_room_at(g, m);
     if (g->hover_room >= 0 && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
         ged_new_input_batch();
-        bool right = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
-        ged_map_click(g->hover_room, right);
-        g->focus = right ? FOCUS_WORLD : FOCUS_ROOM;   // gone to (or answered with) a room: the cursor keys work the room now
+        bool answered = ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
+        g->focus = answered ? FOCUS_ROOM : FOCUS_WORLD;   // a prompt answered: the editor keeps the keys; a plain click stays on the map
         g->world_sel = g->hover_room;
         return true;
     }
