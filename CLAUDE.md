@@ -121,16 +121,23 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   texture (refreshed for the room being edited). Left click = go to that room, creating it if the
   file has no such room (`room_create()` in editor_actions.c: blank tiles and all settings 0).
   Only the world map creates rooms: the `r` prompt and exit-walking never do, since exits of 0
-  mean "none" and walking to room 0 must not conjure one; right click =
+  mean "none" and walking to room 0 must not conjure one. Leaving a room that is still entirely
+  blank removes it again (`room_prune_blank`, via `ged_left_room`), so an unused slot stays a slot;
+  right click =
   `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
   or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
 - A switch's TOGGLE_BIT chunks into other rooms are drawn only as green arrows from the switch to
   those rooms' thumbnails on the world map, the thumbnails tinted and framed green; switches in
   other rooms that toggle a switch here are violet arrows the other way, from their room's tinted
   thumbnail to the switch (`draw_world_links`, drawn over the map; thick while the switch here is
-  selected or under the cursor). A left click within 6 px of any link line or arrow selects that
-  chunk (`link_click` / `collect_links`, `ged_select_chunk`), going to the other room first for an
-  incoming arrow; clicks on a thumbnail still go to the room. Green is theirs alone
+  selected or under the cursor). A left click within 4 px of any link line or arrow (not near the
+  switch marker) selects what it stands for (`link_click` / `collect_links`, `ged_select_chunk`);
+  a cross-room arrow takes two clicks: first its end in this room, then, while that is selected,
+  follow it to the other room's switch / chunk, the cursor landing on that switch (clamped into the
+  room for an out-of-bounds one). Works in switch editing too. The link nearest the mouse (within
+  6 px) is drawn a little fatter as the click target (`link_hover`). Clicks on a thumbnail still go
+  to the room. Any other plain click on the room picture first leaves whatever switch /
+  chunk / room editing mode is active (`ged_cancel`). Green is theirs alone
   on the map: yellow frames this room, blue its neighbours. Links to a switch in the same room are
   still lines inside the picture. A hot switch's links (cursor on it, or selected) keep their colour
   and thicken; yellow is only for goto mode. Overlay colours: magenta switch markers, orange TOGGLE_BLOCK,

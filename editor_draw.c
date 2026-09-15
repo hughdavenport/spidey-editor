@@ -1780,12 +1780,15 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     }
                     bottom ++;
                     for (size_t i = 1; i < sw->chunks.length; i ++) {
-                        if (state->current_chunk == i) {
-                            fprintf(stderr, "%s:%d: %s: UNIMPLEMENTED: selected chunk\n", __FILE__, __LINE__, __func__);
-                            UNREACHABLE();
-                        }
+                        /* the selected chunk (of this switch) is shown inverse; a chunk index
+                         * alone says nothing, another switch may have the same one selected */
+                        bool selected = state->current_chunk == i && state->current_switch == s + 1;
                         scr_printf("    ");
-                        if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK) {
+                        if (selected) {
+                            scr_printf("\033[1;7m(");
+                            PRINTF_DATA((uint16_t)i);
+                            scr_printf(")\033[m ");
+                        } else if (state->current_state == EDIT_SWITCHDETAILS_SELECT_CHUNK) {
                             scr_printf("\033[1;4m(");
                             PRINTF_DATA((uint16_t)i);
                             scr_printf(")\033[m ");

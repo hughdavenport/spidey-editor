@@ -787,6 +787,31 @@ bool room_create(size_t room_idx) {
     return true;
 }
 
+// Is this room entirely blank: every tile 0, no objects or switches, every
+// setting 0, no name, nothing trailing? (What room_create makes, untouched.)
+static bool room_is_blank(Room *r) {
+    struct DecompressedRoom *d = &r->data;
+    for (size_t i = 0; i < C_ARRAY_LEN(d->tiles); i++) if (d->tiles[i]) return false;
+    if (d->num_objects || d->num_switches || r->rest.length) return false;
+    if (d->tile_offset || d->background || d->room_north || d->room_east || d->room_south || d->room_west ||
+        d->room_damage || d->gravity_vertical || d->gravity_horizontal || d->UNKNOWN_b || d->UNKNOWN_c || d->UNKNOWN_f ||
+        (d->_num_switches & 0x3)) return false;
+    for (size_t i = 0; i < C_ARRAY_LEN(d->name); i++) if (d->name[i] != ' ' && d->name[i] != '\0') return false;
+    return true;
+}
+
+// Leaving a room that is still entirely blank removes it again (it was only
+// there to be edited); coming back through the world map recreates it.
+bool room_prune_blank(size_t room_idx) {
+    if (room_idx >= C_ARRAY_LEN(state->rooms.rooms) || room_idx == state->current_level) return false;
+    Room *r = &state->rooms.rooms[room_idx];
+    if (!r->valid || !room_is_blank(r)) return false;
+    r->valid = false;
+    ARRAY_FREE(r->rest); ARRAY_FREE(r->compressed); ARRAY_FREE(r->decompressed);
+    editor_save();
+    return true;
+}
+
 bool transfer_item_to_room(size_t room_idx) {
     if (room_idx >= C_ARRAY_LEN(state->rooms.rooms) || room_idx == state->current_level) return false;
     if (!state->rooms.rooms[room_idx].valid) return false;

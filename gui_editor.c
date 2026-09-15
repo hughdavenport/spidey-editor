@@ -317,6 +317,10 @@ void ged_select_chunk(int sw, int chunk) {
     }
 }
 
+int ged_current_chunk(void) { return (int)state->current_chunk; }
+void ged_cancel(void) { editor_cancel_to_plain(); }
+void ged_left_room(int prev) { if (prev >= 0 && prev < 64) room_prune_blank((size_t)prev); }
+
 int ged_linking(void) {
     switch (state->current_state) {
         case EDIT_SWITCHDETAILS:

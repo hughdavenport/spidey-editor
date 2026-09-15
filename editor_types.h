@@ -275,6 +275,7 @@ extern size_t panel_oob_switch_n;
 /* GUI helpers (editor_actions.c) */
 bool transfer_item_to_room(size_t room_idx);
 bool room_create(size_t room_idx);   // make an absent room exist, entirely blank (tiles and settings all 0); false if it already does
+bool room_prune_blank(size_t room_idx);   // remove a room again if it is still entirely blank (not the current one); true if it was
 bool editor_save(void);              // writeRooms(); a refused write (game limits) undoes the change and says so in the status line
 void clipboard_clear(void);          // free whatever the clipboard holds; type becomes CLIP_NONE
 void room_snapshot_copy(struct DecompressedRoom *dst, const struct DecompressedRoom *src);   // deep copy (objects, switches)

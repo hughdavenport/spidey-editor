@@ -103,6 +103,9 @@ int   ged_item_at(int tx, int ty, int *idx);               // 1 switch preamble,
 // Open switch `sw` of the current room for editing and select its chunk
 // `chunk` (0 = the switch itself), as s<id>, Ctrl-S, c<n> would.
 void  ged_select_chunk(int sw, int chunk);
+int   ged_current_chunk(void);     // the chunk selected for editing (0 = none / the switch itself)
+void  ged_cancel(void);            // leave any switch / chunk / room editing mode (Escape until plain)
+void  ged_left_room(int prev);     // the GUI moved from room `prev`: a still-blank room is removed again
 
 // GUI-side tile painting (palette + drag): one undo entry per stroke, room
 // written after the stroke (ged_flush) rather than per cell.
