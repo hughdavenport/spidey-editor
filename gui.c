@@ -840,7 +840,11 @@ static bool feed_mouse(GuiState *g) {
     // attribute buttons under the source buttons (tiles view)
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && tiles_view(g))
         for (int i = 0; i < 4; i++)
-            if (CheckCollisionPointRec(m, attr_button(g, i))) { g->sel_attr = ATTRS[i].bits; return true; }
+            if (CheckCollisionPointRec(m, attr_button(g, i))) {
+                g->sel_attr = ATTRS[i].bits;
+                g->focus = FOCUS_BUTTONS; g->btn_row = 5 + i / 2; g->btn_sel = i % 2;   // the keyboard cursor follows the click
+                return true;
+            }
 
     // block editor (while the cursor is on a block object it replaces the pixel editor)
     {
@@ -916,7 +920,11 @@ static bool feed_mouse(GuiState *g) {
         if (g->pix_painting) return false;
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
             for (int i = 0; i < pixed_button_count(g); i++)
-                if (CheckCollisionPointRec(m, pixed_button(g, i))) { pixed_button_press(g, i); return true; }
+                if (CheckCollisionPointRec(m, pixed_button(g, i))) {
+                    g->focus = FOCUS_BUTTONS; g->btn_row = i / 2; g->btn_sel = i % 2;   // the keyboard cursor follows the click
+                    pixed_button_press(g, i);
+                    return true;
+                }
     }
 
     // world map: hover names, left = go there, right = move the thing / retarget the chunk
