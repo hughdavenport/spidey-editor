@@ -203,7 +203,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   or click one; arrows and hjkl move that panel's selection (colours: moving selects the paint
   colour; buttons: left/right along the row, up/down to the pass/solid/magnet/slip row in the tiles
   view, Enter/Space presses; both skipped while the block panel is up),
-  Enter/Space applies it (world map: go there;
+  Enter/Space applies it (world map: go there, and focus returns to the room so the cursor keys move
+  the room cursor, as a left click on the map does too;
   picker: put tile / creature at the room cursor; editor: paint). Esc, or any other key that
   is forwarded to the editor (`r`, `s`, digits, Ctrl-X, ...), returns focus to the room, so
   `r` then `h`/`l` types into the room prompt rather than moving the world-map selection. `u` after a mouse-driven room edit goes to the room undo.
