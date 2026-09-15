@@ -1728,7 +1728,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 break;
             }
         }
-        if (found) panel_oob_row0 = bottom;
+        if (found) panel_oob_row0 = bottom + 2;   /* the GUI pins the list from its heading, not the two spacer lines */
         if (found) {
             GOTO(0, bottom);
             scr_printf("\n\nOut of bounds switches:\n");
