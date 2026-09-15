@@ -242,6 +242,8 @@ bool readRoomFromFile(Room *room, FILE *fp, const char *filename);
 bool writeRooms(RoomFile *file);
 bool importRooms(FILE *fp, RoomFile *file, int force_room_id);
 bool recomputeToggleBits(RoomFile *file);
+void recomputeBases(RoomFile *file);
+bool swapRooms(RoomFile *file, int a, int b);
 void dumpRoom(Room *room, RoomFile *file, bool color);
 
 #endif // ROOM_H

@@ -983,6 +983,72 @@ bool main_importRoom(int *argc, char ***argv, char *program, RoomFile *file, boo
     return true;
 }
 
+// swap A B [--movertab FILE]: exchange two rooms (play.sh uses it to start in a chosen room).
+// The mover table, FILE or ./MOVERTAB.DAT if present, is permuted to the new object order and
+// written as MOVERTAB.DAT beside the output .SPL.
+bool main_swap(int *argc, char ***argv, char *program, int *swap_a, int *swap_b, char **movertab) {
+    if (*argc < 3) {
+        fprintf(stderr, "Usage: %s swap A B [--movertab FILE] [OUT.SPL]\n", program);
+        return false;
+    }
+    char *end;
+    long a = strtol((*argv)[1], &end, 0);
+    if (end == NULL || *end != '\0' || a <= 0 || a >= (long)C_ARRAY_LEN(((RoomFile *)0)->rooms)) {
+        fprintf(stderr, "Invalid room id: %s\n", (*argv)[1]);
+        return false;
+    }
+    long b = strtol((*argv)[2], &end, 0);
+    if (end == NULL || *end != '\0' || b <= 0 || b >= (long)C_ARRAY_LEN(((RoomFile *)0)->rooms)) {
+        fprintf(stderr, "Invalid room id: %s\n", (*argv)[2]);
+        return false;
+    }
+    *swap_a = (int)a; *swap_b = (int)b;
+    *argv += 3; *argc -= 3;
+    if (*argc >= 2 && strcmp((*argv)[0], "--movertab") == 0) {
+        *movertab = (*argv)[1];
+        *argv += 2; *argc -= 2;
+    }
+    return true;
+}
+
+// MOVERTAB.DAT holds 3 bytes per object, in global object order (see recomputeBases). After
+// swapping rooms a and b the order changes; permute the table so every object keeps its entry.
+// `before` = objects per room before the swap.
+static bool permuteMovertab(const unsigned before[64], int a, int b, const char *src, const char *dst) {
+    uint8_t table[768] = {0}, out[768] = {0};
+    FILE *fp = fopen(src, "rb");
+    if (fp == NULL) {
+        fprintf(stderr, "Could not open %s for reading: %s\n", src, strerror(errno));
+        return false;
+    }
+    size_t n = fread(table, 1, sizeof table, fp);
+    fclose(fp);
+    if (n != sizeof table) fprintf(stderr, "Warning: %s is %zu bytes, expected %zu\n", src, n, sizeof table);
+    unsigned old_base[64], new_base[64], after[64];
+    memcpy(after, before, sizeof after);
+    after[a] = before[b]; after[b] = before[a];
+    for (unsigned i = 0, o = 0, w = 0; i < 64; i++) {
+        old_base[i] = o; new_base[i] = w;
+        o += before[i]; w += after[i];
+    }
+    for (unsigned i = 0; i < 64; i++) {
+        unsigned from = (i == (unsigned)a) ? (unsigned)b : (i == (unsigned)b) ? (unsigned)a : i;
+        for (unsigned k = 0; k < after[i]; k++) {
+            unsigned oi = old_base[from] + k, ni = new_base[i] + k;
+            if (3 * oi + 3 <= sizeof table && 3 * ni + 3 <= sizeof out) memcpy(out + 3 * ni, table + 3 * oi, 3);
+        }
+    }
+    fp = fopen(dst, "wb");
+    if (fp == NULL) {
+        fprintf(stderr, "Could not open %s for writing: %s\n", dst, strerror(errno));
+        return false;
+    }
+    bool ok = fwrite(out, 1, sizeof out, fp) == sizeof out;
+    fclose(fp);
+    if (ok) fprintf(stderr, "Written %s\n", dst);
+    return ok;
+}
+
 int editor_main();
 
 static void print_subcommands(FILE *out) {
@@ -992,6 +1058,7 @@ static void print_subcommands(FILE *out) {
     fprintf(out, "    import [FILE|-] [OUT.SPL]             - Import display output (rooms not in file blanked); writes OUT.SPL (default ROOMS.SPL)\n");
     fprintf(out, "    importRoom ROOMID [FILE|-] [OUT.SPL]  - Import one room at ROOMID; writes OUT.SPL (default ROOMS.SPL)\n");
     fprintf(out, "    recompress                           - No changes to underlying data, just recompress\n");
+    fprintf(out, "    swap A B [--movertab FILE]           - Exchange rooms A and B (links, bases, toggle bits follow); permutes FILE or ./MOVERTAB.DAT into OUT's MOVERTAB.DAT\n");
     fprintf(out, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
     fprintf(out, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
     fprintf(out, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
@@ -1015,6 +1082,9 @@ int main(int argc, char **argv) {
     bool display = false;
     bool display_color = true;
     bool import_done = false;
+    bool swapped = false;
+    int swap_a = -1, swap_b = -1;
+    char *swap_movertab = NULL;
     bool list = false;
     int display_room = -1;
     int find_tile = -1;
@@ -1063,6 +1133,11 @@ int main(int argc, char **argv) {
             if (!main_recompress(&argc, &argv, program, &file, &recompress, &recompress_room)) {
                 defer_return(1);
             }
+        } else if (strcasecmp(argv[0], "swap") == 0) {
+            if (!main_swap(&argc, &argv, program, &swap_a, &swap_b, &swap_movertab)) {
+                defer_return(1);
+            }
+            swapped = true;
         } else if (strcasecmp(argv[0], "display") == 0) {
             if (!main_display(&argc, &argv, program, &file, &display, &display_room, &display_color)) {
                 defer_return(1);
@@ -1325,7 +1400,7 @@ int main(int argc, char **argv) {
             argc --;
         }
     }
-    if (find_sprite == -1 && find_tile == -1 && !list && !display && !recompress && !import_done && patches.length == 0) {
+    if (find_sprite == -1 && find_tile == -1 && !list && !display && !recompress && !import_done && !swapped && patches.length == 0) {
         fprintf(stderr, "Usage: %s subcommand [subcommand]... [FILENAME]\n", program);
         print_subcommands(stderr);
         defer_return(1);
@@ -1791,8 +1866,29 @@ int main(int argc, char **argv) {
             dumpRoom(&file.rooms[rooms.data[i]], &file, display_color);
         }
     }
-    if (patches.length > 0 || recompress || import_done) {
+    if (swapped) {
+        unsigned before[64] = {0};
+        for (size_t i = 0; i < C_ARRAY_LEN(file.rooms); i++)
+            if (file.rooms[i].valid) before[i] = file.rooms[i].data.num_objects;
+        if (!file.rooms[swap_a].valid || !file.rooms[swap_b].valid) {
+            fprintf(stderr, "swap: rooms %d and %d must both exist\n", swap_a, swap_b);
+            defer_return(1);
+        }
+        if (!swapRooms(&file, swap_a, swap_b)) defer_return(1);
+        const char *src = swap_movertab ? swap_movertab : "MOVERTAB.DAT";
+        if (swap_movertab || access(src, R_OK) == 0) {
+            char dst[4096];
+            const char *slash = strrchr(fileName, '/');
+            if (slash) snprintf(dst, sizeof dst, "%.*s/MOVERTAB.DAT", (int)(slash - fileName), fileName);
+            else snprintf(dst, sizeof dst, "MOVERTAB.DAT");
+            if (!permuteMovertab(before, swap_a, swap_b, src, dst)) defer_return(1);
+        } else {
+            fprintf(stderr, "swap: no MOVERTAB.DAT here and none given, mover table not permuted\n");
+        }
+    }
+    if (patches.length > 0 || recompress || import_done || swapped) {
         if (import_done) {
+            recomputeBases(&file);
             if (!recomputeToggleBits(&file)) defer_return(1);
         }
         if (recompress) {

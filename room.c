@@ -989,6 +989,62 @@ tb_found:       ;
     return true;
 }
 
+// The game addresses MOVERTAB.DAT and the switch-state table by cumulative counts over
+// the lower-numbered rooms: a room's UNKNOWN_c is the number of objects in every valid room
+// before it, and its switch base (UNKNOWN_f * 4 + the low two bits of _num_switches) the
+// number of switches before it. Holds for every original room; a wrong base makes remote
+// toggles miss and gives sprites another object's mover entry (verified in play 2026-09-15).
+void recomputeBases(RoomFile *file) {
+    unsigned objects = 0, switches = 0;
+    for (size_t i = 0; i < C_ARRAY_LEN(file->rooms); i++) {
+        Room *r = file->rooms + i;
+        if (!r->valid) continue;
+        r->data.UNKNOWN_c = (uint8_t)objects;
+        r->data._num_switches = (uint8_t)((r->data.num_switches << 2) | (switches & 0x3));
+        r->data.UNKNOWN_f = (uint8_t)(switches >> 2);
+        objects += r->data.num_objects;
+        switches += r->data.num_switches;
+    }
+}
+
+// Swap rooms a and b (so that b can become the start room, say) keeping every link: exits
+// into either room follow it, TOGGLE_BIT chunks aimed at either room follow it, and the index
+// bases and toggle bits are recomputed for the new order. Room 0 stands for "no exit" in the
+// exit bytes, so it cannot take part.
+bool swapRooms(RoomFile *file, int a, int b) {
+    if (a <= 0 || b <= 0 || a >= (int)C_ARRAY_LEN(file->rooms) || b >= (int)C_ARRAY_LEN(file->rooms)) {
+        fprintf(stderr, "swapRooms: rooms must be 1..63\n");
+        return false;
+    }
+    if (a == b) return true;
+    Room tmp = file->rooms[a];
+    file->rooms[a] = file->rooms[b];
+    file->rooms[b] = tmp;
+    file->rooms[a].index = (uint8_t)a;
+    file->rooms[b].index = (uint8_t)b;
+    for (size_t i = 0; i < C_ARRAY_LEN(file->rooms); i++) {
+        Room *r = file->rooms + i;
+        if (!r->valid) continue;
+        uint8_t *exits[] = { &r->data.room_north, &r->data.room_east, &r->data.room_south, &r->data.room_west };
+        for (size_t e = 0; e < C_ARRAY_LEN(exits); e++) {
+            if (*exits[e] == a) *exits[e] = (uint8_t)b;
+            else if (*exits[e] == b) *exits[e] = (uint8_t)a;
+        }
+        for (size_t sw = 0; sw < r->data.num_switches; sw++) {
+            struct SwitchObject *s = r->data.switches + sw;
+            for (size_t c = 1; c < s->chunks.length; c++) {
+                struct SwitchChunk *chunk = s->chunks.data + c;
+                if (chunk->type != TOGGLE_BIT) continue;
+                if (chunk->room_idx == a) chunk->room_idx = (uint16_t)b;
+                else if (chunk->room_idx == b) chunk->room_idx = (uint16_t)a;
+            }
+        }
+        ARRAY_FREE(r->compressed);
+    }
+    recomputeBases(file);
+    return recomputeToggleBits(file);
+}
+
 // force_room_id >= 0: import the first room found into that slot (ignore file's Room N id).
 // force_room_id < 0: use the room id from the "Room N @..." header.
 bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {

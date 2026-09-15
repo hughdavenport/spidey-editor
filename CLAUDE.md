@@ -244,8 +244,12 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - The hint text lives in the Ctrl-? overlay (GUI lines appended under the editor's box).
 - `gui_smoke_test.sh` runs in a sandbox copy (sources, binaries, Spider/, ROOMS.SPL) so it
   never touches the live files or a GUI you have open.
-- Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh swap the current room into
-  slot 1 of the copy the game runs from, so you start in the room being edited.
+- Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh run `a.out swap 1 N` on the
+  copy the game runs from, so you start in the room being edited. `swap` exchanges two rooms with
+  exits, TOGGLE_BIT targets, the per-room index bases (`UNKNOWN_c` = objects before this room,
+  `UNKNOWN_f*4+e` = switches before it; the game reads MOVERTAB.DAT and the switch-state table by
+  them) and the mover table following. `import` recomputes the bases too. A levelset's own
+  MOVERTAB.DAT sits beside ROOMS.SPL in the repo root; play.sh copies it, else the game's original.
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the
   picture (click selects, Shift+drag / middle-drag paints; one undo entry per stroke,
   written 0.4 s after the stroke). Left/right click go to the editor's mouse handling.

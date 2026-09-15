@@ -5,14 +5,20 @@ SPIDEY_DIR=${SPIDEY_DIR:-Spider}
 for f in *.EGA *.CGA BACKS.SPL; do
     if [ -f "$f" ] && [ "$f" -nt "$SPIDEY_DIR/$f" ]; then cp "$f" "$SPIDEY_DIR/"; fi
 done
-# PLAY_ROOM (set by the editor's Ctrl-P) = start in that room: it is swapped
-# into slot 1, the game's start room, in the copy the game runs from.
+# The mover table (MOVERTAB.DAT, one entry per object across the whole set) must match
+# ROOMS.SPL: a levelset's own table lives beside it here as ./MOVERTAB.DAT; without one the
+# game's original table is used.
+[ -f "$SPIDEY_DIR/MOVERTAB.DAT.original" ] || cp "$SPIDEY_DIR/MOVERTAB.DAT" "$SPIDEY_DIR/MOVERTAB.DAT.original"
+MOVERTAB=MOVERTAB.DAT; [ -f "$MOVERTAB" ] || MOVERTAB="$SPIDEY_DIR/MOVERTAB.DAT.original"
+# PLAY_ROOM (set by the editor's Ctrl-P) = start in that room: `swap` exchanges it with slot 1,
+# the game's start room, in the copy the game runs from, with exits, toggle targets, index bases
+# and the mover table following (importRoom would leave the room's old bases and lose the name
+# other rooms' switches refer to it by).
 if [ -n "${PLAY_ROOM:-}" ] && [ "$PLAY_ROOM" != 1 ]; then
-    tmp=$(mktemp)
-    ./a.out display "$PLAY_ROOM" > "$tmp" && ./a.out importRoom 1 "$tmp" "$SPIDEY_DIR/ROOMS.SPL"
-    rm -f "$tmp"
+    ./a.out swap 1 "$PLAY_ROOM" --movertab "$MOVERTAB" "$SPIDEY_DIR/ROOMS.SPL" || exit 1
 else
-    cp ROOMS.SPL $SPIDEY_DIR
+    cp ROOMS.SPL "$SPIDEY_DIR/"
+    cp "$MOVERTAB" "$SPIDEY_DIR/MOVERTAB.DAT"
 fi
 cd $SPIDEY_DIR
 dosbox-x -nopromptfolder SPIDEY.EXE 2>/dev/null &
