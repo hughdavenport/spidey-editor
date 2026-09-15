@@ -176,6 +176,8 @@ static int  pcw(GuiState *g);
 static int  oob_rows(int *r0);
 static int  world_room_at(GuiState *g, Vector2 m);
 static void draw_world_links(GuiState *g);
+static bool link_click(GuiState *g, Vector2 m);
+static Vector2 switch_anchor(GuiState *g, struct SwitchObject *sw);
 static void draw_source_grid(GuiState *g, bool block_up);
 static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
 static Rectangle pixed_button(GuiState *g, int i);
@@ -521,8 +523,7 @@ static void focus_move(GuiState *g, int dx, int dy) {
 static void focus_apply(GuiState *g) {
     ged_new_input_batch();
     if (g->focus == FOCUS_WORLD) {
-        ged_map_click(g->world_sel, false);
-        g->focus = FOCUS_ROOM;                        // went there by keyboard (or answered a prompt): the cursor keys work the room
+        ged_map_click(g->world_sel, false);           // by keyboard: go there, and stay on the map to keep browsing
     } else if (g->focus == FOCUS_PICKER && g->screens_view) {
         g->focus = FOCUS_EDITOR;                      // the list's choice is showing: over to the picture
     } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {
@@ -947,12 +948,16 @@ static bool feed_mouse(GuiState *g) {
                 }
     }
 
+    // a click on a switch link line (not on a thumbnail) selects that chunk
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !(mod & (GK_MOD_SHIFT | GK_MOD_CTRL)) && world_room_at(g, m) < 0 && link_click(g, m)) return true;
+
     // world map: hover names, left = go there, right = move the thing / retarget the chunk
     g->hover_room = world_room_at(g, m);
     if (g->hover_room >= 0 && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
         ged_new_input_batch();
-        bool answered = ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
-        g->focus = answered ? FOCUS_ROOM : FOCUS_WORLD;   // a prompt answered: the editor keeps the keys; a plain click stays on the map
+        bool right = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
+        ged_map_click(g->hover_room, right);
+        g->focus = right ? FOCUS_WORLD : FOCUS_ROOM;      // clicked into a room: the keys work the room; the keyboard route (Enter) stays on the map
         g->world_sel = g->hover_room;
         return true;
     }
@@ -1216,7 +1221,8 @@ static void draw_help(GuiState *g) {
         "        on the window: it is scaled to the image and snapped to the palette",
         "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize, import / export",
         "        = BLOCK-<room>-<n>.png; the grid's 5th slot reads gfx (show the pixel editor instead) or block (back)",
-        "info text: click a switch / chunk / object / room field line to edit it",
+        "info text: click a switch / chunk / object / room field line to edit it; click a link line (or an arrow",
+        "        to / from the world map) to select that chunk, going to its room first for an incoming one",
     };
     int nextra = (int)(sizeof gui_help / sizeof gui_help[0]);
     for (int i = 0; i < nextra; i++) { int l = (int)strlen(gui_help[i]) + 2; if (l > cols) cols = l; }
@@ -2202,6 +2208,83 @@ static void draw_hover_preview(GuiState *g) {
     Rectangle src = { (g->sel_tile % 8) * 8, (g->sel_tile / 8) * 8, 8, 8 };
     DrawTexturePro(g->pal_tex, src, dst, (Vector2){0, 0}, 0, (Color){255, 255, 255, 150});
     DrawRectangleLinesEx(dst, 2, GOLD);
+}
+
+// Every switch link on screen as a segment: the chunks of this room's
+// switches (block / object / same-room switch targets inside the picture,
+// other rooms' thumbnails on the map) and the incoming arrows from other rooms'
+// switches. `room` / `sw` / `chunk` name the chunk. Mirrors the geometry that
+// draw_overlay and draw_world_links draw.
+typedef struct { Vector2 a, b; int room, sw, chunk; } LinkSeg;
+static int collect_links(GuiState *g, LinkSeg *out, int max) {
+    RoomFile *rooms = ged_rooms();
+    int cur = ged_room(), n = 0, tw, th;
+    struct DecompressedRoom *r = &rooms->rooms[cur].data;
+    world_geom(g, &tw, &th);
+    for (int i = 0; i < r->num_switches && n < max; i++) {
+        struct SwitchObject *sw = r->switches + i;
+        if (sw->chunks.length == 0) continue;
+        Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
+        for (size_t c = 1; c < sw->chunks.length && n < max; c++) {
+            struct SwitchChunk *ch = sw->chunks.data + c;
+            Vector2 e;
+            if (ch->type == TOGGLE_BLOCK) e = tile_pt(g, ch->x + 0.5f, ch->y + 0.5f);
+            else if (ch->type == TOGGLE_OBJECT && ch->index < r->num_objects) {
+                struct RoomObject *t = r->objects + ch->index;
+                e = tile_pt(g, t->x + (t->type == BLOCK ? t->block.width / 2.0f : 0.5f), t->y + (t->type == BLOCK ? t->block.height / 2.0f : 0.5f));
+            } else if (ch->type == TOGGLE_BIT && ch->room_idx == cur && ch->switch_idx < r->num_switches && r->switches[ch->switch_idx].chunks.length) {
+                struct SwitchChunk *p = r->switches[ch->switch_idx].chunks.data;
+                e = tile_pt(g, p->x + 0.5f, p->y + 0.5f);
+            } else if (ch->type == TOGGLE_BIT && ch->room_idx != cur && ch->room_idx < 64) {
+                Rectangle d = world_cell(g, ch->room_idx, tw, th);
+                e = (Vector2){ d.x + d.width / 2, d.y + d.height / 2 };
+                o = switch_anchor(g, sw);
+            } else continue;
+            out[n++] = (LinkSeg){ o, e, cur, i, (int)c };
+        }
+    }
+    for (int rid = 0; rid < 64 && n < max; rid++) {
+        if (rid == cur || !rooms->rooms[rid].valid) continue;
+        struct DecompressedRoom *other = &rooms->rooms[rid].data;
+        for (int i = 0; i < other->num_switches && n < max; i++) {
+            struct SwitchObject *sw = other->switches + i;
+            for (size_t c = 1; c < sw->chunks.length && n < max; c++) {
+                struct SwitchChunk *ch = sw->chunks.data + c;
+                if (ch->type != TOGGLE_BIT || ch->room_idx != cur || ch->switch_idx >= r->num_switches || r->switches[ch->switch_idx].chunks.length == 0) continue;
+                Rectangle d = world_cell(g, rid, tw, th);
+                out[n++] = (LinkSeg){ (Vector2){ d.x + d.width / 2, d.y + d.height / 2 }, switch_anchor(g, r->switches + ch->switch_idx), rid, i, (int)c };
+            }
+        }
+    }
+    return n;
+}
+
+static float point_segment_dist(Vector2 p, Vector2 a, Vector2 b) {
+    float dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+    float t = len2 > 0 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    float qx = a.x + t * dx - p.x, qy = a.y + t * dy - p.y;
+    return sqrtf(qx * qx + qy * qy);
+}
+
+// A click near a link line selects its chunk: the switch is opened (in its
+// own room, going there first for an incoming arrow) and the chunk chosen,
+// which is what makes the link thick. true if a link took the click.
+static bool link_click(GuiState *g, Vector2 m) {
+    if (!ged_show_switches() || ged_linking()) return false;
+    static LinkSeg segs[512];
+    int n = collect_links(g, segs, 512), best = -1;
+    float bestd = 6;
+    for (int i = 0; i < n; i++) {
+        float d = point_segment_dist(m, segs[i].a, segs[i].b);
+        if (d < bestd) { bestd = d; best = i; }
+    }
+    if (best < 0) return false;
+    ged_new_input_batch();
+    if (segs[best].room != ged_room()) ged_map_click(segs[best].room, false);
+    ged_select_chunk(segs[best].sw, segs[best].chunk);
+    g->focus = FOCUS_ROOM;
+    return true;
 }
 
 // An arrow from `o` to `e` with its head at `e`.

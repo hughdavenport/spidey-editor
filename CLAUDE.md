@@ -128,7 +128,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   those rooms' thumbnails on the world map, the thumbnails tinted and framed green; switches in
   other rooms that toggle a switch here are violet arrows the other way, from their room's tinted
   thumbnail to the switch (`draw_world_links`, drawn over the map; thick while the switch here is
-  selected or under the cursor). Green is theirs alone
+  selected or under the cursor). A left click within 6 px of any link line or arrow selects that
+  chunk (`link_click` / `collect_links`, `ged_select_chunk`), going to the other room first for an
+  incoming arrow; clicks on a thumbnail still go to the room. Green is theirs alone
   on the map: yellow frames this room, blue its neighbours. Links to a switch in the same room are
   still lines inside the picture. A hot switch's links (cursor on it, or selected) keep their colour
   and thicken; yellow is only for goto mode. Overlay colours: magenta switch markers, orange TOGGLE_BLOCK,
@@ -217,8 +219,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   selects the paint colour; pick+fill: Enter/Space toggles the tool; attributes: the 2x2
   pass/solid/magnet/slip block, tiles view only, Enter/Space selects; buttons: the two-column grid,
   Enter/Space presses; colours, tools, attributes and buttons are skipped while the block panel is up),
-  Enter/Space applies it (world map: go there, and focus returns to the room so the cursor keys move
-  the room cursor; a mouse click on the map goes there but keeps the focus on the map;
+  Enter/Space applies it (world map: go there and stay focused on the map to keep browsing, while a
+  mouse click on the map goes there and hands focus to the room;
   picker: put tile / creature at the room cursor; editor: paint). Esc, or any other key that
   is forwarded to the editor (`r`, `s`, digits, Ctrl-X, ...), returns focus to the room, so
   `r` then `h`/`l` types into the room prompt rather than moving the world-map selection. `u` after a mouse-driven room edit goes to the room undo.

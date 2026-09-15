@@ -304,6 +304,19 @@ void ged_adjust_room(int dbackground, int dtileset) {
     editor_save();
 }
 
+void ged_select_chunk(int sw, int chunk) {
+    if (sw < 0 || sw > 15) return;
+    static const char hex[] = "0123456789abcdef";
+    editor_cancel_to_plain();
+    editor_handle_key((Key){ .code = KEY_CHAR, .ch = 's', .mod = MOD_NONE });
+    editor_handle_key((Key){ .code = KEY_CHAR, .ch = hex[sw], .mod = MOD_NONE });
+    if (plain_state()) editor_handle_key((Key){ .code = KEY_CTRL, .ch = 'S', .mod = MOD_NONE });   // (goto-switch opens out-of-bounds ones itself)
+    if (state->current_state == EDIT_SWITCHDETAILS && chunk > 0 && chunk <= 15) {
+        editor_handle_key((Key){ .code = KEY_CHAR, .ch = 'c', .mod = MOD_NONE });
+        editor_handle_key((Key){ .code = KEY_CHAR, .ch = hex[chunk], .mod = MOD_NONE });
+    }
+}
+
 int ged_linking(void) {
     switch (state->current_state) {
         case EDIT_SWITCHDETAILS:

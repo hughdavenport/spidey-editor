@@ -100,6 +100,9 @@ void  ged_link_block(int x, int y, int w, int h);          // TOGGLE_BLOCK cover
 void  ged_link_object(int object_idx);                     // TOGGLE_OBJECT
 void  ged_link_switch(int switch_idx);                     // TOGGLE_BIT to a switch in this room
 int   ged_item_at(int tx, int ty, int *idx);               // 1 switch preamble, 2 object, else 0
+// Open switch `sw` of the current room for editing and select its chunk
+// `chunk` (0 = the switch itself), as s<id>, Ctrl-S, c<n> would.
+void  ged_select_chunk(int sw, int chunk);
 
 // GUI-side tile painting (palette + drag): one undo entry per stroke, room
 // written after the stroke (ged_flush) rather than per cell.
