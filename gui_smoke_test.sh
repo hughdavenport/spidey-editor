@@ -74,10 +74,10 @@ xdotool mousemove $((X + 776 + 12)) $((Y + 24 + 3*21 + 10)) mousedown 1; sleep 0
 xdotool mousemove $((X + 776 + 192 + 16 + 5*9 + 4)) $((Y + 24 + 5*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12d-sprite-edit
 xdotool key u; sleep 0.8
 xdotool mousemove $((X + 876 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
-# backgrounds: "backs" button (4th), pick scenery tile 0x10 (16 across, 12 px cells: row 1, col 0; a solid tile),
+# backgrounds: "backs" button (4th), pick scenery tile 0x10 (16 across, 24 px cells like the tiles, twice the picker width: row 1, col 0; a solid tile),
 # Shift+drag along room row 3, wait for the BACKS.SPL write, undo, back to tiles
 xdotool mousemove $((X + 876 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12e-backs-view
-xdotool mousemove $((X + 776 + 0*12 + 6)) $((Y + 24 + 1*12 + 6)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
+xdotool mousemove $((X + 776 + 0*24 + 12)) $((Y + 24 + 1*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1
 for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done
 xdotool mouseup 1; xdotool keyup shift; sleep 1.2; snap s12f-backs-painted

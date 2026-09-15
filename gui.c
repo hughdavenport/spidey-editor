@@ -161,7 +161,7 @@ enum { VIEW_TILES, VIEW_SPRITES, VIEW_BACKS, VIEW_FONT, VIEW_SCREENS };
 // The full-screen pictures, in the order the screens picker lists them.
 static const GfxSource SCREENS[] = { GFX_LOADSCRN, GFX_WINSCRN, GFX_PAGE1, GFX_PAGE2, GFX_PAGE3, GFX_PAGE4, GFX_HISCORE, GFX_SPIDFIGR, GFX_SKELFIGR };
 #define NSCREENS ((int)(sizeof SCREENS / sizeof SCREENS[0]))
-#define BACKS_COLS 16           // the scenery picker: 16 x 16 tiles in the picker square
+#define BACKS_COLS 16           // the scenery picker: 16 x 16 tiles at the tile zoom (see picker_w)
 #define FONT_COLS 8             // the font picker: 8 x 16 tiles at the tile zoom, like the tileset
 #define MOD_LATCH_FRAMES 3
 
@@ -268,7 +268,10 @@ static int palette_x(GuiState *g) { return pic_x(g) + pic_w(g) + PAD; }
 static int palette_y(GuiState *g) { return pic_y(g); }
 // pixel editor: the selected image zoomed to about the picker's height, right
 // of the picker; colour swatches, labels and buttons under it
-static int pixed_x(GuiState *g) { return palette_x(g) + TILESET_PX * g->scale + 2 * PAD; }
+// The picker is the tileset's width, except the scenery picker: 16 across at the
+// tile zoom, so twice as wide, and the pixel editor moves right to make room.
+static int picker_w(GuiState *g) { return (g->backs_view ? 2 : 1) * TILESET_PX * g->scale; }
+static int pixed_x(GuiState *g) { return palette_x(g) + picker_w(g) + 2 * PAD; }
 static void pixed_dims(GuiState *g, int *w, int *h) { render_gfx_size(g->pix_src, w, h); }
 static int pixed_px(GuiState *g) { int w, h; pixed_dims(g, &w, &h); int p = TILESET_PX * g->scale / h; return p < 2 ? 2 : p; }
 static int pixed_w(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return w * pixed_px(g); }
@@ -824,8 +827,8 @@ static bool feed_mouse(GuiState *g) {
                 return true;
             }
         } else if (g->backs_view) {
-            int c = side / BACKS_COLS;
-            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + side) {
+            int pw = picker_w(g), c = pw / BACKS_COLS;
+            if (m.x >= px0 && m.x < px0 + pw && m.y >= py0 && m.y < py0 + pw) {
                 g->sel_img[GFX_SCENERY] = ((int)(m.y - py0) / c) * BACKS_COLS + (int)(m.x - px0) / c;
                 g->focus = FOCUS_PICKER;
                 return true;
@@ -1503,18 +1506,18 @@ static const char *backs_users(int bid) {
 // the scenery tiles (16 across).
 static void draw_palette(GuiState *g) {
     int s = 8 * g->scale, x0 = palette_x(g), y0 = palette_y(g), fs = g->font_px, side = TILESET_PX * g->scale;
-    if (g->backs_view) {
-        int c = side / BACKS_COLS, sel = g->sel_img[GFX_SCENERY];
-        DrawRectangle(x0, y0, side, side, (Color){35, 45, 35, 255});
+    if (g->backs_view) {                              // SCENERY: 16 x 16 tiles at the tile zoom
+        int pw = picker_w(g), c = pw / BACKS_COLS, sel = g->sel_img[GFX_SCENERY];
+        DrawRectangle(x0, y0, pw, pw, (Color){35, 45, 35, 255});
         if (g->sheet_loaded[GFX_SCENERY])
             DrawTexturePro(g->sheet_tex[GFX_SCENERY], (Rectangle){0, 0, g->sheet_tex[GFX_SCENERY].width, g->sheet_tex[GFX_SCENERY].height},
-                           (Rectangle){x0, y0, side, side}, (Vector2){0, 0}, 0, WHITE);
+                           (Rectangle){x0, y0, pw, pw}, (Vector2){0, 0}, 0, WHITE);
         for (int i = 0; i <= BACKS_COLS; i++) {
-            DrawLine(x0 + i * c, y0, x0 + i * c, y0 + side, (Color){80, 80, 80, 255});
-            DrawLine(x0, y0 + i * c, x0 + side, y0 + i * c, (Color){80, 80, 80, 255});
+            DrawLine(x0 + i * c, y0, x0 + i * c, y0 + pw, (Color){80, 80, 80, 255});
+            DrawLine(x0, y0 + i * c, x0 + pw, y0 + i * c, (Color){80, 80, 80, 255});
         }
         DrawRectangleLinesEx((Rectangle){x0 + (sel % BACKS_COLS) * c, y0 + (sel / BACKS_COLS) * c, c, c}, 2, GOLD);
-        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, side + 4}, 2, GOLD);
+        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, pw + 4, pw + 4}, 2, GOLD);
     } else if (g->font_view) {                        // CHARSET: 8 x 16 tiles, drawn at the tile zoom
         int c = side / FONT_COLS, sel = g->sel_img[GFX_CHARSET], rows = 16;
         DrawRectangle(x0, y0, side, c * rows, (Color){45, 45, 35, 255});

@@ -180,7 +180,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   to go back to painting.
   Right-click in the grid picks a colour without moving the keyboard cursor. play.sh copies newer ./BLOCKS/SPIDS1/SPIDS2/SCENERY .EGA and .CGA and
   BACKS.SPL into Spider/ so the game shows edits.
-- Backgrounds ("backs" button): the picker shows the 256 SCENERY tiles 16 across; Shift+drag in
+- Backgrounds ("backs" button): the picker shows the 256 SCENERY tiles 16 across at the tile zoom,
+  twice the tileset's width (`picker_w`; the pixel editor moves right for that view); Shift+drag in
   the room paints them into the room's background block (`render_backs_set_tile`, BACKS.SPL
   block = the room's `bkgrnd`, so every room with that number changes: the label lists them),
   middle-click picks the background tile under the mouse, Shift shows a green ghost. Strokes go on
