@@ -162,6 +162,7 @@ enum { VIEW_TILES, VIEW_SPRITES, VIEW_BACKS, VIEW_FONT, VIEW_SCREENS };
 static const GfxSource SCREENS[] = { GFX_LOADSCRN, GFX_WINSCRN, GFX_PAGE1, GFX_PAGE2, GFX_PAGE3, GFX_PAGE4, GFX_HISCORE, GFX_SPIDFIGR, GFX_SKELFIGR };
 #define NSCREENS ((int)(sizeof SCREENS / sizeof SCREENS[0]))
 #define BACKS_COLS 16           // the scenery picker: 16 x 16 tiles in the picker square
+#define FONT_COLS 8             // the font picker: 8 x 16 tiles at the tile zoom, like the tileset
 #define MOD_LATCH_FRAMES 3
 
 static const char *FONT_CANDIDATES[] = {
@@ -277,8 +278,12 @@ static int swatch_y(GuiState *g) { return palette_y(g) + pixed_h(g) + PAD; }
 static int pixed_text_y(GuiState *g) { return swatch_y(g) + SWATCH_ROWS * swatch_px(g) + PAD; }
 static int pixed_bottom(GuiState *g) { return pixed_text_y(g) + 9 * ch(g); }   // status, creature / hint, the picker's labels, saved
 // The buttons sit under the picker, two per row, from below where the tallest
-// picker (the sprite sheets, 16 rows of frames) ends, so they never move.
-static int buttons_y0(GuiState *g) { return palette_y(g) + (int)(16 * (TILESET_PX * g->scale / 8.0f) * SPIDS_FRAME_H / SPIDS_FRAME_W) + PAD; }
+// picker ends (the sprite sheets, 16 rows of frames, or the font, 16 rows of
+// tiles), so they never move.
+static int buttons_y0(GuiState *g) {
+    int sprites = (int)(16 * (TILESET_PX * g->scale / 8.0f) * SPIDS_FRAME_H / SPIDS_FRAME_W), font = 16 * 8 * g->scale;
+    return palette_y(g) + (sprites > font ? sprites : font) + PAD;
+}
 static int buttons_bottom(GuiState *g) { return buttons_y0(g) + 5 * (ch(g) + 8); }   // the attribute rows are above, not below
 // the image being edited: tiles are picked within the current tileset
 static int pixed_index(GuiState *g) {
@@ -488,7 +493,7 @@ static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh
 // Arrow / hjkl movement for the panel that has keyboard focus.
 static void focus_move(GuiState *g, int dx, int dy) {
     if (g->focus == FOCUS_PICKER) {
-        if (g->font_view) g->sel_img[GFX_CHARSET] = (g->sel_img[GFX_CHARSET] + dx + BACKS_COLS * dy + 128) % 128;
+        if (g->font_view) g->sel_img[GFX_CHARSET] = (g->sel_img[GFX_CHARSET] + dx + FONT_COLS * dy + 128) % 128;
         else if (g->screens_view) {
             int i = ((screen_index(g->pix_src) + dx + dy) % NSCREENS + NSCREENS) % NSCREENS;
             g->screen_src = g->pix_src = SCREENS[i]; g->scr_stale = true;
@@ -812,9 +817,9 @@ static bool feed_mouse(GuiState *g) {
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int side = TILESET_PX * g->scale, px0 = palette_x(g), py0 = palette_y(g);
         if (g->font_view) {
-            int c = side / BACKS_COLS;
-            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + 8 * c) {
-                g->sel_img[GFX_CHARSET] = ((int)(m.y - py0) / c) * BACKS_COLS + (int)(m.x - px0) / c;
+            int c = side / FONT_COLS;
+            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + 16 * c) {
+                g->sel_img[GFX_CHARSET] = ((int)(m.y - py0) / c) * FONT_COLS + (int)(m.x - px0) / c;
                 g->focus = FOCUS_PICKER;
                 return true;
             }
@@ -1310,7 +1315,7 @@ static void draw_cursor(GuiState *g) {
 }
 
 // Build the 8-across picker texture of a sprite sheet (RGBA, key transparent).
-static int sheet_cols(GfxSource src) { return src == GFX_SCENERY || src == GFX_CHARSET ? BACKS_COLS : 8; }
+static int sheet_cols(GfxSource src) { return src == GFX_SCENERY ? BACKS_COLS : src == GFX_CHARSET ? FONT_COLS : 8; }
 
 // The chosen screen as a texture (the big view and the thumbnail draw it).
 static void screen_tex_build(GuiState *g) {
@@ -1508,17 +1513,17 @@ static void draw_palette(GuiState *g) {
         }
         DrawRectangleLinesEx((Rectangle){x0 + (sel % BACKS_COLS) * c, y0 + (sel / BACKS_COLS) * c, c, c}, 2, GOLD);
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, side + 4}, 2, GOLD);
-    } else if (g->font_view) {                        // CHARSET: 16 x 8 tiles
-        int c = side / BACKS_COLS, sel = g->sel_img[GFX_CHARSET], rows = 8;
+    } else if (g->font_view) {                        // CHARSET: 8 x 16 tiles, drawn at the tile zoom
+        int c = side / FONT_COLS, sel = g->sel_img[GFX_CHARSET], rows = 16;
         DrawRectangle(x0, y0, side, c * rows, (Color){45, 45, 35, 255});
         if (!render_gfx_available(g->rctx, GFX_CHARSET))
-            gtext(&g->font, g->font_loaded, TextFormat("%s is not in the data dir", render_gfx_name(g->rctx, GFX_CHARSET)), x0 + 4, y0 + c * rows + 4, fs, ORANGE);
+            gtext(&g->font, g->font_loaded, TextFormat("%s is not in the data dir", render_gfx_name(g->rctx, GFX_CHARSET)), x0 + 4, y0 + 4, fs, ORANGE);
         if (g->sheet_loaded[GFX_CHARSET])
             DrawTexturePro(g->sheet_tex[GFX_CHARSET], (Rectangle){0, 0, g->sheet_tex[GFX_CHARSET].width, g->sheet_tex[GFX_CHARSET].height},
                            (Rectangle){x0, y0, side, c * rows}, (Vector2){0, 0}, 0, WHITE);
-        for (int i = 0; i <= BACKS_COLS; i++) DrawLine(x0 + i * c, y0, x0 + i * c, y0 + c * rows, (Color){80, 80, 80, 255});
+        for (int i = 0; i <= FONT_COLS; i++) DrawLine(x0 + i * c, y0, x0 + i * c, y0 + c * rows, (Color){80, 80, 80, 255});
         for (int i = 0; i <= rows; i++) DrawLine(x0, y0 + i * c, x0 + side, y0 + i * c, (Color){80, 80, 80, 255});
-        DrawRectangleLinesEx((Rectangle){x0 + (sel % BACKS_COLS) * c, y0 + (sel / BACKS_COLS) * c, c, c}, 2, GOLD);
+        DrawRectangleLinesEx((Rectangle){x0 + (sel % FONT_COLS) * c, y0 + (sel / FONT_COLS) * c, c, c}, 2, GOLD);
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, c * rows + 4}, 2, GOLD);
     } else if (g->pix_src == GFX_TILES) {
         DrawTexturePro(g->pal_tex, (Rectangle){0, 0, TILESET_PX, TILESET_PX},

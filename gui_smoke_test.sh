@@ -69,29 +69,29 @@ xdotool mousemove $((X + 776 + 192 + 16 + 6*9 + 4)) $((Y + 24 + 6*9 + 4)) moused
 xdotool key u; sleep 0.8
 xdotool mousemove $((X + 1264 + 36)) $((Y + 224 + 24)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3   # fill is a mode: turn it off again
 # sprite editing: SPIDS1 button (2nd button under the editor), pick frame 0x18 (row 3, col 0), paint a pixel, snapshot, undo
-xdotool mousemove $((X + 776 + 46)) $((Y + 400 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4; snap s12d0-spids1-mode
+xdotool mousemove $((X + 776 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4; snap s12d0-spids1-mode
 xdotool mousemove $((X + 776 + 12)) $((Y + 24 + 3*21 + 10)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4
 xdotool mousemove $((X + 776 + 192 + 16 + 5*9 + 4)) $((Y + 24 + 5*9 + 4)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12d-sprite-edit
 xdotool key u; sleep 0.8
-xdotool mousemove $((X + 876 + 46)) $((Y + 368 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
+xdotool mousemove $((X + 876 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # backgrounds: "backs" button (4th), pick scenery tile 0x10 (16 across, 12 px cells: row 1, col 0; a solid tile),
 # Shift+drag along room row 3, wait for the BACKS.SPL write, undo, back to tiles
-xdotool mousemove $((X + 876 + 46)) $((Y + 400 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12e-backs-view
+xdotool mousemove $((X + 876 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12e-backs-view
 xdotool mousemove $((X + 776 + 0*12 + 6)) $((Y + 24 + 1*12 + 6)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1
 for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done
 xdotool mouseup 1; xdotool keyup shift; sleep 1.2; snap s12f-backs-painted
 xdotool key u; sleep 0.8; snap s12g-backs-undo
-xdotool mousemove $((X + 876 + 46)) $((Y + 368 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
-# font button (row 2 of the grid, y 432): the CHARSET picker; pick tile 0x41, paint pixel (3,3) red, undo
-xdotool mousemove $((X + 776 + 46)) $((Y + 432 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12h-font-view
-xdotool mousemove $((X + 776 + 1*12 + 6)) $((Y + 24 + 4*12 + 6)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
+xdotool mousemove $((X + 876 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
+# font button (row 2 of the grid, y 480): the CHARSET picker (8 across, 24 px cells like the tiles); pick tile 0x41 (row 8, col 1), paint pixel (3,3) red, undo
+xdotool mousemove $((X + 776 + 46)) $((Y + 480 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12h-font-view
+xdotool mousemove $((X + 776 + 1*24 + 12)) $((Y + 24 + 8*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool mousemove $((X + 984 + 2*24 + 12)) $((Y + 224 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.2
 xdotool mousemove $((X + 984 + 3*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12i-font-edit
 xdotool key u; sleep 1.5   # (the undo's debounced write lands ~0.6 s later; a click inside that long frame would be lost)
 # screens: the "screens" button opens screen mode (whole window: picture at 3x from (128,192), panel at x 1216:
 # list rows from y 56 every 26, swatches at y 298 (36 px), buttons pick/fill y 378, import/export y 410, room y 442)
-xdotool mousemove $((X + 876 + 46)) $((Y + 432 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s12j-screen-mode
+xdotool mousemove $((X + 876 + 46)) $((Y + 480 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s12j-screen-mode
 xdotool mousemove $((X + 1224 + 40)) $((Y + 56 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5        # LOADSCRN
 xdotool mousemove $((X + 1224 + 2*36 + 18)) $((Y + 298 + 18)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # colour 2
 xdotool mousemove $((X + 128 + 100*3 + 1)) $((Y + 192 + 50*3 + 1)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12k-screen-edit
@@ -100,10 +100,10 @@ xdotool key u; sleep 0.8
 xdotool mousemove $((X + 1224 + 54)) $((Y + 410 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12l-screen-import   # import
 xdotool key u; sleep 0.6
 xdotool key Escape; sleep 0.5; snap s12m-back-from-screens   # Esc leaves screen mode
-xdotool mousemove $((X + 876 + 46)) $((Y + 368 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
+xdotool mousemove $((X + 876 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
-# buttons under the picker in two columns (x 776 / 876, rows of 32 px from y 368; attributes level with the swatches at 224 / 256); world map at 536; thumbs 68x47 + 4 gap (height-limited)
-xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 536 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
+# buttons under the picker in two columns (x 776 / 876, rows of 32 px from y 416, below the tallest picker (sprite sheets / font); attributes level with the swatches at 224 / 256); world map at 584; thumbs ~65x45 + 4 gap (height-limited)
+xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 584 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
 # wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
 xdotool mousemove $((X + 400)) $((Y + 24 + 200)) click 5; sleep 0.4; snap s13b-wheel-bkgrnd
 xdotool keydown shift; xdotool click 4; xdotool keyup shift; sleep 0.4; snap s13c-wheel-tileset
@@ -121,8 +121,8 @@ xdotool mousemove $((X + 876 + 46)) $((Y + 288 + 12)) mousedown 1; sleep 0.08; x
 xdotool mousemove $((X + 776 + 46)) $((Y + 288 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.0; snap s14c2-block-import
 xdotool key u; sleep 0.4
 # gfx (the grid's row-4 slot) hides the block panel; the same slot then reads "block" and brings it back
-xdotool mousemove $((X + 776 + 46)) $((Y + 496 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c3-block-hidden
-xdotool mousemove $((X + 776 + 46)) $((Y + 496 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c4-block-back
+xdotool mousemove $((X + 776 + 46)) $((Y + 544 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c3-block-hidden
+xdotool mousemove $((X + 776 + 46)) $((Y + 544 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c4-block-back
 # thick link lines: cursor on switch 4 (o0's toggling switch), snapshot
 xdotool key s; sleep 0.2; xdotool type 4; sleep 0.6; snap s14d-switch-hot
 # switch link: open switch 0 in Midnight (goto switch, Ctrl-S), right-click object O1 (R2D2 at 26,7)
