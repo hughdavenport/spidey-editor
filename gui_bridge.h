@@ -72,6 +72,7 @@ void  ged_set_cursor(int x, int y);
 void  ged_clear_selection(void);   // forget the selected switch/chunk (as moving the cursor does)
 bool  ged_show_objects(void);
 bool  ged_show_switches(void);
+bool  ged_show_tiles(void);       /* Ctrl-D t: tint tiles by class */
 RoomFile *ged_rooms(void);
 bool  ged_help_shown(void);
 int   ged_current_switch(void);    // the editor's selected switch (Ctrl-S / s#), or -1

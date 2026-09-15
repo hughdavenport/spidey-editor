@@ -1221,6 +1221,7 @@ static void draw_help(GuiState *g) {
     static const char *gui_help[] = {
         "GUI  (mouse and keys on top of the editor's)",
         "F2 hex map     F3 switch between the .EGA and .CGA graphics     q quit     wheel over text: scroll",
+        "Ctrl-D t: tint tiles by class (grey pass-through, blue solid, violet magnetic, cyan slippery)",
         "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
         "        that creature); middle-click on the room picks the tile",
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
@@ -1284,6 +1285,9 @@ static void draw_help(GuiState *g) {
         { YELLOW,            "sprite object; goto emphasis; map: this room" },
         { GOLD,              "keyboard focus" },
         { WHITE,             "mouse hover on the map; thick = the hot switch" },
+        { {0, 120, 255, 255}, "Ctrl-D t tile classes: blue solid" },
+        { {200, 60, 255, 255}, "  violet magnetic (no web)" },
+        { {0, 230, 230, 255}, "  cyan slippery, grey pass-through" },
     };
     int lx = ox + (x1 - x0 + 3) * hcw, nleg = (int)(sizeof legend / sizeof legend[0]);
     if (lx + 52 * hcw <= ox + w && nleg <= rows)
@@ -2544,6 +2548,20 @@ static void draw_overlay(GuiState *g) {
     Color C_SW = MAGENTA, C_BLK = SKYBLUE, C_OBJ = (Color){96,160,255,255},
           C_BIT = GREEN, C_TBLK = ORANGE, C_SPR = YELLOW;
     int fs = g->font_px;
+
+    // Ctrl-D t: every tile tinted by the class its top two bits give it. Empty (0x00)
+    // stays clear; other pass-through tiles are faint grey so scenery and hazards you can
+    // walk through read as such next to solid (blue), magnetic (violet) and slippery (cyan).
+    if (ged_show_tiles() && !g->text_map) {
+        static const Color tint[4] = { {200, 200, 200, 60}, {0, 120, 255, 110}, {200, 60, 255, 120}, {0, 230, 230, 120} };
+        for (int y = 0; y < HEIGHT_TILES; y++)
+            for (int x = 0; x < WIDTH_TILES; x++) {
+                uint8_t t = r->tiles[TILE_IDX(x, y)];
+                if (t == 0) continue;
+                Vector2 p = tile_pt(g, x, y);
+                DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, tint[t >> 6]);
+            }
+    }
 
     if (ged_show_objects() || emph_obj) {
         for (int i = 0; i < r->num_objects; i++) {

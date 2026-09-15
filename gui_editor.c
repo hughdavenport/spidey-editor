@@ -188,6 +188,7 @@ void ged_cursor(int *x, int *y) {
 }
 bool ged_show_objects(void) { return state->debug.objects; }
 bool ged_show_switches(void) { return state->debug.switches; }
+bool ged_show_tiles(void)    { return state->debug.tiles; }
 RoomFile *ged_rooms(void) { return &state->rooms; }
 void ged_set_cursor(int x, int y) {
     if (x < 0 || x >= WIDTH_TILES || y < 0 || y >= HEIGHT_TILES) return;

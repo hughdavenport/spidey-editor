@@ -116,6 +116,7 @@ struct debug {
     bool unknowns;
     bool objects;
     bool switches;
+    bool tiles;     /* GUI: tint every tile by its class (pass-through / solid / magnetic / slippery) */
     bool all;
 };
 

@@ -128,6 +128,7 @@ help_keys help[][100] = {
         {"o", "objects"},
         {"p", "position"},
         {"s", "switches"},
+        {"t", "tile types (GUI)"},
         {"u", "unknowns"},
         {"ESC", "cancel"},
         {"q", "cancel"},

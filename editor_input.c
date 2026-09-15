@@ -736,6 +736,7 @@ static bool handle_toggle_display(Key key) {
                 case 'o': state->debug.objects = !state->debug.objects; break;
                 case 'p': state->debug.pos = !state->debug.pos; break;
                 case 's': state->debug.switches = !state->debug.switches; break;
+                case 't': state->debug.tiles = !state->debug.tiles; break;
                 case 'u': state->debug.unknowns = !state->debug.unknowns; break;
                 case 'q': break;
                 case '?': state->help = !state->help; changed = 0; break;
