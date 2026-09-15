@@ -229,8 +229,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   selects the paint colour; pick+fill: Enter/Space toggles the tool; attributes: the 2x2
   pass/solid/magnet/slip block, tiles view only, Enter/Space selects; buttons: the two-column grid,
   Enter/Space presses; colours, tools, attributes and buttons are skipped while the block panel is up),
-  Enter/Space applies it (world map: go there and stay focused on the map to keep browsing, while a
-  mouse click on the map goes there and hands focus to the room;
+  Enter/Space applies it (world map: go there and stay focused on the map, by click or keyboard alike,
+  to keep browsing; the `r` prompt and other editor keys give the focus to the room;
   picker: put tile / creature at the room cursor; editor: paint). Esc, or any other key that
   is forwarded to the editor (`r`, `s`, digits, Ctrl-X, ...), returns focus to the room, so
   `r` then `h`/`l` types into the room prompt rather than moving the world-map selection. `u` after a mouse-driven room edit goes to the room undo.

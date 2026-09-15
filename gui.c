@@ -961,9 +961,8 @@ static bool feed_mouse(GuiState *g) {
     g->hover_room = world_room_at(g, m);
     if (g->hover_room >= 0 && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
         ged_new_input_batch();
-        bool right = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
-        ged_map_click(g->hover_room, right);
-        g->focus = right ? FOCUS_WORLD : FOCUS_ROOM;      // clicked into a room: the keys work the room; the keyboard route (Enter) stays on the map
+        ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
+        g->focus = FOCUS_WORLD;                           // the map keeps the focus (click or Enter); r<n> and other editor keys give it to the room
         g->world_sel = g->hover_room;
         return true;
     }
