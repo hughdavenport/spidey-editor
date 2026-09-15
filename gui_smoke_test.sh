@@ -116,12 +116,12 @@ xdotool key r; sleep 0.2; xdotool type 01; sleep 0.5
 xdotool key o; sleep 0.2; xdotool type 0; sleep 0.6; snap s14b-block-selected
 xdotool mousemove $((X + 984 + 1*36 + 18)) $((Y + 24 + 1*36 + 18)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s14c-block-painted
 xdotool key u; sleep 0.4
-# block export / import (buttons 6 and 5 of the block panel, 76 px apart, y = 24 + 2*36 + 8): the PNG round-trips to the same tiles
-xdotool mousemove $((X + 984 + 6*76 + 36)) $((Y + 104 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5
-xdotool mousemove $((X + 984 + 5*76 + 36)) $((Y + 104 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.0; snap s14c2-block-import
+# block export / import (block buttons sit under the picker, two per row from y 224: import = row 2 left, export = row 2 right): the PNG round-trips to the same tiles
+xdotool mousemove $((X + 876 + 46)) $((Y + 288 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5
+xdotool mousemove $((X + 776 + 46)) $((Y + 288 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.0; snap s14c2-block-import
 xdotool key u; sleep 0.4
-# gfx hides the block panel; "block" (now first in the second button row) brings it back
-xdotool mousemove $((X + 984 + 4*76 + 36)) $((Y + 104 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c3-block-hidden
+# gfx (the grid's row-4 slot) hides the block panel; the same slot then reads "block" and brings it back
+xdotool mousemove $((X + 776 + 46)) $((Y + 496 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c3-block-hidden
 xdotool mousemove $((X + 776 + 46)) $((Y + 496 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c4-block-back
 # thick link lines: cursor on switch 4 (o0's toggling switch), snapshot
 xdotool key s; sleep 0.2; xdotool type 4; sleep 0.6; snap s14d-switch-hot

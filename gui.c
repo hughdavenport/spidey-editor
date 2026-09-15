@@ -41,7 +41,7 @@
 #define SWATCH_ROWS 2
 enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_TOOLS, FOCUS_ATTRS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
-#define BLOCK_BUTTONS 7         // block panel: w+ w- h+ h- gfx import export
+#define BLOCK_BUTTONS 6         // block panel: w+ w- / h+ h- / import export (gfx is the grid's row-4 slot)
 #define BUTTON_ROWS 5           // two per row: reset tiles / sprites backs / font screens / import export / block
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
@@ -174,10 +174,13 @@ static int  pch(GuiState *g);
 static int  pcw(GuiState *g);
 static int  oob_rows(int *r0);
 static int  world_room_at(GuiState *g, Vector2 m);
+static void draw_world_links(GuiState *g);
+static void draw_source_grid(GuiState *g, bool block_up);
 static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
 static Rectangle pixed_button(GuiState *g, int i);
 static Rectangle attr_button(GuiState *g, int i);
 static bool grid_row_valid(GuiState *g, int row);
+static Rectangle grid_button(GuiState *g, int row, int col);
 static Rectangle pick_button(GuiState *g);
 static Rectangle fill_button(GuiState *g);
 static int  pixed_button_count(GuiState *g);
@@ -889,13 +892,14 @@ static bool feed_mouse(GuiState *g) {
                 static const int dxy[4][3] = { {1, 0, 1}, {1, 0, 0}, {0, 1, 1}, {0, 1, 0} };   // w+ w- h+ h-
                 for (int i = 0; i < BLOCK_BUTTONS; i++)
                     if (CheckCollisionPointRec(m, block_button(g, i, bh, z))) {
-                        if (i == 4) { g->block_hidden = bi; return true; }          // gfx: back to the pixel editor
-                        if (i == 5) { block_import_png(g, bi, bw, bh, NULL); return true; }
-                        if (i == 6) { block_export_png(g, bi, bw, bh); return true; }
+                        if (i == 4) { block_import_png(g, bi, bw, bh, NULL); return true; }
+                        if (i == 5) { block_export_png(g, bi, bw, bh); return true; }
                         ged_new_input_batch();
                         ged_block_resize(dxy[i][0], dxy[i][1], dxy[i][2]);
                         return true;
                     }
+                if (CheckCollisionPointRec(m, grid_button(g, 4, 0))) { g->block_hidden = bi; return true; }   // gfx: the pixel editor; "block" there brings this back
+                if (m.x >= palette_x(g) && m.x < pixed_x(g) && m.y >= buttons_y0(g) && m.y < buttons_bottom(g)) return true;   // the rest of the grid is dimmed while the block panel is up
             }
             if (in_grid) return false;
         }
@@ -1209,7 +1213,8 @@ static void draw_help(GuiState *g) {
         "font / screens buttons: the CHARSET font, and the title, story, ending, high-score and health-figure",
         "        pictures (painted on the big picture); import / export = <name>.png in the data dir, or drop a PNG",
         "        on the window: it is scaled to the image and snapped to the palette",
-        "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize",
+        "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize, import / export",
+        "        = BLOCK-<room>-<n>.png; the grid's 5th slot reads gfx (show the pixel editor instead) or block (back)",
         "info text: click a switch / chunk / object / room field line to edit it",
     };
     int nextra = (int)(sizeof gui_help / sizeof gui_help[0]);
@@ -1852,10 +1857,12 @@ static int block_zoom(GuiState *g, int w, int h) {
     (void)w; (void)h;
     return 8 * g->scale * 3 / 2;             // fixed: resizing must not rescale the tiles
 }
-// w+ w- h+ h- gfx import export
+// w+ w- / h+ h- / gfx import / export: two per row under the tile picker, in
+// the space the attribute buttons use when no block panel is up.
 static Rectangle block_button(GuiState *g, int i, int h, int z) {
-    int bw = 6 * cw(g);
-    return (Rectangle){ pixed_x(g) + i * (bw + 4), palette_y(g) + h * z + PAD, bw, ch(g) + 4 };
+    (void)h; (void)z;
+    int bw = (TILESET_PX * g->scale - PAD) / 2;
+    return (Rectangle){ palette_x(g) + (i % 2) * (bw + PAD), swatch_y(g) + (i / 2) * (ch(g) + 8), bw, ch(g) + 4 };
 }
 
 // The block object under the cursor: its tile grid, click paints the picked
@@ -1877,7 +1884,7 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
         DrawRectangleLinesEx((Rectangle){x0 + g->ecx * z, y0 + g->ecy * z, z, z}, 2, WHITE);
         DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * z + 4, h * z + 4}, 2, GOLD);
     }
-    const char *names[BLOCK_BUTTONS] = { "w+", "w-", "h+", "h-", "gfx", "import", "export" };
+    const char *names[BLOCK_BUTTONS] = { "w+", "w-", "h+", "h-", "import", "export" };
     for (int i = 0; i < BLOCK_BUTTONS; i++) {
         Rectangle rb = block_button(g, i, h, z);
         DrawRectangleRec(rb, (Color){50, 50, 60, 255});
@@ -1885,10 +1892,10 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
         gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
     }
-    int ty = (int)block_button(g, 0, h, z).y + ch(g) + PAD;
+    int ty = y0 + h * z + PAD;                        // the text goes under the block grid; the buttons are under the picker
     gtext(&g->font, g->font_loaded, TextFormat("block O%d at %d,%d  %dx%d", idx, bx, by, w, h), x0, ty, fs, RAYWHITE);
     gtext(&g->font, g->font_loaded, "click paints, right-click picks; w/h resize", x0, ty + ch(g), fs, GRAY);
-    gtext(&g->font, g->font_loaded, "gfx: pixel editor (its block button returns)", x0, ty + 2 * ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded, "gfx (in the grid below) swaps to the pixel editor", x0, ty + 2 * ch(g), fs, GRAY);
     gtext(&g->font, g->font_loaded, TextFormat("import / export %s (best tiles)", GetFileName(block_png_path(g, idx))), x0, ty + 3 * ch(g), fs, GRAY);
 }
 
@@ -1938,8 +1945,6 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
           x0, ty + ch(g), fs, pixed_locked(g) ? ORANGE : GRAY);
     gtext(&g->font, g->font_loaded, dirty ? "u undoes a stroke; saving..." : "u undoes a stroke",
           x0, ty + 2 * ch(g), fs, dirty ? ORANGE : GRAY);
-    if (g->block_hidden >= 0 && !g->sprites_view)
-        gtext(&g->font, g->font_loaded, TextFormat("block O%d is under the cursor: \"block\" shows its tiles", g->block_hidden), x0, ty + 3 * ch(g), fs, SKYBLUE);
     {
         Rectangle rb = pick_button(g);
         bool kbd = g->focus == FOCUS_TOOLS && g->tool_sel == 0;
@@ -1973,16 +1978,32 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
             int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
             gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
         }
-    const char *names[] = { "reset", "tiles", "sprites", "backs", "font", "screens", "import", "export", "block" };
     (void)block_available;
-    for (int i = 0; i < pixed_button_count(g); i++) {
+}
+
+// The source grid under the picker. While a block panel is up its view
+// buttons are dimmed (a block is tiles) and the row-4 slot reads "gfx"; with
+// the panel hidden that same slot reads "block", so one spot toggles the two.
+static void draw_source_grid(GuiState *g, bool block_up) {
+    static const char *names[] = { "reset", "tiles", "sprites", "backs", "font", "screens", "import", "export" };
+    int fs = g->font_px;
+    for (int i = 0; i < 8; i++) {
         Rectangle rb = pixed_button(g, i);
         bool on = (i == 1 && tiles_view(g)) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view) || (i == 4 && g->font_view) || (i == 5 && g->screens_view);
-        bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == i / 2 && g->btn_sel % 2 == i % 2;
+        bool kbd = !block_up && g->focus == FOCUS_BUTTONS && g->btn_row == i / 2 && g->btn_sel % 2 == i % 2;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? GOLD : GRAY);
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
-        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, block_up ? GRAY : RAYWHITE);
+    }
+    if (block_up || g->block_hidden >= 0) {
+        Rectangle rb = grid_button(g, 4, 0);
+        const char *name = block_up ? "gfx" : "block";
+        bool kbd = !block_up && g->focus == FOCUS_BUTTONS && g->btn_row == 4;
+        DrawRectangleRec(rb, (Color){50, 50, 60, 255});
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : GRAY);
+        int tw = text_w(&g->font, g->font_loaded, name, fs);
+        gtext(&g->font, g->font_loaded, name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
     }
 }
 
@@ -2157,6 +2178,33 @@ static void draw_hover_preview(GuiState *g) {
     Rectangle src = { (g->sel_tile % 8) * 8, (g->sel_tile / 8) * 8, 8, 8 };
     DrawTexturePro(g->pal_tex, src, dst, (Vector2){0, 0}, 0, (Color){255, 255, 255, 150});
     DrawRectangleLinesEx(dst, 2, GOLD);
+}
+
+// A switch's TOGGLE_BIT chunks that reach another room: a line from the switch
+// to that room's thumbnail on the world map (drawn outside the picture's clip;
+// the picture itself shows the exit-edge stub). Thick while the switch is hot.
+static void draw_world_links(GuiState *g) {
+    if (!ged_show_switches() && ged_goto_kind() != 2) return;
+    struct DecompressedRoom *r = &ged_rooms()->rooms[ged_room()].data;
+    int tw, th, cx, cy, cur_idx, sel_sw = ged_current_switch();
+    world_geom(g, &tw, &th);
+    ged_cursor(&cx, &cy);
+    if (ged_item_at(cx, cy, &cur_idx) == 1) sel_sw = cur_idx;
+    for (int i = 0; i < r->num_switches; i++) {
+        struct SwitchObject *sw = r->switches + i;
+        if (sw->chunks.length == 0) continue;
+        Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
+        if (o.y >= pic_y(g) + pic_h(g)) o.y = pic_y(g) + pic_h(g) - 2;    // out-of-bounds switch: start at the picture's edge
+        bool hot = i == sel_sw;
+        for (size_t c = 1; c < sw->chunks.length; c++) {
+            struct SwitchChunk *ch = sw->chunks.data + c;
+            if (ch->type != TOGGLE_BIT || ch->room_idx == ged_room() || ch->room_idx >= 64) continue;
+            Rectangle d = world_cell(g, ch->room_idx, tw, th);
+            Vector2 e = { d.x + d.width / 2, d.y + d.height / 2 };
+            if (hot) DrawLineEx(o, e, 3, YELLOW); else DrawLineV(o, e, (Color){0, 200, 80, 170});
+            DrawRectangleLinesEx(d, hot ? 3 : 1, hot ? YELLOW : GREEN);
+        }
+    }
 }
 
 // Label with a dark backdrop; `emph` (goto mode) makes it bigger and brighter.
@@ -2423,6 +2471,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             draw_link_drag(g);
             draw_cursor(g);
             EndScissorMode();
+            draw_world_links(g);                     // switch links into other rooms run to the world map
         }
         draw_palette(g);
         {
@@ -2432,6 +2481,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             if (on_block && bi != g->block_hidden && !tiles_view(g)) set_view(g, VIEW_TILES);   // a block is made of tiles: the picker shows them
             if (on_block && bi != g->block_hidden) draw_block_editor(g, bi, bx, by, bw, bh);
             else draw_gfx_editor(g, on_block);
+            draw_source_grid(g, on_block && bi != g->block_hidden);
         }
         draw_world_map(g);
         if (ged_help_shown()) draw_help(g);

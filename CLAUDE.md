@@ -124,6 +124,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   mean "none" and walking to room 0 must not conjure one; right click =
   `transfer_item_to_room()` (editor_actions.c) moves the switch/object under the cursor there,
   or, with a TOGGLE_BIT chunk selected, retargets the chunk's room.
+- A switch's TOGGLE_BIT chunks into other rooms are drawn as lines from the switch to those rooms'
+  thumbnails on the world map (`draw_world_links`, outside the picture clip; thick while the
+  switch is selected or under the cursor), as well as the stub to the exit edge inside the picture.
 - Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an
   object -> TOGGLE_OBJECT chunk, right-click another switch -> TOGGLE_BIT chunk, right-drag a
   run of tiles -> TOGGLE_BLOCK chunk covering it; all via `switch_add_chunk()`, which selects
@@ -194,9 +197,11 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   retypes the object under the cursor or creates one).
 - Block object under the cursor: its tile grid replaces the pixel editor (`ged_block_*`) and the
   picker switches to the tiles view (a block is made of tiles; nothing else applies);
-  click paints the picked tile (with the attribute buttons' bits), w+/w-/h+/h- call the
-  editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block (the button
-  grid then shows a "block" button, and the pixel editor a hint, to bring it back).
+  click paints the picked tile (with the attribute buttons' bits); its buttons (w+ w- / h+ h- /
+  import export) sit under the tile picker where the attributes otherwise are; w/h call the
+  editor's stretch/shrink. The source grid stays drawn (dimmed) and its row-4 slot reads "gfx":
+  it hides the panel until the cursor leaves the block, and then reads "block" to bring it back,
+  so repeated clicks on that one spot toggle (`draw_source_grid`); the help overlay explains it.
   "export" renders the block's tiles to <data dir>/BLOCK-<room>-<object>.png; "import" (or a PNG
   dropped while the panel shows) scales a picture to the block and gives each 8x8 cell the
   best-matching tile of the room's tileset (`block_import_png`, one room undo entry).
