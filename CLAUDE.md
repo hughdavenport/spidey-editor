@@ -142,7 +142,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   to the room. Any other plain click on the room picture first leaves whatever switch /
   chunk / room editing mode is active (`ged_cancel`). Green is theirs alone
   on the map: yellow frames this room, blue its neighbours. Links to a switch in the same room are
-  still lines inside the picture. A hot switch's links (cursor on it, or selected) keep their colour
+  still lines inside the picture. A TOGGLE_BLOCK "memory" chunk on an exit byte (offset 2-5 past
+  the tiles, `exit_memory_offset`) is drawn as orange arrows to its off and on rooms' thumbnails,
+  labelled with the exit and state; a click on one (with the chunk selected) goes to that room. A hot switch's links (cursor on it, or selected) keep their colour
   and thicken; yellow is only for goto mode. Overlay colours: magenta switch markers, orange TOGGLE_BLOCK,
   blue TOGGLE_OBJECT lines (light blue = block object outlines and the map's neighbour frames), green
   TOGGLE_BIT, yellow sprite outlines / goto emphasis / the current room on the map, gold keyboard focus.
