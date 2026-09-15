@@ -199,10 +199,11 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   "export" renders the block's tiles to <data dir>/BLOCK-<room>-<object>.png; "import" (or a PNG
   dropped while the panel shows) scales a picture to the block and gives each 8x8 cell the
   best-matching tile of the room's tileset (`block_import_png`, one room undo entry).
-- Keyboard focus (`g->focus`): Tab cycles room / picker / editor / colours / buttons / world map,
-  or click one; arrows and hjkl move that panel's selection (colours: moving selects the paint
-  colour; buttons: left/right along the row, up/down to the pass/solid/magnet/slip row in the tiles
-  view, Enter/Space presses; both skipped while the block panel is up),
+- Keyboard focus (`g->focus`): Tab cycles room / picker / editor / colours / pick+fill / attributes /
+  buttons / world map, or click one; arrows and hjkl move that panel's selection (colours: moving
+  selects the paint colour; pick+fill: Enter/Space toggles the tool; attributes: the 2x2
+  pass/solid/magnet/slip block, tiles view only, Enter/Space selects; buttons: the two-column grid,
+  Enter/Space presses; colours, tools, attributes and buttons are skipped while the block panel is up),
   Enter/Space applies it (world map: go there, and focus returns to the room so the cursor keys move
   the room cursor, as a left click on the map does too;
   picker: put tile / creature at the room cursor; editor: paint). Esc, or any other key that

@@ -39,10 +39,10 @@
 #define MIN_PANEL_ROWS 12       // text rows kept visible under the picture when auto-scaling
 #define SIDE_COLS 68            // panel width right of the picture, in text cells (palette + item details)
 #define SWATCH_ROWS 2
-enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
+enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_TOOLS, FOCUS_ATTRS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
 #define BLOCK_BUTTONS 7         // block panel: w+ w- h+ h- gfx import export
-#define BUTTON_ROWS 7           // two per row: reset tiles / sprites backs / font screens / import export / block; pass solid / magnet slip sit level with the swatches (tiles view)
+#define BUTTON_ROWS 5           // two per row: reset tiles / sprites backs / font screens / import export / block
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
 };
@@ -95,7 +95,9 @@ typedef struct {
     bool pix_op;            // this frame's mouse event went to the pixel editor (for `u` routing)
     int focus;              // which panel arrows / hjkl move: the room, the picker, the pixel editor, its colours, its buttons, or the world map
     int btn_sel;            // FOCUS_BUTTONS: the reset / tiles / sprites / backs / block button the keyboard is on
-    int btn_row;            // FOCUS_BUTTONS: 0 = those, 1 = the pass / solid / magnet / slip row (tiles view)
+    int btn_row;            // FOCUS_BUTTONS: the grid row the keyboard is on
+    int attr_sel;           // FOCUS_ATTRS: the pass / solid / magnet / slip button the keyboard is on
+    int tool_sel;           // FOCUS_TOOLS: 0 = pick, 1 = fill
     int block_hidden;       // block object whose panel was closed with "gfx" (-1 none)
     int ecx, ecy;           // keyboard cursor in the pixel / block editor grid
     bool eyedrop;           // next click anywhere picks that colour
@@ -488,6 +490,10 @@ static void focus_move(GuiState *g, int dx, int dy) {
         g->sel_colour = ((g->sel_colour + dx + (n > 8 ? 8 : 0) * dy) % n + n) % n;
     } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {   // screen mode: pick fill / import export / room
         g->btn_sel = ((g->btn_sel + dx + 2 * dy) % 5 + 5) % 5;
+    } else if (g->focus == FOCUS_ATTRS) {             // 2 x 2
+        g->attr_sel = ((g->attr_sel % 2 + dx) % 2 + 2) % 2 + 2 * (((g->attr_sel / 2 + dy) % 2 + 2) % 2);
+    } else if (g->focus == FOCUS_TOOLS) {             // pick | fill
+        if (dx || dy) g->tool_sel = !g->tool_sel;
     } else if (g->focus == FOCUS_BUTTONS) {           // the button grid: left / right = column, up / down = next row that has buttons
         int step = dy > 0 ? 1 : dy < 0 ? -1 : 0;
         if (step) for (int tries = 0; tries < BUTTON_ROWS; tries++) {
@@ -517,9 +523,14 @@ static void focus_apply(GuiState *g) {
         g->focus = FOCUS_EDITOR;                      // the list's choice is showing: over to the picture
     } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {
         smode_button_press(g, g->btn_sel % 5);
+    } else if (g->focus == FOCUS_ATTRS) {
+        g->sel_attr = ATTRS[g->attr_sel % 4].bits;
+    } else if (g->focus == FOCUS_TOOLS) {
+        if (g->tool_sel) { g->fill_armed = !g->fill_armed; g->eyedrop = false; }
+        else { g->eyedrop = !g->eyedrop; g->fill_armed = false; }
+        g->pix_op = true;
     } else if (g->focus == FOCUS_BUTTONS) {
-        if (g->btn_row >= 5) g->sel_attr = ATTRS[(g->btn_row - 5) * 2 + g->btn_sel % 2].bits;
-        else if (g->btn_row * 2 + g->btn_sel % 2 < pixed_button_count(g)) pixed_button_press(g, g->btn_row * 2 + g->btn_sel % 2);
+        if (g->btn_row * 2 + g->btn_sel % 2 < pixed_button_count(g)) pixed_button_press(g, g->btn_row * 2 + g->btn_sel % 2);
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
         if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
@@ -640,7 +651,8 @@ static bool feed_keys(GuiState *g) {
         if (rk == KEY_TAB && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {      // GUI-only: cycle keyboard focus
             int step = (m & GK_MOD_SHIFT) ? FOCUS_COUNT - 1 : 1, bi, bx, by, bw, bh;
             g->focus = (g->focus + step) % FOCUS_COUNT;
-            while ((g->focus == FOCUS_COLOURS || g->focus == FOCUS_BUTTONS) && block_panel(g, &bi, &bx, &by, &bw, &bh))   // hidden while the block panel is up
+            while (((g->focus == FOCUS_COLOURS || g->focus == FOCUS_TOOLS || g->focus == FOCUS_BUTTONS || g->focus == FOCUS_ATTRS) && block_panel(g, &bi, &bx, &by, &bw, &bh))   // hidden while the block panel is up
+                   || (g->focus == FOCUS_ATTRS && !tiles_view(g)))                                                     // attributes exist in the tiles view only
                 g->focus = (g->focus + step) % FOCUS_COUNT;
             any = true; continue;
         }
@@ -711,11 +723,13 @@ static bool feed_mouse(GuiState *g) {
     }
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, pick_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
         g->eyedrop = !g->eyedrop; g->fill_armed = false;
+        g->focus = FOCUS_TOOLS; g->tool_sel = 0;
         g->pix_op = true;
         return true;
     }
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, fill_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
         g->fill_armed = !g->fill_armed; g->eyedrop = false;
+        g->focus = FOCUS_TOOLS; g->tool_sel = 1;
         g->pix_op = true;
         return true;
     }
@@ -843,7 +857,7 @@ static bool feed_mouse(GuiState *g) {
         for (int i = 0; i < 4; i++)
             if (CheckCollisionPointRec(m, attr_button(g, i))) {
                 g->sel_attr = ATTRS[i].bits;
-                g->focus = FOCUS_BUTTONS; g->btn_row = 5 + i / 2; g->btn_sel = i % 2;   // the keyboard cursor follows the click
+                g->focus = FOCUS_ATTRS; g->attr_sel = i;   // the keyboard cursor follows the click
                 return true;
             }
 
@@ -1186,8 +1200,8 @@ static void draw_help(GuiState *g) {
         "wheel over room or picker: background; Shift+wheel / horizontal wheel: tileset",
         "world map: click = go there (an empty slot becomes a new room); right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
-        "focus: Tab cycles room / picker / editor / colours / buttons / world map (or click one); arrows, hjkl move it;",
-        "       Enter or Space applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
+        "focus: Tab cycles room / picker / editor / colours / pick+fill / attributes / buttons / world map (or click one);",
+        "       arrows, hjkl move it; Enter or Space applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
         "       key (r, s, o, ...) = back to the room",
         "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
         "        pick = then click any colour on screen (room, picker, world map); fill = a mode: clicks on",
@@ -1518,12 +1532,10 @@ static void draw_palette(GuiState *g) {
 // block object's panel has been closed with "gfx".
 // Button of the grid under the picker: two columns, rows 0-3 the sources
 // (reset tiles / sprites backs / font screens / import export), row 4 "block"
-// while a block panel is hidden. Rows 5-6, the tile attributes (tiles view
-// only), sit right under the tile picker, level with the colour swatches.
+// while a block panel is hidden.
 static Rectangle grid_button(GuiState *g, int row, int col) {
     int bw = (TILESET_PX * g->scale - PAD) / 2;
-    int y = row >= 5 ? swatch_y(g) + (row - 5) * (ch(g) + 8) : buttons_y0(g) + row * (ch(g) + 8);
-    return (Rectangle){ palette_x(g) + col * (bw + PAD), y, bw, ch(g) + 4 };
+    return (Rectangle){ palette_x(g) + col * (bw + PAD), buttons_y0(g) + row * (ch(g) + 8), bw, ch(g) + 4 };
 }
 static Rectangle pixed_button(GuiState *g, int i) { return grid_button(g, i / 2, i % 2); }
 static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 9 : 8; }
@@ -1929,13 +1941,15 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         gtext(&g->font, g->font_loaded, TextFormat("block O%d is under the cursor: \"block\" shows its tiles", g->block_hidden), x0, ty + 3 * ch(g), fs, SKYBLUE);
     {
         Rectangle rb = pick_button(g);
+        bool kbd = g->focus == FOCUS_TOOLS && g->tool_sel == 0;
         DrawRectangleRec(rb, g->eyedrop ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-        DrawRectangleLinesEx(rb, 1, g->eyedrop ? GOLD : GRAY);
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || g->eyedrop ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, "pick", fs);
         gtext(&g->font, g->font_loaded, "pick", (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + ((int)rb.height - fs) / 2, fs, RAYWHITE);
         rb = fill_button(g);
+        kbd = g->focus == FOCUS_TOOLS && g->tool_sel == 1;
         DrawRectangleRec(rb, g->fill_armed ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-        DrawRectangleLinesEx(rb, 1, g->fill_armed ? GOLD : GRAY);
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || g->fill_armed ? GOLD : GRAY);
         tw = text_w(&g->font, g->font_loaded, "fill", fs);
         gtext(&g->font, g->font_loaded, "fill", (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + ((int)rb.height - fs) / 2, fs, RAYWHITE);
     }
@@ -1952,7 +1966,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
             Rectangle rb = attr_button(g, i);
             bool on = ATTRS[i].bits == g->sel_attr;
-            bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 5 + i / 2 && g->btn_sel % 2 == i % 2;
+            bool kbd = g->focus == FOCUS_ATTRS && i == g->attr_sel % 4;
             DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
             DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
             int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
@@ -1987,13 +2001,14 @@ static void spidey_build(GuiState *g) {
 
 static int world_y(GuiState *g) { int a = buttons_bottom(g), b = pixed_bottom(g); return (a > b ? a : b) + PAD; }
 // attribute buttons (what painted tiles are): a row under the source buttons
-static Rectangle attr_button(GuiState *g, int i) { return grid_button(g, 5 + i / 2, i % 2); }
-// Which grid rows have buttons right now.
-static bool grid_row_valid(GuiState *g, int row) {
-    if (row < 4) return true;
-    if (row == 4) return g->block_hidden >= 0;
-    return row <= 6 && tiles_view(g);
+// The tile attributes (tiles view only): a 2x2 block right under the tile
+// picker, level with the colour swatches; its own Tab stop (FOCUS_ATTRS).
+static Rectangle attr_button(GuiState *g, int i) {
+    int bw = (TILESET_PX * g->scale - PAD) / 2;
+    return (Rectangle){ palette_x(g) + (i % 2) * (bw + PAD), swatch_y(g) + (i / 2) * (ch(g) + 8), bw, ch(g) + 4 };
 }
+// Which grid rows have buttons right now.
+static bool grid_row_valid(GuiState *g, int row) { return row < 4 || (row == 4 && g->block_hidden >= 0); }
 
 // Thumbnail size: 8 columns across the space right of the picture, shrunk if
 // 8 rows would not fit the window.
