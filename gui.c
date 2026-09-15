@@ -1620,6 +1620,8 @@ static const char *png_path(GuiState *g) {
 static void export_png(GuiState *g) {
     static uint8_t buf[320 * 200 * 4];
     int w, h;
+    g->pix_op = true;
+    if (pixed_locked(g)) { gui_error(g, "tile 0 is always blank: nothing to export"); return; }
     pixed_dims(g, &w, &h);
     render_gfx_rgba(g->rctx, g->pix_src, pixed_index(g), buf);
     Image img = { .data = buf, .width = w, .height = h, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
@@ -1635,8 +1637,8 @@ static void export_png(GuiState *g) {
 static void import_png(GuiState *g, const char *path) {
     if (path == NULL) path = png_path(g);
     g->pix_op = true;
+    if (pixed_locked(g)) { gui_error(g, "tile 0 is always blank: nothing to import into"); return; }
     if (!FileExists(path)) { gui_error(g, TextFormat("no %s to import", path)); return; }
-    if (pixed_locked(g)) { gui_error(g, "tile 0 is always blank"); return; }
     Image img = LoadImage(path);
     if (img.data == NULL) { gui_error(g, TextFormat("could not read %s", path)); return; }
     int w, h, idx = pixed_index(g);
