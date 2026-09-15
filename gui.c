@@ -42,7 +42,7 @@
 enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
 #define BLOCK_BUTTONS 7         // block panel: w+ w- h+ h- gfx import export
-#define BUTTON_ROWS 7           // under the picker, two per row: reset tiles / sprites backs / font screens / import export / block / pass solid / magnet slip
+#define BUTTON_ROWS 7           // two per row: reset tiles / sprites backs / font screens / import export / block; pass solid / magnet slip sit level with the swatches (tiles view)
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
 };
@@ -263,7 +263,7 @@ static int pixed_bottom(GuiState *g) { return pixed_text_y(g) + 9 * ch(g); }   /
 // The buttons sit under the picker, two per row, from below where the tallest
 // picker (the sprite sheets, 16 rows of frames) ends, so they never move.
 static int buttons_y0(GuiState *g) { return palette_y(g) + (int)(16 * (TILESET_PX * g->scale / 8.0f) * SPIDS_FRAME_H / SPIDS_FRAME_W) + PAD; }
-static int buttons_bottom(GuiState *g) { return buttons_y0(g) + BUTTON_ROWS * (ch(g) + 8); }
+static int buttons_bottom(GuiState *g) { return buttons_y0(g) + 5 * (ch(g) + 8); }   // the attribute rows are above, not below
 // the image being edited: tiles are picked within the current tileset
 static int pixed_index(GuiState *g) {
     return g->pix_src == GFX_TILES ? g->sel_tile + g->pal_offset * 16 : g->sel_img[g->pix_src];
@@ -1514,12 +1514,14 @@ static void draw_palette(GuiState *g) {
 
 // Buttons under the editor: reset, then one per view, then "block" while a
 // block object's panel has been closed with "gfx".
-// Button i of the grid under the picker: two columns, rows 0-3 the sources
+// Button of the grid under the picker: two columns, rows 0-3 the sources
 // (reset tiles / sprites backs / font screens / import export), row 4 "block"
-// while a block panel is hidden, rows 5-6 the tile attributes (tiles view).
+// while a block panel is hidden. Rows 5-6, the tile attributes (tiles view
+// only), sit right under the tile picker, level with the colour swatches.
 static Rectangle grid_button(GuiState *g, int row, int col) {
     int bw = (TILESET_PX * g->scale - PAD) / 2;
-    return (Rectangle){ palette_x(g) + col * (bw + PAD), buttons_y0(g) + row * (ch(g) + 8), bw, ch(g) + 4 };
+    int y = row >= 5 ? swatch_y(g) + (row - 5) * (ch(g) + 8) : buttons_y0(g) + row * (ch(g) + 8);
+    return (Rectangle){ palette_x(g) + col * (bw + PAD), y, bw, ch(g) + 4 };
 }
 static Rectangle pixed_button(GuiState *g, int i) { return grid_button(g, i / 2, i % 2); }
 static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 9 : 8; }

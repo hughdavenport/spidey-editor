@@ -173,7 +173,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   The two sets are separate files: an EGA edit is not mirrored into the CGA file or vice versa.
 - The button grid sits under the picker (two per row, from below the sprite sheets' height so it
   never moves): reset tiles / sprites backs / font screens / import export / block (while a block
-  panel is hidden) / pass solid / magnet slip (tiles view); the picker's labels moved into the
+  panel is hidden), with pass solid / magnet slip right under the tile picker, level with the
+  colour swatches (tiles view only); the picker's labels moved into the
   pixel-editor column under its own lines (`grid_button`, `buttons_y0`, `world_y`). "font" is CHARSET (128 tiles, 16 across). "screens" enters screen mode
   (`g->screens_view`): the whole window becomes the chosen full-screen picture (LOADSCRN, WINSCRN,
   PAGE1-4 320x200, HISCORE 320x38, SPIDFIGR / SKELFIGR 64x192; row-planar in EGA,

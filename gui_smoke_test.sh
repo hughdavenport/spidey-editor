@@ -102,8 +102,8 @@ xdotool key u; sleep 0.6
 xdotool key Escape; sleep 0.5; snap s12m-back-from-screens   # Esc leaves screen mode
 xdotool mousemove $((X + 876 + 46)) $((Y + 368 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
-# buttons under the picker in two columns (x 776 / 876, rows of 32 px from y 368); world map at 600; thumbs 62x43 + 4 gap (height-limited)
-xdotool mousemove $((X + 776 + 1*66 + 30)) $((Y + 600 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
+# buttons under the picker in two columns (x 776 / 876, rows of 32 px from y 368; attributes level with the swatches at 224 / 256); world map at 536; thumbs 68x47 + 4 gap (height-limited)
+xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 536 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
 # wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
 xdotool mousemove $((X + 400)) $((Y + 24 + 200)) click 5; sleep 0.4; snap s13b-wheel-bkgrnd
 xdotool keydown shift; xdotool click 4; xdotool keyup shift; sleep 0.4; snap s13c-wheel-tileset
