@@ -89,13 +89,17 @@ xdotool mousemove $((X + 776 + 1*12 + 6)) $((Y + 24 + 4*12 + 6)) mousedown 1; sl
 xdotool mousemove $((X + 984 + 2*24 + 12)) $((Y + 224 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.2
 xdotool mousemove $((X + 984 + 3*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12i-font-edit
 xdotool key u; sleep 1.5   # (the undo's debounced write lands ~0.6 s later; a click inside that long frame would be lost)
-# screens: LOADSCRN fills the picture at 2x (origin 64,88); paint pixel (100,50) red, export, undo, import the export back, back to tiles
-xdotool mousemove $((X + 984 + 1*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s12j-screens-view
-xdotool mousemove $((X + 64 + 100*2 + 1)) $((Y + 88 + 50*2 + 1)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12k-screen-edit
-xdotool mousemove $((X + 984 + 3*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6   # export
+# screens: the "screens" button opens screen mode (whole window: picture at 3x from (128,192), panel at x 1216:
+# list rows from y 56 every 26, swatches at y 298 (36 px), buttons pick/fill y 378, import/export y 410, room y 442)
+xdotool mousemove $((X + 984 + 1*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s12j-screen-mode
+xdotool mousemove $((X + 1224 + 40)) $((Y + 56 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5        # LOADSCRN
+xdotool mousemove $((X + 1224 + 2*36 + 18)) $((Y + 298 + 18)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # colour 2
+xdotool mousemove $((X + 128 + 100*3 + 1)) $((Y + 192 + 50*3 + 1)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12k-screen-edit
+xdotool mousemove $((X + 1340 + 54)) $((Y + 410 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6   # export
 xdotool key u; sleep 0.8
-xdotool mousemove $((X + 984 + 2*116 + 30)) $((Y + 434 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12l-screen-import   # import
+xdotool mousemove $((X + 1224 + 54)) $((Y + 410 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12l-screen-import   # import
 xdotool key u; sleep 0.6
+xdotool key Escape; sleep 0.5; snap s12m-back-from-screens   # Esc leaves screen mode
 xdotool mousemove $((X + 984 + 116 + 30)) $((Y + 405 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
 # labels start under the editor column (462+8=470), world map at 470 + 5 rows*24 + 8 = 598; thumbs 62x43 + 4 gap (height-limited)

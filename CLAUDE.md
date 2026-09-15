@@ -172,11 +172,14 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   undo record / reset / save of a CGA sprite covers its mask frame too (`has_mask`, `mask_of`).
   The two sets are separate files: an EGA edit is not mirrored into the CGA file or vice versa.
 - Two rows of buttons under the pixel editor: reset / tiles / sprites / backs, then font / screens /
-  import / export (/ block). "font" is CHARSET (128 tiles, 16 across). "screens" lists the full-screen
-  pictures (LOADSCRN, WINSCRN, PAGE1-4 320x200, HISCORE 320x38, SPIDFIGR / SKELFIGR 64x192; row-planar
-  in EGA, `render_gfx_is_screen`); the chosen one replaces the room picture at an integer zoom
-  (`draw_screen_view`, texture `scr_tex`) and is painted there directly (click, drag, right-click
-  picks, fill mode); the editor box shows a thumbnail. Undo entries hold a whole image (GFX_MAX_BYTES).
+  import / export (/ block). "font" is CHARSET (128 tiles, 16 across). "screens" enters screen mode
+  (`g->screens_view`): the whole window becomes the chosen full-screen picture (LOADSCRN, WINSCRN,
+  PAGE1-4 320x200, HISCORE 320x38, SPIDFIGR / SKELFIGR 64x192; row-planar in EGA,
+  `render_gfx_is_screen`) at the largest integer zoom left of a side panel with the screens list,
+  swatches, pick / fill / import / export / room buttons and notes (`draw_screen_mode`,
+  `screen_mode_mouse`, texture `scr_tex`). Painting is click / drag on the picture, right-click
+  picks, arrows + Space, f, u; other keys are swallowed (the room is not on screen); Esc or "room"
+  returns to the normal layout. Undo entries hold a whole image (GFX_MAX_BYTES).
   "export" writes the current image as <data dir>/<FILE>.png (screens) or <FILE>-<idx>.png (sheet
   images); "import" reads that file back, or any PNG dropped on the window: scaled to the image with
   nearest neighbour and snapped to the mode's palette, transparent pixels -> the sprite key colour.

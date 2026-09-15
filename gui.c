@@ -190,7 +190,10 @@ static void clamp_colour(GuiState *g);
 static void screen_geom(GuiState *g, int *z, int *ox, int *oy, int *w, int *h);
 static bool mouse_screen_px(GuiState *g, int *x, int *y);
 static void screen_tex_build(GuiState *g);
-static void draw_screen_view(GuiState *g);
+static void draw_screen_mode(GuiState *g);
+static bool screen_mode_mouse(GuiState *g);
+static void draw_swatches(GuiState *g, int x0, int sy, int sp);
+static int  swatch_pick(GuiState *g, int x0, int sy, int sp, Vector2 m);
 static void import_png(GuiState *g, const char *path);
 static void export_png(GuiState *g);
 static void gui_note(GuiState *g, const char *msg);
@@ -246,8 +249,8 @@ static int palette_y(GuiState *g) { return pic_y(g); }
 static int pixed_x(GuiState *g) { return palette_x(g) + TILESET_PX * g->scale + 2 * PAD; }
 static void pixed_dims(GuiState *g, int *w, int *h) { render_gfx_size(g->pix_src, w, h); }
 static int pixed_px(GuiState *g) { int w, h; pixed_dims(g, &w, &h); int p = TILESET_PX * g->scale / h; return p < 2 ? 2 : p; }
-static int pixed_w(GuiState *g) { if (g->screens_view) return TILESET_PX * g->scale; int w, h; pixed_dims(g, &w, &h); return w * pixed_px(g); }
-static int pixed_h(GuiState *g) { if (g->screens_view) return TILESET_PX * g->scale; int w, h; pixed_dims(g, &w, &h); return h * pixed_px(g); }
+static int pixed_w(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return w * pixed_px(g); }
+static int pixed_h(GuiState *g) { int w, h; pixed_dims(g, &w, &h); return h * pixed_px(g); }
 static int swatch_px(GuiState *g) { return pixed_w(g) / 8; }
 static int swatch_y(GuiState *g) { return palette_y(g) + pixed_h(g) + PAD; }
 static int pixed_text_y(GuiState *g) { return swatch_y(g) + SWATCH_ROWS * swatch_px(g) + PAD; }
@@ -404,7 +407,9 @@ static void set_view(GuiState *g, int view) {
         if (!render_gfx_is_screen(g->screen_src)) g->screen_src = GFX_LOADSCRN;
         g->pix_src = g->screen_src;
         g->scr_stale = true;
+        g->focus = FOCUS_EDITOR;                  // arrows / hjkl move the pixel cursor, Space paints
     } else sync_sprite_sel(g);
+    if (view != VIEW_SCREENS && g->focus == FOCUS_EDITOR) g->focus = FOCUS_ROOM;
     clamp_colour(g);
 }
 static bool tiles_view(GuiState *g) { return !g->sprites_view && !g->backs_view && !g->font_view && !g->screens_view; }
@@ -418,15 +423,32 @@ static void clamp_colour(GuiState *g) {
 
 static int screen_index(GfxSource s) { for (int i = 0; i < NSCREENS; i++) if (SCREENS[i] == s) return i; return 0; }
 
-// The chosen screen fills the room's picture area at an integer zoom, centred.
+// Screen mode: the whole window is the chosen picture at the largest integer
+// zoom that fits left of a side panel (list, swatches, buttons); nothing of
+// the room editor is shown until Esc / "room".
+#define SMODE_PANEL_COLS 32
+static int smode_panel_x(GuiState *g) { return GetScreenWidth() - SMODE_PANEL_COLS * cw(g); }
 static void screen_geom(GuiState *g, int *z, int *ox, int *oy, int *w, int *h) {
     render_gfx_size(g->pix_src, w, h);
-    int zx = pic_w(g) / *w, zy = pic_h(g) / *h;
+    int aw = smode_panel_x(g) - 2 * PAD, ah = GetScreenHeight() - 2 * PAD;
+    int zx = aw / *w, zy = ah / *h;
     *z = zx < zy ? zx : zy;
     if (*z < 1) *z = 1;
-    *ox = pic_x(g) + (pic_w(g) - *w * *z) / 2;
-    *oy = pic_y(g) + (pic_h(g) - *h * *z) / 2;
+    *ox = PAD + (aw - *w * *z) / 2;
+    *oy = PAD + (ah - *h * *z) / 2;
 }
+// Panel layout, top to bottom: title, the screens list, swatches, buttons, notes.
+static Rectangle smode_list_row(GuiState *g, int i) {
+    return (Rectangle){ smode_panel_x(g) + PAD, PAD + 2 * ch(g) + i * (ch(g) + 2), SMODE_PANEL_COLS * cw(g) - 2 * PAD, ch(g) };
+}
+static int smode_swatch_px(GuiState *g) { return 3 * cw(g); }
+static int smode_swatch_y(GuiState *g) { return (int)smode_list_row(g, NSCREENS).y + PAD; }
+// pick fill / import export / room, 9 cells wide
+static Rectangle smode_button(GuiState *g, int i) {
+    int bw = 9 * cw(g), row = i / 2, col = i % 2;
+    return (Rectangle){ smode_panel_x(g) + PAD + col * (bw + PAD), smode_swatch_y(g) + SWATCH_ROWS * smode_swatch_px(g) + PAD + row * (ch(g) + 8), bw, ch(g) + 4 };
+}
+static int smode_text_y(GuiState *g) { return (int)smode_button(g, 4).y + ch(g) + 4 + PAD; }
 static bool mouse_screen_px(GuiState *g, int *x, int *y) {
     int z, ox, oy, w, h;
     screen_geom(g, &z, &ox, &oy, &w, &h);
@@ -559,6 +581,7 @@ static bool feed_keys(GuiState *g) {
     // printable characters: shift is already applied; Alt rides along as a modifier
     for (int c = GetCharPressed(); c != 0; c = GetCharPressed()) {
         if (c < 0x20 || c > 0x7e) continue;
+        if (g->screens_view && c != 'h' && c != 'j' && c != 'k' && c != 'l' && c != ' ' && c != 'f' && c != 'u') continue;   // screen mode: the room is not there to edit
         if (g->focus != FOCUS_ROOM && (c == 'h' || c == 'j' || c == 'k' || c == 'l')) {
             focus_move(g, c == 'h' ? -1 : c == 'l' ? 1 : 0, c == 'k' ? -1 : c == 'j' ? 1 : 0);
             any = true;
@@ -586,6 +609,15 @@ static bool feed_keys(GuiState *g) {
         bool ok = true;
         if (rk == KEY_F2) { g->text_map = !g->text_map; continue; }   // GUI-only: hex map toggle
         if (rk == KEY_F3) { set_gfx_mode(g, !g->cga); any = true; continue; }   // GUI-only: EGA / CGA files
+        if (g->screens_view) {                                          // screen mode: Esc leaves, arrows / Enter edit, help still works
+            if (rk == KEY_ESCAPE) { set_view(g, VIEW_TILES); any = true; continue; }
+            if (rk == KEY_LEFT || rk == KEY_RIGHT || rk == KEY_UP || rk == KEY_DOWN) {
+                focus_move(g, rk == KEY_LEFT ? -1 : rk == KEY_RIGHT ? 1 : 0, rk == KEY_UP ? -1 : rk == KEY_DOWN ? 1 : 0);
+                any = true; continue;
+            }
+            if (rk == KEY_ENTER || rk == KEY_KP_ENTER) { focus_apply(g); any = true; continue; }
+            if (!((rk == KEY_SLASH || rk == KEY_MINUS) && (m & GK_MOD_CTRL))) continue;
+        }
         if (rk == KEY_TAB && !(m & (GK_MOD_CTRL | GK_MOD_ALT))) {      // GUI-only: cycle keyboard focus
             int step = (m & GK_MOD_SHIFT) ? FOCUS_COUNT - 1 : 1, bi, bx, by, bw, bh;
             g->focus = (g->focus + step) % FOCUS_COUNT;
@@ -648,6 +680,8 @@ static bool feed_mouse(GuiState *g) {
     uint8_t mod = mods();
     bool paint_btn = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (mod & GK_MOD_SHIFT);
 
+    if (g->screens_view) return screen_mode_mouse(g);
+
     // eyedropper: the click after "pick" reads the colour under the mouse, anywhere
     if (g->eyedrop && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int c = colour_under_mouse(g);
@@ -665,31 +699,6 @@ static bool feed_mouse(GuiState *g) {
         g->fill_armed = !g->fill_armed; g->eyedrop = false;
         g->pix_op = true;
         return true;
-    }
-
-    // screens view: the picture area shows the chosen screen; left paints (or
-    // fills), right picks, drags paint. Clicks anywhere on the picture stop here.
-    if (g->screens_view) {
-        int sx, sy;
-        bool over_pic = m.x >= pic_x(g) && m.x < pic_x(g) + pic_w(g) && m.y >= pic_y(g) && m.y < pic_y(g) + pic_h(g);
-        if (mouse_screen_px(g, &sx, &sy) && render_gfx_available(g->rctx, g->pix_src)) {
-            g->pix_op = true;
-            if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, 0, sx, sy); return true; }
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                g->focus = FOCUS_EDITOR; g->ecx = sx; g->ecy = sy;
-                if (g->fill_armed) { pix_fill(g, 0, sx, sy); return true; }
-                g->pix_painting = true;
-                pix_undo_push(g, g->pix_src, 0);
-            }
-            if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && render_gfx_pixel(g->rctx, g->pix_src, 0, sx, sy) != g->sel_colour) {
-                render_gfx_set_pixel(g->rctx, g->pix_src, 0, sx, sy, g->sel_colour);
-                gfx_touched(g, g->pix_src);
-                return true;
-            }
-        }
-        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
-        if (g->pix_painting) return false;
-        if (over_pic && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) || IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE))) return false;
     }
 
     // middle click on the room: pick that tile into the palette (reverse
@@ -760,14 +769,6 @@ static bool feed_mouse(GuiState *g) {
             int c = side / BACKS_COLS;
             if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + 8 * c) {
                 g->sel_img[GFX_CHARSET] = ((int)(m.y - py0) / c) * BACKS_COLS + (int)(m.x - px0) / c;
-                g->focus = FOCUS_PICKER;
-                return true;
-            }
-        } else if (g->screens_view) {
-            int rh = side / NSCREENS;
-            if (m.x >= px0 && m.x < px0 + side && m.y >= py0 && m.y < py0 + rh * NSCREENS) {
-                g->screen_src = g->pix_src = SCREENS[(int)(m.y - py0) / rh];
-                g->scr_stale = true;
                 g->focus = FOCUS_PICKER;
                 return true;
             }
@@ -865,12 +866,11 @@ static bool feed_mouse(GuiState *g) {
     {
         int px = pixed_px(g), x0 = pixed_x(g), y0 = palette_y(g), sp = swatch_px(g), sy = swatch_y(g), w, h;
         pixed_dims(g, &w, &h);
-        bool in_grid = !g->screens_view && m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;   // (screens: a thumbnail, painted on the big view)
+        bool in_grid = m.x >= x0 && m.x < x0 + w * px && m.y >= y0 && m.y < y0 + h * px;
         bool in_sw = m.x >= x0 && m.x < x0 + 8 * sp && m.y >= sy && m.y < sy + SWATCH_ROWS * sp;
         if (in_sw && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            int c = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
-            int key = render_gfx_key(g->rctx, g->pix_src);
-            if (c < render_colours(g->rctx) || c == key) g->sel_colour = c;
+            int c = swatch_pick(g, x0, sy, sp, m);
+            if (c >= 0) g->sel_colour = c;
             g->pix_op = true;
             return true;
         }
@@ -1239,24 +1239,130 @@ static void screen_tex_build(GuiState *g) {
     g->scr_loaded = true; g->scr_src = g->pix_src; g->scr_stale = false;
 }
 
-// The screens view over the room's picture area.
-static void draw_screen_view(GuiState *g) {
-    int z, ox, oy, w, h;
-    screen_geom(g, &z, &ox, &oy, &w, &h);
-    DrawRectangle(pic_x(g), pic_y(g), pic_w(g), pic_h(g), BLACK);
-    if (!render_gfx_available(g->rctx, g->pix_src)) {
-        gtext(&g->font, g->font_loaded, TextFormat("%s is not in the data dir", render_gfx_name(g->rctx, g->pix_src)), pic_x(g) + PAD, pic_y(g) + PAD, g->font_px, ORANGE);
-        return;
+// The palette swatches (8 across, 2 rows; CGA sprites add a 5th "transparent"
+// one), the selected colour outlined; shared by the pixel editor and screen mode.
+static void draw_swatches(GuiState *g, int x0, int sy, int sp) {
+    int key = render_gfx_key(g->rctx, g->pix_src);
+    const uint8_t (*pal)[3] = render_palette(g->rctx);
+    int nsw = key >= render_colours(g->rctx) ? key + 1 : render_colours(g->rctx);
+    for (int c = 0; c < nsw; c++) {
+        int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
+        if (c == key) {                          // the game draws this colour as transparent in sprites
+            DrawRectangle(sx, yy, sp, sp, (Color){50, 50, 50, 255});
+            DrawRectangle(sx, yy, sp / 2, sp / 2, (Color){70, 70, 70, 255});
+            DrawRectangle(sx + sp / 2, yy + sp / 2, sp - sp / 2, sp - sp / 2, (Color){70, 70, 70, 255});
+            gtext(&g->font, g->font_loaded, "T", sx + 2, yy, g->font_px, RAYWHITE);
+        } else {
+            DrawRectangle(sx, yy, sp, sp, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
+        }
+        if (c == g->sel_colour) DrawRectangleLinesEx((Rectangle){sx, yy, sp, sp}, 2, WHITE);
     }
-    if (g->scr_loaded && g->scr_src == g->pix_src)
+    if (g->focus == FOCUS_COLOURS) DrawRectangleLinesEx((Rectangle){x0 - 2, sy - 2, 8 * sp + 4, SWATCH_ROWS * sp + 4}, 2, GOLD);
+}
+// The swatch under the mouse, or -1.
+static int swatch_pick(GuiState *g, int x0, int sy, int sp, Vector2 m) {
+    if (m.x < x0 || m.x >= x0 + 8 * sp || m.y < sy || m.y >= sy + SWATCH_ROWS * sp) return -1;
+    int c = ((int)(m.y - sy) / sp) * 8 + (int)(m.x - x0) / sp;
+    int key = render_gfx_key(g->rctx, g->pix_src);
+    return c < render_colours(g->rctx) || c == key ? c : -1;
+}
+
+static const char *SMODE_BUTTONS[] = { "pick", "fill", "import", "export", "room" };
+
+// Screen mode: the picture, and the side panel.
+static void draw_screen_mode(GuiState *g) {
+    int z, ox, oy, w, h, fs = g->font_px, px0 = smode_panel_x(g);
+    screen_geom(g, &z, &ox, &oy, &w, &h);
+    if (!render_gfx_available(g->rctx, g->pix_src))
+        gtext(&g->font, g->font_loaded, TextFormat("%s is not in the data dir", render_gfx_name(g->rctx, g->pix_src)), PAD, PAD, fs, ORANGE);
+    else if (g->scr_loaded && g->scr_src == g->pix_src)
         DrawTexturePro(g->scr_tex, (Rectangle){0, 0, w, h}, (Rectangle){ox, oy, w * z, h * z}, (Vector2){0, 0}, 0, WHITE);
     DrawRectangleLinesEx((Rectangle){ox - 1, oy - 1, w * z + 2, h * z + 2}, 1, GRAY);
-    if (g->focus == FOCUS_EDITOR) {
-        if (g->ecx >= w) g->ecx = w - 1;
-        if (g->ecy >= h) g->ecy = h - 1;
-        DrawRectangleLinesEx((Rectangle){ox + g->ecx * z - 1, oy + g->ecy * z - 1, z + 2, z + 2}, 1, WHITE);
-        DrawRectangleLinesEx((Rectangle){ox - 3, oy - 3, w * z + 6, h * z + 6}, 2, GOLD);
+    if (g->ecx >= w) g->ecx = w - 1;
+    if (g->ecy >= h) g->ecy = h - 1;
+    DrawRectangleLinesEx((Rectangle){ox + g->ecx * z - 1, oy + g->ecy * z - 1, z + 2, z + 2}, 1, WHITE);
+
+    DrawRectangle(px0, 0, GetScreenWidth() - px0, GetScreenHeight(), (Color){22, 22, 28, 255});
+    gtext(&g->font, g->font_loaded, TextFormat("%s graphics  %dx%d  zoom %d", g->cga ? "CGA" : "EGA", w, h, z), px0 + PAD, PAD, fs, RAYWHITE);
+    for (int i = 0; i < NSCREENS; i++) {
+        Rectangle r = smode_list_row(g, i);
+        bool on = SCREENS[i] == g->pix_src, avail = render_gfx_available(g->rctx, SCREENS[i]);
+        int sw, sh;
+        render_gfx_size(SCREENS[i], &sw, &sh);
+        char name[32];
+        snprintf(name, sizeof name, "%s", render_gfx_name(g->rctx, SCREENS[i]));
+        *strrchr(name, '.') = '\0';
+        DrawRectangleRec(r, on ? (Color){90, 70, 20, 255} : (Color){40, 40, 48, 255});
+        gtext(&g->font, g->font_loaded, TextFormat("%-9s %dx%d", name, sw, sh), (int)r.x + 4, (int)r.y + ((int)r.height - fs) / 2, fs, avail ? RAYWHITE : GRAY);
     }
+    draw_swatches(g, px0 + PAD, smode_swatch_y(g), smode_swatch_px(g));
+    for (int i = 0; i < 5; i++) {
+        Rectangle rb = smode_button(g, i);
+        bool on = (i == 0 && g->eyedrop) || (i == 1 && g->fill_armed);
+        DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
+        DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
+        int tw = text_w(&g->font, g->font_loaded, SMODE_BUTTONS[i], fs);
+        gtext(&g->font, g->font_loaded, SMODE_BUTTONS[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+    }
+    int ty = smode_text_y(g), lh = ch(g);
+    bool dirty = false;
+    for (int i = 0; i < GFX_SOURCES; i++) dirty |= g->gfx_dirty[i];
+    int key = render_gfx_key(g->rctx, g->pix_src);
+    gtext(&g->font, g->font_loaded, g->sel_colour == key ? TextFormat("colour %d = transparent", g->sel_colour) : TextFormat("colour %d", g->sel_colour), px0 + PAD, ty, fs, RAYWHITE);
+    gtext(&g->font, g->font_loaded, "click / drag paints", px0 + PAD, ty + lh, fs, GRAY);
+    gtext(&g->font, g->font_loaded, "right-click picks a colour", px0 + PAD, ty + 2 * lh, fs, GRAY);
+    gtext(&g->font, g->font_loaded, "arrows + Space paint, f fill", px0 + PAD, ty + 3 * lh, fs, GRAY);
+    gtext(&g->font, g->font_loaded, TextFormat("u undo   F3 %s   Esc back", g->cga ? "EGA" : "CGA"), px0 + PAD, ty + 4 * lh, fs, GRAY);
+    gtext(&g->font, g->font_loaded, dirty ? "saving..." : g->saved_flash > 0 ? "saved" : "", px0 + PAD, ty + 5 * lh, fs, dirty ? ORANGE : GREEN);
+    if (g->err_flash > 0) gtext(&g->font, g->font_loaded, g->err, px0 + PAD, ty + 6 * lh, fs, g->err_col);
+}
+
+// Screen mode mouse: paint on the picture, or use the panel; nothing else exists.
+static bool screen_mode_mouse(GuiState *g) {
+    Vector2 m = GetMousePosition();
+    int sx, sy;
+    g->pix_op = true;
+    if (g->eyedrop && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        int c = colour_under_mouse(g);
+        if (c >= 0) g->sel_colour = c;
+        g->eyedrop = false;
+        return true;
+    }
+    if (mouse_screen_px(g, &sx, &sy) && render_gfx_available(g->rctx, g->pix_src)) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, 0, sx, sy); return true; }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            g->ecx = sx; g->ecy = sy;
+            if (g->fill_armed) { pix_fill(g, 0, sx, sy); return true; }
+            g->pix_painting = true;
+            pix_undo_push(g, g->pix_src, 0);
+        }
+        if (g->pix_painting && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && render_gfx_pixel(g->rctx, g->pix_src, 0, sx, sy) != g->sel_colour) {
+            render_gfx_set_pixel(g->rctx, g->pix_src, 0, sx, sy, g->sel_colour);
+            gfx_touched(g, g->pix_src);
+            return true;
+        }
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) g->pix_painting = false;
+    if (g->pix_painting || !IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) return false;
+    for (int i = 0; i < NSCREENS; i++)
+        if (CheckCollisionPointRec(m, smode_list_row(g, i))) {
+            g->screen_src = g->pix_src = SCREENS[i];
+            g->scr_stale = true;
+            clamp_colour(g);
+            return true;
+        }
+    int c = swatch_pick(g, smode_panel_x(g) + PAD, smode_swatch_y(g), smode_swatch_px(g), m);
+    if (c >= 0) { g->sel_colour = c; return true; }
+    for (int i = 0; i < 5; i++)
+        if (CheckCollisionPointRec(m, smode_button(g, i))) {
+            if (i == 0) { g->eyedrop = !g->eyedrop; g->fill_armed = false; }
+            else if (i == 1) { g->fill_armed = !g->fill_armed; g->eyedrop = false; }
+            else if (i == 2) import_png(g, NULL);
+            else if (i == 3) export_png(g);
+            else set_view(g, VIEW_TILES);
+            return true;
+        }
+    return false;
 }
 static void sheet_build(GuiState *g, GfxSource src) {
     int w, h, n = render_gfx_count(src);
@@ -1317,20 +1423,6 @@ static void draw_palette(GuiState *g) {
         for (int i = 0; i <= rows; i++) DrawLine(x0, y0 + i * c, x0 + side, y0 + i * c, (Color){80, 80, 80, 255});
         DrawRectangleLinesEx((Rectangle){x0 + (sel % BACKS_COLS) * c, y0 + (sel / BACKS_COLS) * c, c, c}, 2, GOLD);
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, c * rows + 4}, 2, GOLD);
-    } else if (g->screens_view) {                     // the screens, one row each
-        int rh = side / NSCREENS;
-        for (int i = 0; i < NSCREENS; i++) {
-            bool on = SCREENS[i] == g->pix_src, avail = render_gfx_available(g->rctx, SCREENS[i]);
-            int w, h;
-            render_gfx_size(SCREENS[i], &w, &h);
-            DrawRectangle(x0, y0 + i * rh, side, rh - 2, on ? (Color){90, 70, 20, 255} : (Color){40, 40, 48, 255});
-            char name[32];
-            snprintf(name, sizeof name, "%s", render_gfx_name(g->rctx, SCREENS[i]));
-            *strrchr(name, '.') = '\0';
-            int nfs = fs < rh - 2 ? fs : rh - 2;
-            gtext(&g->font, g->font_loaded, TextFormat("%-9s %dx%d", name, w, h), x0 + 4, y0 + i * rh + (rh - 2 - nfs) / 2, nfs, avail ? RAYWHITE : GRAY);
-        }
-        if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, rh * NSCREENS + 4}, 2, GOLD);
     } else if (g->pix_src == GFX_TILES) {
         DrawTexturePro(g->pal_tex, (Rectangle){0, 0, TILESET_PX, TILESET_PX},
                        (Rectangle){x0, y0, side, side}, (Vector2){0, 0}, 0, WHITE);
@@ -1369,7 +1461,6 @@ static void draw_palette(GuiState *g) {
     const char *lines[] = {
         g->backs_view    ? TextFormat("background %d  scenery tile 0x%02x", cur_backs(), g->sel_img[GFX_SCENERY])
         : g->font_view   ? TextFormat("%s  tile 0x%02x", render_gfx_name(g->rctx, GFX_CHARSET), g->sel_img[GFX_CHARSET])
-        : g->screens_view ? TextFormat("%s: click the picture to paint", render_gfx_name(g->rctx, g->pix_src))
         : tiles_view(g)  ? TextFormat("tileset %d  selected 0x%02x", g->pal_offset, g->sel_tile | g->sel_attr)
                          : TextFormat("%s  frame 0x%02x", render_gfx_name(g->rctx, g->pix_src), g->sel_img[g->pix_src]),
         g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs())) : "",
@@ -1693,46 +1784,22 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     pixed_dims(g, &w, &h);
     int key = render_gfx_key(g->rctx, g->pix_src);
     const uint8_t (*pal)[3] = render_palette(g->rctx);
-    if (g->screens_view) {                               // a thumbnail; the big view is where it is painted
-        int side = TILESET_PX * g->scale;
-        DrawRectangle(x0, y0, side, side, (Color){30, 30, 30, 255});
-        if (g->scr_loaded && g->scr_src == g->pix_src) {
-            float sc = (float)side / w < (float)side / h ? (float)side / w : (float)side / h;
-            DrawTexturePro(g->scr_tex, (Rectangle){0, 0, w, h},
-                           (Rectangle){x0 + (side - w * sc) / 2, y0 + (side - h * sc) / 2, w * sc, h * sc}, (Vector2){0, 0}, 0, WHITE);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int c = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
+            Color col = c == key ? ((x + y) & 1 ? (Color){70, 70, 70, 255} : (Color){50, 50, 50, 255})
+                                 : (Color){pal[c][0], pal[c][1], pal[c][2], 255};
+            DrawRectangle(x0 + x * px, y0 + y * px, px, px, col);
         }
-    } else {
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int c = render_gfx_pixel(g->rctx, g->pix_src, idx, x, y);
-                Color col = c == key ? ((x + y) & 1 ? (Color){70, 70, 70, 255} : (Color){50, 50, 50, 255})
-                                     : (Color){pal[c][0], pal[c][1], pal[c][2], 255};
-                DrawRectangle(x0 + x * px, y0 + y * px, px, px, col);
-            }
-        for (int i = 0; i <= w; i++) DrawLine(x0 + i * px, y0, x0 + i * px, y0 + h * px, (Color){70, 70, 70, 255});
-        for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * px, x0 + w * px, y0 + i * px, (Color){70, 70, 70, 255});
-        if (g->focus == FOCUS_EDITOR) {
-            if (g->ecx >= w) g->ecx = w - 1;
-            if (g->ecy >= h) g->ecy = h - 1;
-            DrawRectangleLinesEx((Rectangle){x0 + g->ecx * px, y0 + g->ecy * px, px, px}, 2, WHITE);
-            DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * px + 4, h * px + 4}, 2, GOLD);
-        }
+    for (int i = 0; i <= w; i++) DrawLine(x0 + i * px, y0, x0 + i * px, y0 + h * px, (Color){70, 70, 70, 255});
+    for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * px, x0 + w * px, y0 + i * px, (Color){70, 70, 70, 255});
+    if (g->focus == FOCUS_EDITOR) {
+        if (g->ecx >= w) g->ecx = w - 1;
+        if (g->ecy >= h) g->ecy = h - 1;
+        DrawRectangleLinesEx((Rectangle){x0 + g->ecx * px, y0 + g->ecy * px, px, px}, 2, WHITE);
+        DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, w * px + 4, h * px + 4}, 2, GOLD);
     }
-    int sp = swatch_px(g), sy = swatch_y(g);
-    int nsw = key >= render_colours(g->rctx) ? key + 1 : render_colours(g->rctx);   // CGA sprites: a 5th "transparent" swatch
-    for (int c = 0; c < nsw; c++) {
-        int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
-        if (c == key) {                          // the game draws this colour as transparent in sprites
-            DrawRectangle(sx, yy, sp, sp, (Color){50, 50, 50, 255});
-            DrawRectangle(sx, yy, sp / 2, sp / 2, (Color){70, 70, 70, 255});
-            DrawRectangle(sx + sp / 2, yy + sp / 2, sp - sp / 2, sp - sp / 2, (Color){70, 70, 70, 255});
-            gtext(&g->font, g->font_loaded, "T", sx + 2, yy, g->font_px, RAYWHITE);
-        } else {
-            DrawRectangle(sx, yy, sp, sp, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
-        }
-        if (c == g->sel_colour) DrawRectangleLinesEx((Rectangle){sx, yy, sp, sp}, 2, WHITE);
-    }
-    if (g->focus == FOCUS_COLOURS) DrawRectangleLinesEx((Rectangle){x0 - 2, sy - 2, 8 * sp + 4, SWATCH_ROWS * sp + 4}, 2, GOLD);
+    draw_swatches(g, x0, swatch_y(g), swatch_px(g));
     int ty = pixed_text_y(g), fs = g->font_px;
     bool dirty = g->backs_dirty;
     for (int i = 0; i < GFX_SOURCES; i++) dirty |= g->gfx_dirty[i];
@@ -2202,9 +2269,14 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->err_flash > 0) g->err_flash -= dt;
         BeginDrawing();
         ClearBackground(BLACK);
+        if (g->screens_view) {                       // screen mode: the picture and its panel, nothing else
+            draw_screen_mode(g);
+            if (ged_help_shown()) draw_help(g);
+            EndDrawing();
+            continue;
+        }
         draw_text_screen(g);
-        if (g->screens_view) draw_screen_view(g);
-        else if (!g->text_map && !ged_map_is_text()) {   // room-list states show the editor's text instead
+        if (!g->text_map && !ged_map_is_text()) {   // room-list states show the editor's text instead
             DrawTexturePro(g->tex, (Rectangle){0, 0, ROOM_PX_W, ROOM_PX_H},
                            (Rectangle){pic_x(g), pic_y(g), pic_w(g), pic_h(g)},
                            (Vector2){0, 0}, 0, WHITE);
