@@ -192,6 +192,7 @@ static bool mouse_screen_px(GuiState *g, int *x, int *y);
 static void screen_tex_build(GuiState *g);
 static void draw_screen_mode(GuiState *g);
 static bool screen_mode_mouse(GuiState *g);
+static void smode_button_press(GuiState *g, int i);
 static void draw_swatches(GuiState *g, int x0, int sy, int sp);
 static int  swatch_pick(GuiState *g, int x0, int sy, int sp, Vector2 m);
 static void import_png(GuiState *g, const char *path);
@@ -407,7 +408,7 @@ static void set_view(GuiState *g, int view) {
         if (!render_gfx_is_screen(g->screen_src)) g->screen_src = GFX_LOADSCRN;
         g->pix_src = g->screen_src;
         g->scr_stale = true;
-        g->focus = FOCUS_EDITOR;                  // arrows / hjkl move the pixel cursor, Space paints
+        g->focus = FOCUS_PICKER;                  // the list first; Tab: list, colours, buttons, picture
     } else sync_sprite_sel(g);
     if (view != VIEW_SCREENS && g->focus == FOCUS_EDITOR) g->focus = FOCUS_ROOM;
     clamp_colour(g);
@@ -483,6 +484,8 @@ static void focus_move(GuiState *g, int dx, int dy) {
         int n = render_colours(g->rctx), key = render_gfx_key(g->rctx, g->pix_src);
         if (key >= n) n = key + 1;
         g->sel_colour = ((g->sel_colour + dx + (n > 8 ? 8 : 0) * dy) % n + n) % n;
+    } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {   // screen mode: pick fill / import export / room
+        g->btn_sel = ((g->btn_sel + dx + 2 * dy) % 5 + 5) % 5;
     } else if (g->focus == FOCUS_BUTTONS) {           // rows of buttons: left / right along a row, up / down between them
         int rows = tiles_view(g) ? 3 : 2;                 // the attribute row exists in the tiles view only
         if (dy) g->btn_row = ((g->btn_row + dy) % rows + rows) % rows;
@@ -504,6 +507,10 @@ static void focus_apply(GuiState *g) {
     ged_new_input_batch();
     if (g->focus == FOCUS_WORLD) {
         if (ged_map_click(g->world_sel, false)) g->focus = FOCUS_ROOM;   // answered a room prompt: back to the editor for the next one
+    } else if (g->focus == FOCUS_PICKER && g->screens_view) {
+        g->focus = FOCUS_EDITOR;                      // the list's choice is showing: over to the picture
+    } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {
+        smode_button_press(g, g->btn_sel % 5);
     } else if (g->focus == FOCUS_BUTTONS) {
         if (g->btn_row == 2 && tiles_view(g)) g->sel_attr = ATTRS[g->btn_sel % 4].bits;
         else if (g->btn_row == 1) pixed_button_press(g, 4 + g->btn_sel % (pixed_button_count(g) - 4));
@@ -588,9 +595,9 @@ static bool feed_keys(GuiState *g) {
             continue;
         }
         if (g->focus != FOCUS_ROOM && c == ' ') { focus_apply(g); any = true; continue; }
-        if (g->focus == FOCUS_EDITOR && c == 'f') {        // pixel editor focused: toggle fill mode
+        if ((g->focus == FOCUS_EDITOR || g->screens_view) && c == 'f') {   // pixel editor focused (or screen mode): toggle fill mode
             int bi, bx, by, bw, bh;
-            if (!block_panel(g, &bi, &bx, &by, &bw, &bh)) { g->fill_armed = !g->fill_armed; g->eyedrop = false; any = true; continue; }
+            if (g->screens_view || !block_panel(g, &bi, &bx, &by, &bw, &bh)) { g->fill_armed = !g->fill_armed; g->eyedrop = false; any = true; continue; }
         }
         // `u` undoes the last pixel stroke when that was the most recent edit
         if (c == 'u' && g->pix_undo_n && g->pix_seq > g->key_seq && ged_linking() == 0) { pix_undo_pop(g); any = true; continue; }
@@ -609,8 +616,15 @@ static bool feed_keys(GuiState *g) {
         bool ok = true;
         if (rk == KEY_F2) { g->text_map = !g->text_map; continue; }   // GUI-only: hex map toggle
         if (rk == KEY_F3) { set_gfx_mode(g, !g->cga); any = true; continue; }   // GUI-only: EGA / CGA files
-        if (g->screens_view) {                                          // screen mode: Esc leaves, arrows / Enter edit, help still works
+        if (g->screens_view) {                                          // screen mode: Esc leaves, Tab cycles, arrows / Enter edit, help still works
             if (rk == KEY_ESCAPE) { set_view(g, VIEW_TILES); any = true; continue; }
+            if (rk == KEY_TAB) {
+                static const int cycle[] = { FOCUS_PICKER, FOCUS_COLOURS, FOCUS_BUTTONS, FOCUS_EDITOR };
+                int at = 0;
+                for (int c = 0; c < 4; c++) if (cycle[c] == g->focus) at = c;
+                g->focus = cycle[(at + ((m & GK_MOD_SHIFT) ? 3 : 1)) % 4];
+                any = true; continue;
+            }
             if (rk == KEY_LEFT || rk == KEY_RIGHT || rk == KEY_UP || rk == KEY_DOWN) {
                 focus_move(g, rk == KEY_LEFT ? -1 : rk == KEY_RIGHT ? 1 : 0, rk == KEY_UP ? -1 : rk == KEY_DOWN ? 1 : 0);
                 any = true; continue;
@@ -1284,6 +1298,11 @@ static void draw_screen_mode(GuiState *g) {
 
     DrawRectangle(px0, 0, GetScreenWidth() - px0, GetScreenHeight(), (Color){22, 22, 28, 255});
     gtext(&g->font, g->font_loaded, TextFormat("%s graphics  %dx%d  zoom %d", g->cga ? "CGA" : "EGA", w, h, z), px0 + PAD, PAD, fs, RAYWHITE);
+    if (g->focus == FOCUS_EDITOR) DrawRectangleLinesEx((Rectangle){ox - 3, oy - 3, w * z + 6, h * z + 6}, 2, GOLD);
+    if (g->focus == FOCUS_PICKER) {
+        Rectangle r0 = smode_list_row(g, 0), rn = smode_list_row(g, NSCREENS - 1);
+        DrawRectangleLinesEx((Rectangle){r0.x - 2, r0.y - 2, r0.width + 4, rn.y + rn.height - r0.y + 4}, 2, GOLD);
+    }
     for (int i = 0; i < NSCREENS; i++) {
         Rectangle r = smode_list_row(g, i);
         bool on = SCREENS[i] == g->pix_src, avail = render_gfx_available(g->rctx, SCREENS[i]);
@@ -1299,8 +1318,9 @@ static void draw_screen_mode(GuiState *g) {
     for (int i = 0; i < 5; i++) {
         Rectangle rb = smode_button(g, i);
         bool on = (i == 0 && g->eyedrop) || (i == 1 && g->fill_armed);
+        bool kbd = g->focus == FOCUS_BUTTONS && i == g->btn_sel % 5;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-        DrawRectangleLinesEx(rb, 1, on ? GOLD : GRAY);
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, SMODE_BUTTONS[i], fs);
         gtext(&g->font, g->font_loaded, SMODE_BUTTONS[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
     }
@@ -1311,7 +1331,7 @@ static void draw_screen_mode(GuiState *g) {
     gtext(&g->font, g->font_loaded, g->sel_colour == key ? TextFormat("colour %d = transparent", g->sel_colour) : TextFormat("colour %d", g->sel_colour), px0 + PAD, ty, fs, RAYWHITE);
     gtext(&g->font, g->font_loaded, "click / drag paints", px0 + PAD, ty + lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, "right-click picks a colour", px0 + PAD, ty + 2 * lh, fs, GRAY);
-    gtext(&g->font, g->font_loaded, "arrows + Space paint, f fill", px0 + PAD, ty + 3 * lh, fs, GRAY);
+    gtext(&g->font, g->font_loaded, "Tab: list/colours/buttons/picture", px0 + PAD, ty + 3 * lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, TextFormat("u undo   F3 %s   Esc back", g->cga ? "EGA" : "CGA"), px0 + PAD, ty + 4 * lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, dirty ? "saving..." : g->saved_flash > 0 ? "saved" : "", px0 + PAD, ty + 5 * lh, fs, dirty ? ORANGE : GREEN);
     if (g->err_flash > 0) gtext(&g->font, g->font_loaded, g->err, px0 + PAD, ty + 6 * lh, fs, g->err_col);
@@ -1331,7 +1351,7 @@ static bool screen_mode_mouse(GuiState *g) {
     if (mouse_screen_px(g, &sx, &sy) && render_gfx_available(g->rctx, g->pix_src)) {
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { g->sel_colour = render_gfx_pixel(g->rctx, g->pix_src, 0, sx, sy); return true; }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            g->ecx = sx; g->ecy = sy;
+            g->ecx = sx; g->ecy = sy; g->focus = FOCUS_EDITOR;
             if (g->fill_armed) { pix_fill(g, 0, sx, sy); return true; }
             g->pix_painting = true;
             pix_undo_push(g, g->pix_src, 0);
@@ -1348,21 +1368,24 @@ static bool screen_mode_mouse(GuiState *g) {
         if (CheckCollisionPointRec(m, smode_list_row(g, i))) {
             g->screen_src = g->pix_src = SCREENS[i];
             g->scr_stale = true;
+            g->focus = FOCUS_PICKER;
             clamp_colour(g);
             return true;
         }
     int c = swatch_pick(g, smode_panel_x(g) + PAD, smode_swatch_y(g), smode_swatch_px(g), m);
-    if (c >= 0) { g->sel_colour = c; return true; }
+    if (c >= 0) { g->sel_colour = c; g->focus = FOCUS_COLOURS; return true; }
     for (int i = 0; i < 5; i++)
-        if (CheckCollisionPointRec(m, smode_button(g, i))) {
-            if (i == 0) { g->eyedrop = !g->eyedrop; g->fill_armed = false; }
-            else if (i == 1) { g->fill_armed = !g->fill_armed; g->eyedrop = false; }
-            else if (i == 2) import_png(g, NULL);
-            else if (i == 3) export_png(g);
-            else set_view(g, VIEW_TILES);
-            return true;
-        }
+        if (CheckCollisionPointRec(m, smode_button(g, i))) { g->focus = FOCUS_BUTTONS; g->btn_sel = i; smode_button_press(g, i); return true; }
     return false;
+}
+
+static void smode_button_press(GuiState *g, int i) {
+    g->pix_op = true;
+    if (i == 0) { g->eyedrop = !g->eyedrop; g->fill_armed = false; }
+    else if (i == 1) { g->fill_armed = !g->fill_armed; g->eyedrop = false; }
+    else if (i == 2) import_png(g, NULL);
+    else if (i == 3) export_png(g);
+    else set_view(g, VIEW_TILES);
 }
 static void sheet_build(GuiState *g, GfxSource src) {
     int w, h, n = render_gfx_count(src);

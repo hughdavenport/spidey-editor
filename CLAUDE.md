@@ -178,8 +178,11 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   `render_gfx_is_screen`) at the largest integer zoom left of a side panel with the screens list,
   swatches, pick / fill / import / export / room buttons and notes (`draw_screen_mode`,
   `screen_mode_mouse`, texture `scr_tex`). Painting is click / drag on the picture, right-click
-  picks, arrows + Space, f, u; other keys are swallowed (the room is not on screen); Esc or "room"
-  returns to the normal layout. Undo entries hold a whole image (GFX_MAX_BYTES).
+  picks; keyboard: the list has focus on entry, Tab cycles list / colours / buttons / picture
+  (`FOCUS_PICKER` / `FOCUS_COLOURS` / `FOCUS_BUTTONS` / `FOCUS_EDITOR`), arrows and hjkl move within
+  the focused one, Enter / Space on the list goes to the picture, on a button presses it, on the
+  picture paints; f fill, u undo; other keys are swallowed (the room is not on screen); Esc or
+  "room" returns to the normal layout. Undo entries hold a whole image (GFX_MAX_BYTES).
   "export" writes the current image as <data dir>/<FILE>.png (screens) or <FILE>-<idx>.png (sheet
   images); "import" reads that file back, or any PNG dropped on the window: scaled to the image with
   nearest neighbour and snapped to the mode's palette, transparent pixels -> the sprite key colour.
