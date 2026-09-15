@@ -1468,6 +1468,8 @@ static void draw_palette(GuiState *g) {
     } else if (g->font_view) {                        // CHARSET: 16 x 8 tiles
         int c = side / BACKS_COLS, sel = g->sel_img[GFX_CHARSET], rows = 8;
         DrawRectangle(x0, y0, side, c * rows, (Color){45, 45, 35, 255});
+        if (!render_gfx_available(g->rctx, GFX_CHARSET))
+            gtext(&g->font, g->font_loaded, TextFormat("%s is not in the data dir", render_gfx_name(g->rctx, GFX_CHARSET)), x0 + 4, y0 + c * rows + 4, fs, ORANGE);
         if (g->sheet_loaded[GFX_CHARSET])
             DrawTexturePro(g->sheet_tex[GFX_CHARSET], (Rectangle){0, 0, g->sheet_tex[GFX_CHARSET].width, g->sheet_tex[GFX_CHARSET].height},
                            (Rectangle){x0, y0, side, c * rows}, (Vector2){0, 0}, 0, WHITE);
@@ -2427,6 +2429,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             int bi, bx, by, bw, bh;
             bool on_block = ged_block_at_cursor(&bi, &bx, &by, &bw, &bh);
             if (!on_block) g->block_hidden = -1;
+            if (on_block && bi != g->block_hidden && !tiles_view(g)) set_view(g, VIEW_TILES);   // a block is made of tiles: the picker shows them
             if (on_block && bi != g->block_hidden) draw_block_editor(g, bi, bx, by, bw, bh);
             else draw_gfx_editor(g, on_block);
         }

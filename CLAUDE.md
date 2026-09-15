@@ -192,7 +192,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Sprite frames map to creatures (`CREATURES[]` in gui.c, ranges verified against the game);
   with a sprite selected, Shift+click in the room places that creature (`ged_place_sprite`:
   retypes the object under the cursor or creates one).
-- Block object under the cursor: its tile grid replaces the pixel editor (`ged_block_*`);
+- Block object under the cursor: its tile grid replaces the pixel editor (`ged_block_*`) and the
+  picker switches to the tiles view (a block is made of tiles; nothing else applies);
   click paints the picked tile (with the attribute buttons' bits), w+/w-/h+/h- call the
   editor's stretch/shrink, "gfx" hides the panel until the cursor leaves the block (the button
   grid then shows a "block" button, and the pixel editor a hint, to bring it back).
