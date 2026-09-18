@@ -1190,27 +1190,42 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     // applied) the same way its definition is marked above (type+damage digits, or the raw tile
     // hex bytes) but underlined, so the two are visually distinct - "similar to other" markers
     // on this map, since the plain TUI has no picture to show this any other way. This is drawn
-    // into the same cell buffer the GUI's own hex-map view (F2) shows as text too.
+    // into the same cell buffer the GUI's own hex-map view (F2) shows as text too. Standing on
+    // the offset (drawn) location itself shows the same shadow in the same place, rather than a
+    // marker back at the definition (Hugh: "in tui, when you are over the actual offset of a
+    // block or sprite, show the shadow"; "show it where it would be shown if you had that
+    // object selected, not the definition place") - "over the definition" and "over the offset"
+    // both point at the one shadow at the offset, they just never both apply at once once the
+    // two differ.
     if (state->debug.objects && state->current_state != GOTO_OBJECT) {
         for (size_t i = 0; i < room.num_objects; i++) {
             struct RoomObject *object = room.objects + i;
             unsigned global = (unsigned)room.UNKNOWN_c + (unsigned)i;
-            if (object->type == SPRITE && x == object->x && y == object->y &&
-                    global < C_ARRAY_LEN(state->movertab) / 3) {
+            if (object->type == SPRITE && global < C_ARRAY_LEN(state->movertab) / 3) {
                 const uint8_t *entry = state->movertab + global * 3;
                 int ox = object->x + movertab_offset_x(entry);
                 int oy = object->y + movertab_offset_y(entry, true);
-                if ((ox != object->x || oy != object->y) &&
-                        ox >= 0 && ox < WIDTH_TILES && oy >= 0 && oy < HEIGHT_TILES) {
+                bool offset_visible = (ox != object->x || oy != object->y) &&
+                        ox >= 0 && ox < WIDTH_TILES && oy >= 0 && oy < HEIGHT_TILES;
+                bool at_def = x == object->x && y == object->y;
+                // Standing on the offset itself shows the same shadow already shown from the
+                // definition, in the same place (Hugh: "show it where it would be shown if you
+                // had that object selected, not the definition place") - not a marker back at
+                // the definition, which would be a second, different location to make sense of.
+                bool at_off = offset_visible && x == ox && y == oy;
+                if (offset_visible && (at_def || at_off)) {
                     GOTO(2 * ox, oy + 1);
                     scr_printf("\033[4;33;40m%d%d\033[m", object->sprite.type, object->sprite.damage);
                 }
-            } else if (object->type == BLOCK && object->tiles &&
-                    x >= object->x && x < object->x + (int)object->block.width &&
-                    y >= object->y && y < object->y + (int)object->block.height) {
+            } else if (object->type == BLOCK && object->tiles) {
                 int ox, oy;
                 render_block_offset(object, state->movertab, global, &ox, &oy);
-                if (ox != object->x || oy != object->y) {
+                bool offset_visible = ox != object->x || oy != object->y;
+                bool in_def = x >= object->x && x < object->x + (int)object->block.width &&
+                              y >= object->y && y < object->y + (int)object->block.height;
+                bool in_off = offset_visible && x >= ox && x < ox + (int)object->block.width &&
+                              y >= oy && y < oy + (int)object->block.height;
+                if (offset_visible && (in_def || in_off)) {
                     for (int by = 0; by < (int)object->block.height; by++) {
                         int ty = oy + by;
                         if (ty < 0 || ty >= HEIGHT_TILES) continue;
@@ -1235,6 +1250,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             for (size_t c = 1; c < sw->chunks.length; c++) {
                 struct SwitchChunk *chunk = sw->chunks.data + c;
                 if (chunk->type != TOGGLE_BLOCK) continue;
+                if (chunk->y >= HEIGHT_TILES) continue;   // a "memory" chunk, off-map by design
                 uint8_t ctile = (s + 1 == state->current_switch && c == state->current_chunk)
                     ? (state->switch_on ? chunk->on : chunk->off)
                     : chunk->off;
@@ -1259,6 +1275,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             if (sw->chunks.length == 0) continue;
             int sx = sw->chunks.data[0].x;
             int sy = sw->chunks.data[0].y;
+            // An out-of-bounds switch (shown in its own "Out of bounds switches" panel
+            // listing instead) has no tile on the map to mark - GOTOing to 2*sx, sy+1 for one
+            // spilled into the panel text below the map (Hugh: "there is a line with just a
+            // blue 00 on it just above out of bound switches").
+            if (sx >= WIDTH_TILES || sy >= HEIGHT_TILES) continue;
             uint8_t tile = room.tiles[TILE_IDX(sx, sy)];
             GOTO(2 * sx, sy + 1);
             scr_printf("\033[4%d;30m%02X\033[m", (int)(s % 3) + 4, tile);
@@ -1546,14 +1567,23 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             if (obj->type != SPRITE) continue;
             // Its logical (x,y) - the definition - always counts as "on" a sprite, regardless of
             // how far an x/y offset has since moved it away from there (Hugh: "when i go to
-            // where it is defined in the level... it is as if i were on an empty tile"). The GUI
-            // additionally matches the sprite's actual rendered box (SPRITE_X_PAD widens and
-            // shifts it even with no offset at all, see render.c) - but the plain TUI never
-            // draws that picture at all, so that box is invisible and meaningless there: only
-            // the definition point should work there (Hugh: "the sprite doesn't get drawn in
-            // the tui, so you should only be able to edit via the definition point"). The
-            // Enter-key hit-test in handle_tile_edit (editor_input.c) uses this same pair.
+            // where it is defined in the level... it is as if i were on an empty tile"). The
+            // plain offset tile (movertab_offset_x/y applied) counts too, in the TUI as well as
+            // the GUI - it's just a tile coordinate, no picture needed to know where it is
+            // (Hugh: "it doesn't show up when the spidey cursor... i go to where a sprite would
+            // be drawn, and no info shows up in tui"), matching the shadow marker above. Only
+            // the *wider* GUI rendered box (SPRITE_X_PAD widens and shifts it even with no
+            // offset at all, see render.c) stays GUI-only, since that's a picture-pixel detail
+            // with nothing to correspond to in the TUI. The Enter-key hit-test in handle_tile_edit
+            // (editor_input.c) uses this same set of checks.
             bool hit = (int)x == obj->x && (int)y == obj->y;
+            unsigned obj_global = (unsigned)room.UNKNOWN_c + (unsigned)i;
+            if (!hit && obj_global < C_ARRAY_LEN(state->movertab) / 3) {
+                const uint8_t *oe = state->movertab + obj_global * 3;
+                int ox = obj->x + movertab_offset_x(oe);
+                int oy = obj->y + movertab_offset_y(oe, true);
+                hit = (int)x == ox && (int)y == oy;
+            }
             if (!hit && screen_headless) {
                 int dx, dy, w, h; bool fh, fv;
                 render_sprite_box(obj, state->movertab, (unsigned)room.UNKNOWN_c + (unsigned)i, &dx, &dy, &w, &h, &fh, &fv);

@@ -3935,14 +3935,24 @@ static bool handle_tile_edit(Key key) {
                     // Its logical (x,y) - the definition - always counts as "on" a sprite,
                     // regardless of how far an x/y offset has since moved it away from there
                     // (Hugh: "when i go to where it is defined in the level... it is as if i
-                    // were on an empty tile"). The GUI additionally matches the sprite's actual
-                    // rendered box (wider than one tile, and shifted even with no offset at all -
-                    // see render.c's SPRITE_X_PAD), matching what a click there already can do
-                    // (ged_sprite_hit in gui.c, same math) - but the plain TUI never draws that
-                    // picture at all, so that box is invisible and meaningless there: only the
-                    // definition point should work (Hugh: "the sprite doesn't get drawn in the
-                    // tui, so you should only be able to edit via the definition point").
+                    // were on an empty tile"). The plain offset tile counts too, in the TUI as
+                    // well as the GUI - just a tile coordinate, no picture needed (Hugh: "it
+                    // doesn't show up when the spidey cursor... i go to where a sprite would be
+                    // drawn, and no info shows up in tui"). Only the *wider* GUI rendered box
+                    // (SPRITE_X_PAD widens and shifts it even with no offset at all - see
+                    // render.c) stays GUI-only, matching what a click there already can do
+                    // (ged_sprite_hit in gui.c, same math) - that's a picture-pixel detail with
+                    // nothing to correspond to in the TUI.
                     bool sprite_hit = obj->type == SPRITE && (int)x == obj->x && (int)y == obj->y;
+                    if (obj->type == SPRITE && !sprite_hit) {
+                        unsigned global = (unsigned)room->UNKNOWN_c + (unsigned)obj_idx;
+                        if (global < C_ARRAY_LEN(state->movertab) / 3) {
+                            const uint8_t *oe = state->movertab + global * 3;
+                            int ox = obj->x + movertab_offset_x(oe);
+                            int oy = obj->y + movertab_offset_y(oe, true);
+                            sprite_hit = (int)x == ox && (int)y == oy;
+                        }
+                    }
                     if (obj->type == SPRITE && !sprite_hit && screen_headless) {
                         int dx, dy, w, h; bool fh, fv;
                         unsigned global = (unsigned)room->UNKNOWN_c + (unsigned)obj_idx;
