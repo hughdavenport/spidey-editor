@@ -4,6 +4,7 @@ gui.so
 *.SPL
 *.spl
 *.png
+!docs/screenshots/*.png
 Spider/
 *.bz2
 *.gz
