@@ -1277,37 +1277,11 @@ int main(int argc, char **argv) {
                                     found_switch = 1;
                                 }
 
-                                printf("  - idx=%u test=0x%02X value=",
+                                printf("  - idx=%u test=0x%02X value=0x%02X (%s)\n",
                                         file.rooms[room].data.switches[i].chunks.data[chunk].index,
-                                        file.rooms[room].data.switches[i].chunks.data[chunk].test);
-
-                                switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_LEFT) {
-                                    case MOVE_LEFT:
-                                        switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_UP) {
-                                            case MOVE_UP: printf("up+left"); break;
-                                            case MOVE_DOWN: printf("down+left"); break;
-                                            case '\0': printf("left"); break;
-                                        }
-                                        break;
-
-                                    case MOVE_RIGHT:
-                                        switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_UP) {
-                                            case MOVE_UP: printf("up+right"); break;
-                                            case MOVE_DOWN: printf("down+right"); break;
-                                            case '\0': printf("right"); break;
-                                        }
-                                        break;
-
-                                    case '\0':
-                                        switch (file.rooms[room].data.switches[i].chunks.data[chunk].value & MOVE_UP) {
-                                            case MOVE_UP: printf("up"); break;
-                                            case MOVE_DOWN: printf("down"); break;
-                                            case '\0': printf("stop"); break;
-                                        }
-                                        break;
-                                }
-                                printf(" value_without_direction=0x%02X\n", 
-                                        file.rooms[room].data.switches[i].chunks.data[chunk].value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].test,
+                                        file.rooms[room].data.switches[i].chunks.data[chunk].value,
+                                        move_desc(file.rooms[room].data.switches[i].chunks.data[chunk].value));
                             }
                         }
                     }
@@ -1326,6 +1300,7 @@ int main(int argc, char **argv) {
             argv ++; argc --;
             // Collect flags (any position) and up to two positionals (TARGET, OUT).
             RenderOpts opts = { .data_dir = ".", .scale = 3, .debug = false };
+            uint8_t movertab_buf[256 * 3];
             const char *pos[2] = {NULL, NULL};
             int npos = 0;
             bool bad = false;
@@ -1336,6 +1311,16 @@ int main(int argc, char **argv) {
                     opts.scale = (int)strtol(argv[1], NULL, 10); argv += 2; argc -= 2;
                 } else if (strcmp(argv[0], "--data-dir") == 0 && argc >= 2) {
                     opts.data_dir = argv[1]; argv += 2; argc -= 2;
+                } else if (strcmp(argv[0], "--movertab") == 0 && argc >= 2) {
+                    FILE *mfp = fopen(argv[1], "rb");
+                    if (mfp == NULL || fread(movertab_buf, 1, sizeof movertab_buf, mfp) != sizeof movertab_buf) {
+                        fprintf(stderr, "render: could not read a %zu-byte MOVERTAB.DAT from '%s'\n", sizeof movertab_buf, argv[1]);
+                        if (mfp) fclose(mfp);
+                        bad = true; break;
+                    }
+                    fclose(mfp);
+                    opts.movertab = movertab_buf;
+                    argv += 2; argc -= 2;
                 } else if (argv[0][0] == '-' && argv[0][1] != '\0') {
                     fprintf(stderr, "render: unknown option '%s'\n", argv[0]);
                     bad = true; break;
@@ -1345,7 +1330,7 @@ int main(int argc, char **argv) {
                 }
             }
             if (bad || npos < 2) {
-                fprintf(stderr, "Usage: render ROOMID|all|montage OUT.png|DIR [--debug] [--scale N] [--data-dir DIR]\n");
+                fprintf(stderr, "Usage: render ROOMID|all|montage OUT.png|DIR [--debug] [--scale N] [--data-dir DIR] [--movertab FILE]\n");
                 defer_return(1);
             }
             bool render_all = (strcasecmp(pos[0], "all") == 0);
@@ -1910,7 +1895,7 @@ int main(int argc, char **argv) {
                     fileName);
             defer_return(1);
         }
-        if (!writeFile(&file, fp)) defer_return(1);
+        if (!writeFile(&file, fp, NULL)) defer_return(1);
         fclose(fp);
         fp = NULL;
         fprintf(stderr, "Written %s\n", fileName);

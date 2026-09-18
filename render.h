@@ -9,6 +9,7 @@ typedef struct {
     const char *data_dir;   // directory holding the EGA / BACKS.SPL assets
     int scale;              // nearest-neighbour upscale factor (>= 1)
     bool debug;             // draw the debug overlay (switches/objects/grid)
+    const uint8_t *movertab;   // optional (NULL = draw every sprite un-mirrored); see render_set_movertab
 } RenderOpts;
 
 // Render one room to a PNG at out_path. Returns false (with a message on
@@ -44,6 +45,25 @@ bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out);
 // Whether render_room_rgb draws Spider-Man at his start position in room 1
 // (default true; the GUI draws him at the cursor instead).
 void render_show_player(RenderCtx *ctx, bool show);
+
+// MOVERTAB.DAT (768 bytes: 256 objects x 3 bytes), so render_room_rgb can mirror a sprite
+// horizontally/vertically per its byte 2 facing/upside-down bits (see room.c's
+// movertab_behavior_desc comment). NULL (the default) draws every sprite un-mirrored, as
+// before this existed. Not copied: the pointer must stay valid until the next call or a new
+// render_set_movertab.
+void render_set_movertab(RenderCtx *ctx, const uint8_t *movertab);
+
+// Where a sprite object (room->objects[i], global = room->UNKNOWN_c + i) actually draws: top-left
+// pixel, frame size, and its flip flags, once byte 2's facing/upside-down and bytes 0/1's x/y
+// pixel offset are applied. False (untouched out-params) for anything but a SPRITE. Used both by
+// render_room_rgb's own drawing and by the GUI's click hit-testing, so a sprite offset far from
+// its logical tile can still be selected where it's actually drawn (see gui_editor.c).
+bool render_sprite_box(struct RoomObject *o, const uint8_t *movertab, unsigned global,
+                        int *dx, int *dy, int *w, int *h, bool *flip_h, bool *flip_v);
+
+// A block object's tile-space origin (block.width/height unaffected) once its MOVERTAB x/y
+// offset is applied. False for anything but a BLOCK. Same sharing rationale as render_sprite_box.
+bool render_block_offset(struct RoomObject *o, const uint8_t *movertab, unsigned global, int *ox, int *oy);
 
 #define SPIDS_FRAME_W 24
 #define SPIDS_FRAME_H 21

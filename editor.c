@@ -14,9 +14,9 @@
 #define TIME_NEWER(t1, t2) (((t1).tv_sec > (t2).tv_sec) || (((t1).tv_sec == (t2).tv_sec) && (t1).tv_nsec > (t2).tv_nsec))
 
 #ifdef __TINYC__
-#define LIBRARY_BUILD_CMD "tcc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c editor_actions.c editor_draw.c editor_input.c editor_screen.c -o"
+#define LIBRARY_BUILD_CMD "tcc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared render.c room.c spl.c editor_actions.c editor_draw.c editor_input.c editor_screen.c -o"
 #else
-#define LIBRARY_BUILD_CMD "cc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared room.c editor_actions.c editor_draw.c editor_input.c editor_screen.c -o"
+#define LIBRARY_BUILD_CMD "cc -g -ggdb -Werror -Wall -Wpedantic -fsanitize=address -fpic -shared render.c room.c spl.c editor_actions.c editor_draw.c editor_input.c editor_screen.c -o"
 #endif
 
 #include "editor_types.h"
@@ -27,6 +27,10 @@ bool any_source_newer(struct timespec test_time) {
         __FILE__,
         "room.c",
         "room.h",
+        "spl.c",
+        "spl.h",
+        "render.c",
+        "render.h",
         "array.h",
         "editor_types.h",
         "editor_actions.c",
@@ -105,7 +109,7 @@ void get_screen_dimensions() {
     state->screen_dimensions.y = w.ws_row ? w.ws_row : 50;
 }
 
-static void sigint_handler(int sig) { (void)sig; end(); }
+static void sigint_handler(int sig) { fprintf(stderr, "SIGINT\n"); (void)sig; end(); }
 
 void sigwinch_handler(int arg) {
     assert(arg == SIGWINCH);
@@ -132,12 +136,14 @@ void setup() {
         struct termios new = state->original_termios;
         new.c_lflag &= ~(ICANON | ECHO);
         new.c_iflag &= ~(IXON | IXOFF);
+        new.c_iflag &= ~(ISIG);
         assert(tcsetattr(STDIN_FILENO, TCSANOW, &new) == 0);
     }
 
     get_screen_dimensions();
 
     assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+    movertab_load();
 
     for (size_t i = 0; i < C_ARRAY_LEN(state->cursors); i ++) {
         state->cursors[i].x = WIDTH_TILES / 2;
@@ -150,6 +156,7 @@ void setup() {
 
     state->help = true;
     state->debug.hex = true;
+    state->debug.tiles = true;
 }
 
 typedef game_state *(*main_fn)(char *library, game_state *call_state);
@@ -212,12 +219,21 @@ game_state *loop_main(char *library, game_state *call_state) {
         struct stat rooms_stat;
         if (stat("ROOMS.SPL", &rooms_stat) == 0
                 && TIME_NEWER(rooms_stat.st_mtim, start_rooms_stat.st_mtim)) {
-            snprintf(state->status_message, sizeof(state->status_message), "Reloading ROOMS.SPL");
-            redraw();
-            freeRoomFile(&state->rooms);
-            assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+            /* Our own last editor_save() already updated state->rooms in memory
+             * to match exactly what it just wrote; free-and-reread only when
+             * this mtime change isn't the one we made ourselves, else every
+             * save eventually races this poll into freeing state mid-use by
+             * whatever handler is still holding a pointer into it. */
+            bool own_write = rooms_stat.st_mtim.tv_sec == state->last_own_write_mtim.tv_sec
+                           && rooms_stat.st_mtim.tv_nsec == state->last_own_write_mtim.tv_nsec;
             start_rooms_stat = rooms_stat;
-            dirty = true;
+            if (!own_write) {
+                snprintf(state->status_message, sizeof(state->status_message), "Reloading ROOMS.SPL");
+                redraw();
+                freeRoomFile(&state->rooms);
+                assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+                dirty = true;
+            }
         }
 
         dirty |= process_input();   /* blocks up to 1 s */
@@ -270,7 +286,11 @@ int editor_main() {
             fprintf(stderr, "Building editor library: %s\n", build_cmd);
             assert(system(build_cmd) == 0);
             module = dlopen(library, RTLD_NOW);
-            assert(module != NULL);
+            if (!module) {
+                fprintf(stderr, "dlopen(%s): %s\n", library, dlerror());
+                free(library);
+                return 1;
+            }
         }
         void *(*function)(char *library, void *state);
         *(void **) (&function) = dlsym(module, "loop_main");

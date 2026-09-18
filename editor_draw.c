@@ -1,4 +1,5 @@
 #include "editor_types.h"
+#include "render.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -48,6 +49,7 @@ help_keys help[][100] = {
         {"Ctrl-r[gtdbcef|-]", "edit room detail (hjkl/arrows = room links)"},
         {"Ctrl-s", "create/edit switch"},
         {"Ctrl-o", "create/cycle object/sprites"},
+        {"Enter", "edit object's MOVERTAB.DAT entry (over an object)"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
         {"Delete/Backspace", "remove nibble / delete / clear tile"},
@@ -72,6 +74,24 @@ help_keys help[][100] = {
         {"q", "cancel"},
         {"Ctrl-?", "help"},
         {"Ctrl-h", "toggle hex"},
+        {0},
+    },
+
+    [EDIT_MOVERTAB_OBJECT]={
+        {"d", "sprite: toggle dead/alive"},
+        {"f", "sprite (alive): cycle flip none/horizontal/vertical/both; block: cycle horizontal stopped/right/left + speed"},
+        {"m/M", "sprite (alive): cycle mode stopped/patrol/chase"},
+        {"s", "sprite (chasing): toggle stopped / actively moving"},
+        {"w", "sprite (patrol/chasing): toggle stop at wall / turn around; block (moving horizontally): toggle stop at wall / bounce"},
+        {"u", "block: cycle vertical stopped/down/up + speed"},
+        {"e", "sprite (patrol/chasing): toggle fall at edge / turn around; block (moving vertically): toggle stop at wall / bounce"},
+        {"hjkl, arrows", "nudge the x/y tile offset (bytes 0/1)"},
+        {"r", "toggle raw hex entry of byte 2 (no glitch protection) / back to attributes"},
+        {"0-9a-fA-F", "raw mode: set byte 2 (2 hex digits)"},
+        {"ESC/q", "cancel"},
+        {"Ctrl-?", "help"},
+        {"Ctrl-h", "toggle hex"},
+        {"Ctrl-p", "play (play.sh)"},
         {0},
     },
 
@@ -144,10 +164,10 @@ help_keys help[][100] = {
         {"|", "vertical gravity"},
         {"-", "horizontal gravity"},
 
-        {"b", "UNKNOWN_b"},
-        {"c", "UNKNOWN_c"},
-        {"e", "UNKNOWN_e (low 2 bits)"},
-        {"f", "UNKNOWN_f"},
+        // UNKNOWN_b isn't shown here at all any more: every original room has it set to 1,
+        // and testing (disassembly + play) found no code path that ever reads it, so there's
+        // nothing useful to look at. Object base / switch base are shown but not editable
+        // here: they're recomputed automatically from the file's layout on every save.
 
         {"LEFT/h", "room left"},
         {"RIGHT/l", "room right"},
@@ -188,6 +208,8 @@ help_keys help[][100] = {
         {"Down/j", "side: bottom"},
         {"Up/k", "side: top"},
         {"Right/l", "side: right"},
+        {"X", "edit x (0-31; 22-31 is off-grid)"},
+        {"Y", "edit y (0-31; 22-31 is off-grid)"},
         {"+", "increase switch id"},
         {"-", "decrease switch id"},
         {"y", "yank switch"},
@@ -195,6 +217,15 @@ help_keys help[][100] = {
         {"p", "paste chunk"},
         {"c[n]", "select chunk"},
         {"C", "create chunk"},
+        {"ESC/q/Ctrl-s", "cancel"},
+        {"Ctrl-p", "play (play.sh)"},
+        {"Ctrl-?", "help"},
+        {"Ctrl-h", "toggle hex"},
+        {0},
+    },
+
+    [EDIT_SWITCHDETAILS_XY]={
+        {"0-9a-fA-F", "value (0-31; wraps into the 5-bit field)"},
         {"ESC/q/Ctrl-s", "cancel"},
         {"Ctrl-p", "play (play.sh)"},
         {"Ctrl-?", "help"},
@@ -289,6 +320,8 @@ help_keys help[][100] = {
         {"-", "decrease chunk id"},
         {"i", "cycle through possible index values"},
         {"s", "cycle through possible test values"},
+        {"v", "cycle value through named presets (stop/up/down/left/right/kill)"},
+        {"V", "cycle value through named presets, backwards"},
         {"0-9a-fA-F", "change raw value (advanced)"},
         {"ESC/q/Ctrl-s", "cancel"},
         {"Ctrl-p", "play (play.sh)"},
@@ -357,6 +390,17 @@ void show_help()
     }
 }
 
+// A room's name, trimmed of its trailing space padding, for chunk summaries
+// that name a target room (a TOGGLE_BIT switch). buf must be at least 25 bytes.
+static const char *room_name_trimmed(uint16_t room_idx, char *buf, size_t buf_size) {
+    memset(buf, 0, buf_size);
+    strncpy(buf, state->rooms.rooms[room_idx].data.name, buf_size - 1);
+    for (int j = (int)buf_size - 1; j >= 0; j--)
+        if (buf[j] == '\0' || isspace((unsigned char)buf[j])) buf[j] = '\0';
+        else break;
+    return buf;
+}
+
 static bool chunk_at_cursor(struct SwitchChunk *chunk, int cx, int cy) {
     if (chunk->type != TOGGLE_BLOCK) return false;
     return chunk->dir == HORIZONTAL
@@ -366,9 +410,19 @@ static bool chunk_at_cursor(struct SwitchChunk *chunk, int cx, int cy) {
 
 static void draw_switch_chunks_brief(struct SwitchObject *sw, int cx, int cy, int *bottom) {
     if (sw->chunks.length <= 1) return;
+    /* A switch can carry up to 16 chunks, and several switches can share the
+     * cursor's tile; a packed room can list more lines here than a real
+     * terminal (or even the GUI's virtual screen) is tall. Stop and say so
+     * rather than let the GOTO below assert. */
+    if (*bottom >= state->screen_dimensions.y - 1) return;
     GOTO(0, *bottom); (*bottom)++;
     scr_printf("  chunks:");
     for (size_t i = 1; i < sw->chunks.length; i++) {
+        if (*bottom >= state->screen_dimensions.y - 1) {
+            GOTO(0, *bottom); (*bottom)++;
+            scr_printf("  ... %zu more chunk%s not shown", sw->chunks.length - i, sw->chunks.length - i == 1 ? "" : "s");
+            return;
+        }
         GOTO(0, *bottom); (*bottom)++;
         struct SwitchChunk *chunk = sw->chunks.data + i;
         bool at_cur = chunk_at_cursor(chunk, cx, cy);
@@ -382,14 +436,9 @@ static void draw_switch_chunks_brief(struct SwitchObject *sw, int cx, int cy, in
                     at_cur ? " *" : "");
                 break;
             case TOGGLE_BIT: {
-                char name[25] = {0};
-                strncpy(name, state->rooms.rooms[chunk->room_idx].data.name,
-                        sizeof(name) - 1);
-                for (int j = (int)sizeof(name) - 1; j >= 0; j--)
-                    if (name[j] == '\0' || isspace((unsigned char)name[j])) name[j] = '\0';
-                    else break;
+                char name[25];
                 scr_printf("toggle: (room) %s (switch) %d (on/off)=%d/%d",
-                    name, chunk->switch_idx, chunk->on, chunk->off);
+                    room_name_trimmed(chunk->room_idx, name, sizeof(name)), chunk->switch_idx, chunk->on, chunk->off);
                 break;
             }
             case TOGGLE_OBJECT:
@@ -399,6 +448,142 @@ static void draw_switch_chunks_brief(struct SwitchObject *sw, int cx, int cy, in
             default: break;
         }
     }
+}
+
+// One "word: value" attribute field, matching the rest of this panel's hotkey convention (see
+// e.g. "bkgrnd:" in EDIT_ROOMDETAILS above): `hot` underlines the word's leading letter (always
+// its hotkey) or not, but the text is otherwise identical either way - this is what lets
+// draw_movertab_entry show the exact same wording whether the object is just being looked at or
+// is the open EDIT_MOVERTAB_OBJECT.
+static void movertab_field(bool hot, const char *word, const char *value) {
+    if (hot) scr_printf("\033[1;4m%c\033[m%s: %s", word[0], word + 1, value);
+    else scr_printf("%s: %s", word, value);
+}
+
+// A label word with its hotkey letter embedded (see movertab_field) but no ": value" of its
+// own - for a block's direction/speed/walls fields, where one label governs a "(|): .. (-): .."
+// pair rather than a single value (see movertab_axis_field just below).
+static void movertab_word(bool hot, const char *word) {
+    if (hot) scr_printf("\033[1;4m%c\033[m%s", word[0], word + 1);
+    else scr_printf("%s", word);
+}
+// "(|): value" / "(-): value" - the vertical/horizontal half of a block's direction/speed/walls
+// field, matching EDIT_ROOMDETAILS's "gravity (|)"/"gravity (-)" convention exactly. `focus_hot`
+// (not just `hot`) underlines the symbol itself: only while that field's key (s/d/w) is the one
+// currently armed (state->movertab_block_focus), since | and - do something different depending
+// on which of those is active (see handle_edit_movertab_object's '|'/'-' case).
+static void movertab_axis_field(bool focus_hot, char sym, const char *value) {
+    if (focus_hot) scr_printf("(\033[1;4m%c\033[m): %s", sym, value);
+    else scr_printf("(%c): %s", sym, value);
+}
+
+static void draw_movertab_fields(const uint8_t *entry, bool is_sprite, bool hot) {
+    if (!is_sprite) {
+        // Two independent axes (see the "heli" table comment above handle_edit_movertab_object,
+        // editor_input.c): speed/walls each split into a vertical (|) and horizontal (-) half,
+        // matching EDIT_ROOMDETAILS's gravity fields. No separate direction field - speed is
+        // signed instead, -3..3 (Hugh: "drop the direction display, and instead do speed:
+        // -3..3, and -ve means v and <"). Walls only matters for an axis actually moving.
+        int vspeed_mag = (entry[2] >> 4) & 0x03, hspeed_mag = entry[2] & 0x03;
+        int vspeed = (entry[2] & 0x40) ? vspeed_mag : -vspeed_mag;    // + up, - down
+        int hspeed = (entry[2] & 0x04) ? -hspeed_mag : hspeed_mag;    // + right, - left
+        char vspeedbuf[4], hspeedbuf[4];
+        snprintf(vspeedbuf, sizeof vspeedbuf, "%d", vspeed);
+        snprintf(hspeedbuf, sizeof hspeedbuf, "%d", hspeed);
+        bool speed_focus = hot && (state->movertab_block_focus == 's' || state->movertab_block_focus == 'd');
+        bool wall_focus = hot && state->movertab_block_focus == 'w';
+
+        movertab_word(hot, "speed");
+        scr_printf(" "); movertab_axis_field(speed_focus, '|', vspeedbuf);
+        scr_printf(", "); movertab_axis_field(speed_focus, '-', hspeedbuf);
+        if (vspeed_mag || hspeed_mag) {
+            scr_printf(", ");
+            movertab_word(hot, "walls");
+            scr_printf(" ");
+            bool first = true;
+            if (vspeed_mag) { movertab_axis_field(wall_focus, '|', (entry[2] & 0x80) ? "back" : "stop"); first = false; }
+            if (hspeed_mag) { if (!first) scr_printf(", "); movertab_axis_field(wall_focus, '-', (entry[2] & 0x08) ? "back" : "stop"); }
+        }
+        return;
+    }
+    if (entry[2] == 0x00) {
+        movertab_field(hot, "dead", "yes");
+        return;
+    }
+    if ((entry[2] & 0x81) != 0x80) {
+        // Raw mode (or an older editor version) can leave a value this picker would never
+        // produce itself (bit 0x01 set, or 0x80 clear on a nonzero byte) - say so plainly
+        // rather than decode it as if it were a clean attribute combination: pressing d/f/m
+        // normalises it back to one the moment you use them (see handle_edit_movertab_object).
+        if (hot) scr_printf("GLITCHY - \033[1;4md\033[m/\033[1;4mf\033[m/\033[1;4mm\033[m fixes it");
+        else scr_printf("GLITCHY - d/f/m fixes it");
+        return;
+    }
+    static const char *FLIP[4] = {"none", "<", "^", "both"};   // < horizontal (facing), ^ vertical (upside-down) - same compact-symbol style as "gravity (|)"/"gravity (-)"
+    // chase-first: 0x40 and 0x08 can coexist (see the 0x08/0x40 comment in editor_input.c) -
+    // within chase, 0x08 is its own "currently moving" sub-flag (the "stopped" field), not patrol.
+    int mode = (entry[2] & 0x40) ? 2 : (entry[2] & 0x08) ? 1 : 0;
+    movertab_field(hot, "dead", "no");
+    scr_printf(", ");
+    movertab_field(hot, "flip", FLIP[(entry[2] & 0x06) >> 1]);
+    scr_printf(", ");
+    movertab_field(hot, "mode", mode == 0 ? "stopped" : mode == 1 ? "patrol" : "chase");
+    if (mode == 2 && !(entry[2] & 0x08)) {   // chasing already implies "not stopped" by default - only worth saying when it IS stopped
+        scr_printf(", ");
+        movertab_field(hot, "stopped", "yes");
+    }
+    if (mode != 0) {
+        scr_printf(", ");
+        movertab_field(hot, "edge", (entry[2] & 0x20) ? "turn" : "fall");
+        scr_printf(", ");
+        movertab_field(hot, "walls", (entry[2] & 0x10) ? "turn" : "stop");
+    }
+}
+
+// The x/y tile offset (MOVERTAB bytes 1/0) on the object's own sprite/block summary line, not
+// the movertab attribute line below it (Hugh: "put the offsets of x/y on the line above"; "show
+// them even if 0"). Edited with hjkl/arrows while EDIT_MOVERTAB_OBJECT has this object open (see
+// movertab_offset_adjust, editor_input.c) - `hot` (that condition) underlines the hjkl hint.
+static void draw_movertab_offset(unsigned global, bool is_sprite, bool hot) {
+    if (global >= C_ARRAY_LEN(state->movertab) / 3) return;
+    const uint8_t *entry = state->movertab + global * 3;
+    int dx = movertab_offset_x(entry), dy = movertab_offset_y(entry, is_sprite);
+    scr_printf(" (offset x,y)=%+d,%+d", dx, dy);
+    if (hot) scr_printf(" (\033[1;4marrows\033[m/\033[1;4mhjkl\033[m)");
+}
+
+// One object's MOVERTAB entry, in the bottom panel next to its sprite/block line (that line
+// carries the x/y tile offset - bytes 0/1 - itself; see the sprite/block listing above). Read-
+// only and the active EDIT_MOVERTAB_OBJECT view show identical wording (draw_movertab_fields) -
+// the only difference is EDIT_MOVERTAB_OBJECT's hotkey letters being underlined, and raw hex
+// entry (state->movertab_raw) replacing just the "raw: XX" tail (byte 2 only) with the
+// byte-being-typed display, decoded fields still shown above it. Kept out of the title row: that
+// row also carries state->status_message, which "Saved MOVERTAB.DAT" overwrites after every
+// edit, making a live view there useless.
+static void draw_movertab_entry(unsigned global, bool active_edit, int *bottom, bool is_sprite) {
+    if (global >= C_ARRAY_LEN(state->movertab) / 3) return;
+    const uint8_t *entry = state->movertab + global * 3;
+    GOTO(0, *bottom); (*bottom)++;
+    scr_printf("  ");
+    bool raw_editing = active_edit && state->movertab_raw;
+    draw_movertab_fields(entry, is_sprite, active_edit && !raw_editing);
+    scr_printf(", ");
+    if (!raw_editing) {
+        char raw[8];
+        snprintf(raw, sizeof raw, "%02x", entry[2]);
+        movertab_field(active_edit, "raw", raw);
+    } else {
+        char hi = "0123456789abcdef"[entry[2] >> 4];
+        char lo = "0123456789abcdef"[entry[2] & 0xf];
+        scr_printf("\033[1;4mr\033[maw: ");
+        if (state->partial_byte) {
+            scr_printf("%x", state->partial_byte & 0xFF);
+            scr_printf("\033[4m%c\033[m", lo);
+        } else {
+            scr_printf("\033[4m%c%c\033[m", hi, lo);
+        }
+    }
+    if (active_edit && !state->movertab_loaded) scr_printf(" (no MOVERTAB.DAT found)");
 }
 
 /* Where redraw() put the out-of-bounds switch list (GUI pins it and makes the
@@ -411,6 +596,11 @@ size_t panel_oob_switch_n = 0;
 
 void redraw() {
 #define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
+    // A long-running hot-reloaded session never re-runs the startup init that first calls
+    // movertab_load() (hot-reload only swaps in new code, not the one-time setup that ran
+    // before this feature existed), so try once here too - the first redraw of any session,
+    // old or new, is guaranteed to hit this.
+    if (!state->movertab_load_attempted) movertab_load();
     panel_oob_row0 = panel_oob_row1 = -1;
     panel_oob_switch_n = 0;
 
@@ -669,7 +859,16 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
 
         GOTO(0,1);
-        scr_printf("\nEnter room number or q to go to main view\n\n");
+        scr_printf("\nEnter room number or q to go to main view\n");
+        if (state->current_state == GOTO_ROOM) {
+            if (state->room_delete_mode) {
+                scr_printf("\033[1;31mCtrl-X: DELETE MODE - next room picked is blanked, not entered\033[m\n");
+            } else {
+                scr_printf("Ctrl-X: delete mode (blank a room instead of entering it)\n");
+            }
+        } else {
+            scr_printf("\n");
+        }
         for (size_t i = 0; i < C_ARRAY_LEN(state->rooms.rooms) / 2; i ++) {
             size_t room_id = i;
             struct DecompressedRoom *room = &state->rooms.rooms[room_id].data;
@@ -906,10 +1105,19 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         }
                     }
                 }
-                if (colored || tile != BLANK_TILE) {
+                bool attr_colored = false;
+                if (!colored && state->debug.tiles && tile != BLANK_TILE) {
+                    // Same grey/blue/violet/cyan legend as Ctrl-D t on the room
+                    // picture (pass/solid/magnet/slip), in the 8-colour ANSI
+                    // palette the hex map itself is drawn in.
+                    static const char *attr_ansi[4] = { "\033[47;30m", "\033[44;37m", "\033[45;37m", "\033[46;30m" };
+                    scr_printf("%s", attr_ansi[tile >> 6]);
+                    attr_colored = true;
+                }
+                if (colored || attr_colored || tile != BLANK_TILE) {
                     GOTO(2 * x, y + 1);
                     scr_printf("%02X", tile);
-                    if (colored) scr_printf("\033[m");
+                    if (colored || attr_colored) scr_printf("\033[m");
                 }
             }
         }
@@ -951,6 +1159,49 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             assert(object->x < WIDTH_TILES && object->y < HEIGHT_TILES);
             GOTO(2 * object->x, object->y + 1);
             scr_printf("\033[4%ld;30m%d%d\033[m", (i % 3) + 1, object->sprite.type, object->sprite.damage);
+        }
+    }
+
+    // Whenever the cursor sits on an object's own definition tile (not only while its MOVERTAB
+    // entry is actively open - Hugh: "show the shadows when you are over the object def, not
+    // just when you are in edit mode... but when you are not over the object [even over where it
+    // really is], then don't show shadow"), mark the tile(s) it's actually drawn at (x/y offset
+    // applied) the same way its definition is marked above (type+damage digits, or the raw tile
+    // hex bytes) but underlined, so the two are visually distinct - "similar to other" markers
+    // on this map, since the plain TUI has no picture to show this any other way. This is drawn
+    // into the same cell buffer the GUI's own hex-map view (F2) shows as text too.
+    if (state->debug.objects && state->current_state != GOTO_OBJECT) {
+        for (size_t i = 0; i < room.num_objects; i++) {
+            struct RoomObject *object = room.objects + i;
+            unsigned global = (unsigned)room.UNKNOWN_c + (unsigned)i;
+            if (object->type == SPRITE && x == object->x && y == object->y &&
+                    global < C_ARRAY_LEN(state->movertab) / 3) {
+                const uint8_t *entry = state->movertab + global * 3;
+                int ox = object->x + movertab_offset_x(entry);
+                int oy = object->y + movertab_offset_y(entry, true);
+                if ((ox != object->x || oy != object->y) &&
+                        ox >= 0 && ox < WIDTH_TILES && oy >= 0 && oy < HEIGHT_TILES) {
+                    GOTO(2 * ox, oy + 1);
+                    scr_printf("\033[4;33;40m%d%d\033[m", object->sprite.type, object->sprite.damage);
+                }
+            } else if (object->type == BLOCK && object->tiles &&
+                    x >= object->x && x < object->x + (int)object->block.width &&
+                    y >= object->y && y < object->y + (int)object->block.height) {
+                int ox, oy;
+                render_block_offset(object, state->movertab, global, &ox, &oy);
+                if (ox != object->x || oy != object->y) {
+                    for (int by = 0; by < (int)object->block.height; by++) {
+                        int ty = oy + by;
+                        if (ty < 0 || ty >= HEIGHT_TILES) continue;
+                        for (int bx = 0; bx < (int)object->block.width; bx++) {
+                            int tx = ox + bx;
+                            if (tx < 0 || tx >= WIDTH_TILES) continue;
+                            GOTO(2 * tx, ty + 1);
+                            scr_printf("\033[4;33;40m%02X\033[m", object->tiles[by * (int)object->block.width + bx]);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1021,10 +1272,12 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
         switch (state->current_state) {
             case EDIT_ROOMDETAILS_NUM:
+            case EDIT_SWITCHDETAILS_XY:
             case EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS:
             case EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS:
             case EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS:
             case EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS:
+            case EDIT_MOVERTAB_OBJECT:
                 break;
 
             case NORMAL:
@@ -1189,87 +1442,17 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
     if (state->debug.unknowns) {
         GOTO(0, bottom); bottom ++;
-        switch (state->current_state) {
-            case EDIT_ROOMDETAILS:
-                scr_printf("UNKNOWN_\033[1;4mb\033[m: ");PRINTF_DATA(room.UNKNOWN_b);
-                scr_printf(", UNKNOWN_\033[1;4mc\033[m: ");PRINTF_DATA(room.UNKNOWN_c);
-                scr_printf(", UNKNOWN_\033[1;4me\033[m: ");PRINTF_DATA(room._num_switches & 0x3);
-                scr_printf(", UNKNOWN_\033[1;4mf\033[m: ");PRINTF_DATA(room.UNKNOWN_f);
-                break;
-
-            case EDIT_ROOMDETAILS_NUM:
-                if (state->room_detail == 'b') {
-                    scr_printf("UNKNOWN_\033[1;4mb\033[m: ");
-                    if (state->partial_byte) {
-                        if (state->debug.hex) {
-                            scr_printf("%x", state->partial_byte & 0xFF);
-                        } else {
-                            scr_printf("%u", state->partial_byte & 0xFF);
-                        }
-                    } else {
-                        scr_printf("\033[4;5m_\033[m");
-                    }
-                    scr_printf("\033[4;5m_\033[m");
-                } else {
-                    scr_printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
-                }
-
-                if (state->room_detail == 'c') {
-                    scr_printf(", UNKNOWN_\033[1;4mc\033[m: ");
-                    if (state->partial_byte) {
-                        if (state->debug.hex) {
-                            scr_printf("%x", state->partial_byte & 0xFF);
-                        } else {
-                            scr_printf("%u", state->partial_byte & 0xFF);
-                        }
-                    } else {
-                        scr_printf("\033[4;5m_\033[m");
-                    }
-                    scr_printf("\033[4;5m_\033[m");
-                } else {
-                    scr_printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
-                }
-
-                if (state->room_detail == 'e') {
-                    scr_printf(", UNKNOWN_\033[1;4me\033[m: ");
-                    if (state->partial_byte) {
-                        if (state->debug.hex) {
-                            scr_printf("%x", state->partial_byte & 0xFF);
-                        } else {
-                            scr_printf("%u", state->partial_byte & 0xFF);
-                        }
-                    } else {
-                        scr_printf("\033[4;5m_\033[m");
-                    }
-                    scr_printf("\033[4;5m_\033[m");
-                } else {
-                    scr_printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
-                }
-
-                if (state->room_detail == 'f') {
-                    scr_printf(", UNKNOWN_\033[1;4mf\033[m: ");
-                    if (state->partial_byte) {
-                        if (state->debug.hex) {
-                            scr_printf("%x", state->partial_byte & 0xFF);
-                        } else {
-                            scr_printf("%u", state->partial_byte & 0xFF);
-                        }
-                    } else {
-                        scr_printf("\033[4;5m_\033[m");
-                    }
-                    scr_printf("\033[4;5m_\033[m");
-                } else {
-                    scr_printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
-                }
-
-                break;
-
-            default:
-                scr_printf("UNKNOWN_b: ");PRINTF_DATA(room.UNKNOWN_b);
-                scr_printf(", UNKNOWN_c: ");PRINTF_DATA(room.UNKNOWN_c);
-                scr_printf(", UNKNOWN_e: ");PRINTF_DATA(room._num_switches & 0x3);
-                scr_printf(", UNKNOWN_f: ");PRINTF_DATA(room.UNKNOWN_f);
-        }
+        // Object base / switch base are not editable here: writeRooms() recomputes them
+        // fresh from the file's actual room/switch layout on every save, so showing them as
+        // plain fields you could type into was misleading (any edit here would just be
+        // overwritten by the next save anyway). UNKNOWN_b isn't shown at all any more: every
+        // original room has it set to 1, and testing (disassembly + play) found no code path
+        // that ever reads it, so there's nothing useful to look at (main.c's `patch` command
+        // still reaches it, for anyone who wants to poke at it further).
+        unsigned switch_base = (unsigned)room.UNKNOWN_f * 4 + (room._num_switches & 0x3);
+        scr_printf("object base (auto): ");PRINTF_DATA(room.UNKNOWN_c);
+        scr_printf("  switch base (auto): ");
+        scr_printf(state->debug.hex ? "%x" : "%u", switch_base);
     }
     if (state->debug.neighbours) {
         char neighbour_name[25] = {0};
@@ -1580,17 +1763,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                         case TOGGLE_BIT:
                         {
-                            struct DecompressedRoom target_room = state->rooms.rooms[chunk->room_idx].data;
-                            char target_name[25] = {0};
-                            assert(C_ARRAY_LEN(target_name) >= C_ARRAY_LEN(target_room.name));
-                            strncpy(target_name, target_room.name, C_ARRAY_LEN(target_room.name));
-                            for (int i = C_ARRAY_LEN(target_name) - 1; i >= 0; i --) {
-                                if (target_name[i] == '\0' || isspace(target_name[i])) {
-                                    target_name[i] = '\0';
-                                } else {
-                                    break;
-                                }
-                            }
+                            char target_name[25];
+                            room_name_trimmed(chunk->room_idx, target_name, sizeof(target_name));
                             if (state->current_chunk == i) {
                                 scr_printf("toggle: (\033[4;1mr\033[moom) %s (switch) ", target_name);
                                 if (state->partial_byte) {
@@ -1617,35 +1791,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             } else {
                                 scr_printf("object: (idx)=%d (test)=%d", chunk->index, chunk->test >> 4);
                             }
-                            scr_printf(" (value)=");
-                            switch (chunk->value & MOVE_LEFT) {
-                                case MOVE_LEFT:
-                                    switch (chunk->value & MOVE_UP) {
-                                        case MOVE_UP: scr_printf("up+left"); break;
-                                        case MOVE_DOWN: scr_printf("down+left"); break;
-                                        case '\0': scr_printf("left"); break;
-                                    }
-                                    break;
-
-                                case MOVE_RIGHT:
-                                    switch (chunk->value & MOVE_UP) {
-                                        case MOVE_UP: scr_printf("up+right"); break;
-                                        case MOVE_DOWN: scr_printf("down+right"); break;
-                                        case '\0': scr_printf("right"); break;
-                                    }
-                                    break;
-
-                                case '\0':
-                                    switch (chunk->value & MOVE_UP) {
-                                        case MOVE_UP: scr_printf("up"); break;
-                                        case MOVE_DOWN: scr_printf("down"); break;
-                                        case '\0': scr_printf("stop"); break;
-                                    }
-                                    break;
-                            }
-
-                            scr_printf(" (value)=");
-                            PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                            scr_printf(" (value)=%s", move_desc(chunk->value));
                             scr_printf(" (raw)=");
                             if (state->current_chunk == i) {
                                 if (state->partial_byte) {
@@ -1682,6 +1828,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 struct SwitchObject *extra = room.switches + sw_i;
                 if (extra->chunks.length < 1) continue;
                 if (extra->chunks.data[0].x != x || extra->chunks.data[0].y != y) continue;
+                if (bottom >= state->screen_dimensions.y - 1) {
+                    GOTO(0, bottom); bottom++;
+                    scr_printf("  ... more switches at this tile not shown");
+                    break;
+                }
                 struct SwitchChunk *pr = extra->chunks.data;
                 bool has_chunk_at_cur = false;
                 for (size_t c = 1; c < extra->chunks.length; c++) {
@@ -1707,7 +1858,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 && chunk_switch_underneath != switcz
                 && (chunk_switch_underneath->chunks.length == 0
                     || chunk_switch_underneath->chunks.data[0].x != x
-                    || chunk_switch_underneath->chunks.data[0].y != y)) {
+                    || chunk_switch_underneath->chunks.data[0].y != y)
+                && bottom < state->screen_dimensions.y - 1) {
             struct SwitchChunk *pr = chunk_switch_underneath->chunks.data;
             GOTO(0, bottom); bottom++;
             scr_printf("switch ");
@@ -1878,37 +2030,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                             case TOGGLE_OBJECT:
                             {
-                                scr_printf("object - (idx)=%d (test)=", chunk->index >> 4);
+                                scr_printf("(idx)=%d (test)=", chunk->index);
                                 PRINTF_DATA(chunk->test);
-                                scr_printf(" (value)=");
-                                switch (chunk->value & MOVE_LEFT) {
-                                    case MOVE_LEFT:
-                                        switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: scr_printf("up+left"); break;
-                                            case MOVE_DOWN: scr_printf("down+left"); break;
-                                            case '\0': scr_printf("left"); break;
-                                        }
-                                        break;
-
-                                    case MOVE_RIGHT:
-                                        switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: scr_printf("up+right"); break;
-                                            case MOVE_DOWN: scr_printf("down+right"); break;
-                                            case '\0': scr_printf("right"); break;
-                                        }
-                                        break;
-
-                                    case '\0':
-                                        switch (chunk->value & MOVE_UP) {
-                                            case MOVE_UP: scr_printf("up"); break;
-                                            case MOVE_DOWN: scr_printf("down"); break;
-                                            case '\0': scr_printf("stop"); break;
-                                        }
-                                        break;
-                                }
-
-                                scr_printf(" (value)=");
-                                PRINTF_DATA(chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                                scr_printf(" (value)=%s", move_desc(chunk->value));
                                 scr_printf(" (raw)=");
                                 PRINTF_DATA(chunk->value);
                             }; break;
@@ -1927,13 +2051,37 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         if (found) panel_oob_row1 = bottom;
     }
 
-    if (state->debug.objects) {
+    if (state->debug.objects || state->current_state == EDIT_MOVERTAB_OBJECT) {
         bool obj_selected = switch_underneath == NULL && chunk_switch_underneath == NULL;
         bool first_hit = true;
         /* Pass 1: sprites first (on top) */
         for (size_t i = 0; i < room.num_objects; i++) {
             struct RoomObject *obj = room.objects + i;
-            if (obj->type != SPRITE || obj->x != x || obj->y != y) continue;
+            if (obj->type != SPRITE) continue;
+            // Its logical (x,y) - the definition - always counts as "on" a sprite, regardless of
+            // how far an x/y offset has since moved it away from there (Hugh: "when i go to
+            // where it is defined in the level... it is as if i were on an empty tile"). The GUI
+            // additionally matches the sprite's actual rendered box (SPRITE_X_PAD widens and
+            // shifts it even with no offset at all, see render.c) - but the plain TUI never
+            // draws that picture at all, so that box is invisible and meaningless there: only
+            // the definition point should work there (Hugh: "the sprite doesn't get drawn in
+            // the tui, so you should only be able to edit via the definition point"). The
+            // Enter-key hit-test in handle_tile_edit (editor_input.c) uses this same pair.
+            bool hit = (int)x == obj->x && (int)y == obj->y;
+            if (!hit && screen_headless) {
+                int dx, dy, w, h; bool fh, fv;
+                render_sprite_box(obj, state->movertab, (unsigned)room.UNKNOWN_c + (unsigned)i, &dx, &dy, &w, &h, &fh, &fv);
+                int px = (int)x * 8, py = (int)y * 8;
+                hit = px < dx + w && px + 8 > dx && py < dy + h && py + 8 > dy;
+            }
+            if (!hit) continue;
+            // The box/offset checks above can now match several sprites/blocks around the
+            // cursor at once (unlike the old exact-tile-only test, which could match at most
+            // one) - stop adding rows once the screen is nearly full rather than assert past its
+            // bottom (a real crash Hugh hit: "editor_draw.c:1859: redraw: Assertion `(bottom) <
+            // state->screen_dimensions.y ... failed"). Two rows of margin: the summary line
+            // below plus draw_movertab_entry's own line.
+            if (bottom >= state->screen_dimensions.y - 2) continue;
             bool is_active = first_hit && obj_selected;
             first_hit = false;
             GOTO(0, bottom); bottom++;
@@ -1967,13 +2115,33 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             PRINTF_DATA(obj->y);
             scr_printf(" (dmg)=");
             PRINTF_DATA(obj->sprite.damage);
+            draw_movertab_offset((unsigned)room.UNKNOWN_c + (unsigned)i, true,
+                                  state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i);
+            draw_movertab_entry((unsigned)room.UNKNOWN_c + (unsigned)i,
+                                 state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i,
+                                 &bottom, true);
         }
         /* Pass 2: blocks underneath */
         for (size_t i = 0; i < room.num_objects; i++) {
             struct RoomObject *obj = room.objects + i;
             if (obj->type != BLOCK) continue;
-            if (x < obj->x || x >= obj->x + (int)obj->block.width) continue;
-            if (y < obj->y || y >= obj->y + (int)obj->block.height) continue;
+            // Its definition rectangle always counts as "on" a block, same reasoning as a
+            // sprite's logical (x,y) - plus, unlike a sprite's rendered box (only meaningful
+            // where there's an actual picture), a block's x/y-offset rectangle is a plain,
+            // well-defined set of tiles regardless of TUI or GUI, so it applies in both (Hugh:
+            // "i would like to be able to edit it when spidey is over its drawn location, and
+            // also its definition byte... i want both").
+            bool in_def = x >= obj->x && x < obj->x + (int)obj->block.width &&
+                          y >= obj->y && y < obj->y + (int)obj->block.height;
+            bool in_off = false;
+            if (!in_def) {
+                int ox, oy;
+                render_block_offset(obj, state->movertab, (unsigned)room.UNKNOWN_c + (unsigned)i, &ox, &oy);
+                in_off = x >= ox && x < ox + (int)obj->block.width &&
+                         y >= oy && y < oy + (int)obj->block.height;
+            }
+            if (!in_def && !in_off) continue;
+            if (bottom >= state->screen_dimensions.y - 2) continue;   // see the same guard in the sprite pass above
             bool is_active = first_hit && obj_selected;
             first_hit = false;
             GOTO(0, bottom); bottom++;
@@ -1989,6 +2157,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             PRINTF_DATA(obj->block.width);
             scr_printf(",");
             PRINTF_DATA(obj->block.height);
+            draw_movertab_offset((unsigned)room.UNKNOWN_c + (unsigned)i, false,
+                                  state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i);
+            draw_movertab_entry((unsigned)room.UNKNOWN_c + (unsigned)i,
+                                 state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i,
+                                 &bottom, false);
         }
     }
 

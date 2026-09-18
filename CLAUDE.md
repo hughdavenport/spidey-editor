@@ -54,7 +54,12 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   ROOMS.SPL.tmp and renames it over ROOMS.SPL only on success. Every editor write goes through
   `editor_save()` (editor_actions.c): on refusal it undoes back to `saved_undo_len` (the undo depth
   at the last successful write) and puts "NOT SAVED: ..." in the status line, so the editor always
-  shows what is on disk. `room_create` un-creates its room on refusal.
+  shows what is on disk. `room_create` un-creates its room on refusal. `writeRooms`'s `failed_room`
+  out-param is `>=0` for a specific room over its own 960-byte limit, `-1` for the whole file over
+  its total limit, or `-2` for a TOGGLE_BIT chunk pointing at a switch that no longer exists (e.g.
+  after pasting a room with fewer switches over one other rooms still toggle into) - not a size
+  problem at all, so it gets its own message via the `dangling_msg` out-param instead of being
+  lumped in with "over its total size limit".
 - BACKS.SPL: the game's limit is unknown, so `render_backs_save` refuses to grow past the shipped
   file's size (`BACKS_FILE_LIMIT` 0x2b93; our compressor packs about twice as tight, so there is headroom) and
   also writes via .tmp + rename. The GUI then undoes background strokes until it fits and shows the

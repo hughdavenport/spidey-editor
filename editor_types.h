@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "room.h"
@@ -23,11 +24,13 @@
 #define HIDE_CURSOR "\x1b[?25l"
 #define SHOW_CURSOR "\x1b[?25h"
 
+// really this is alt buff
 #define SAVE_SCREEN    "\x1b[?47h"
 #define RESTORE_SCREEN "\x1b[?47l"
 
-#define ENABLE_ALT_BUFFER  "\x1b[1049h"
-#define DISABLE_ALT_BUFFER "\x1b[1049l"
+// really this is alt buff with cursor save and clear on exit
+#define ENABLE_ALT_BUFFER  /*"\x1b[?1049h" */
+#define DISABLE_ALT_BUFFER /*"\x1b[?1049l" */
 
 #define RESET_GFX_MODE "\x1b[0m"
 #define CLEAR_SCREEN   "\x1b[0J"
@@ -135,6 +138,7 @@ typedef enum {
     EDIT_ROOMDETAILS_ROOM,
 
     EDIT_SWITCHDETAILS,
+    EDIT_SWITCHDETAILS_XY,
 
     EDIT_SWITCHDETAILS_SELECT_CHUNK,
     EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS,
@@ -142,6 +146,8 @@ typedef enum {
     EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS,
     EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM,
     EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS,
+
+    EDIT_MOVERTAB_OBJECT,
 
     TOGGLE_DISPLAY,
     NUM_STATES
@@ -185,6 +191,11 @@ typedef struct {
     size_t current_level;
     v2 screen_dimensions;
     struct termios original_termios;
+    /* mtime ROOMS.SPL had right after our own last successful write, so the
+     * "did something else change ROOMS.SPL on disk" poll in editor.c doesn't
+     * mistake our own save for an external edit and free+reread state out
+     * from under whatever the UI is mid-way through doing with it. */
+    struct timespec last_own_write_mtim;
     RoomFile rooms;
     bool resized;
     bool help;
@@ -201,12 +212,23 @@ typedef struct {
     char room_name[24];
     size_t roomname_length;
     size_t roomname_cursor;
+    bool room_delete_mode;   /* GOTO_ROOM: Ctrl-D toggles; next room picked is blanked, not entered */
 
     size_t current_switch;
     size_t current_chunk;
     bool switch_on;
+    size_t current_object;   /* EDIT_MOVERTAB_OBJECT: which of the current room's objects */
+    bool movertab_raw;       /* EDIT_MOVERTAB_OBJECT: raw hex entry (byte 2 only) instead of the attribute picker */
+    char movertab_block_focus;   /* EDIT_MOVERTAB_OBJECT, block only: 0 (hjkl/arrows adjust the x/y offset), or 's'/'d'/'w' (hjkl/arrows and |/- adjust speed/direction/walls instead) */
 
     Clipboard clipboard;
+
+    /* MOVERTAB.DAT: 256 entries x 3 bytes, indexed by global object number (see
+     * recomputeBases). Loaded once (movertab_load) and edited object-by-object
+     * (EDIT_MOVERTAB_OBJECT, entered with Ctrl-M over an object). */
+    uint8_t movertab[256 * 3];
+    bool movertab_loaded;
+    bool movertab_load_attempted;   /* redraw() tries movertab_load() once, not every frame */
 
     ARRAY(UndoEntry) undo_stack;
     ARRAY(UndoEntry) redo_stack;
@@ -277,7 +299,12 @@ extern size_t panel_oob_switch_n;
 bool transfer_item_to_room(size_t room_idx);
 bool room_create(size_t room_idx);   // make an absent room exist, entirely blank (tiles and settings all 0); false if it already does
 bool room_prune_blank(size_t room_idx);   // remove a room again if it is still entirely blank (not the current one); true if it was
-bool editor_save(void);              // writeRooms(); a refused write (game limits) undoes the change and says so in the status line
+void movertab_load(void);            // read ./MOVERTAB.DAT, else Spider/MOVERTAB.DAT(.original), else zero; sets movertab_loaded
+bool movertab_save(void);            // write state->movertab to ./MOVERTAB.DAT
+int movertab_offset_x(const uint8_t *entry);                     // decode a MOVERTAB entry's byte 1 (x offset, whole tiles)
+int movertab_offset_y(const uint8_t *entry, bool is_sprite);     // decode a MOVERTAB entry's byte 0 (y offset, whole tiles) - sprite/block encodings differ
+void movertab_clamp_offset(uint8_t *entry, bool is_sprite, int x, int y);   // pull the x/y offset back in if it would draw outside the room at this tile position
+bool editor_save(void);              // writeRooms(); a refused write (room/file size limits) undoes the change and names which in the status line
 void clipboard_clear(void);          // free whatever the clipboard holds; type becomes CLIP_NONE
 void room_snapshot_copy(struct DecompressedRoom *dst, const struct DecompressedRoom *src);   // deep copy (objects, switches)
 void room_snapshot_free(struct DecompressedRoom *snap);

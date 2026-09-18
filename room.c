@@ -82,14 +82,234 @@ bool readHeader(Header *head, FILE *fp) {
     return true;
 }
 
-// Describe a TOGGLE_OBJECT value's movement direction, matching the editor's
-// decode (MOVE_* masks overlap, so switch on each axis). See editor_draw.c.
-static const char *move_desc(uint8_t value) {
-    switch (value & MOVE_LEFT) {
-        case MOVE_LEFT:  switch (value & MOVE_UP) { case MOVE_UP: return "up+left"; case MOVE_DOWN: return "down+left"; default: return "left"; }
-        case MOVE_RIGHT: switch (value & MOVE_UP) { case MOVE_UP: return "up+right"; case MOVE_DOWN: return "down+right"; default: return "right"; }
-        default:         switch (value & MOVE_UP) { case MOVE_UP: return "up"; case MOVE_DOWN: return "down"; default: return "stop"; }
+// MOVERTAB.DAT entry bytes 0 and 1 (previously "unknown, mostly zero" - long undocumented
+// because the shipped table has almost every entry at 0/0). Hugh found live in DOSBox
+// (2026-09-18) that they are position offsets in whole TILES, not pixels (confirmed once this
+// editor's own render preview moved a sprite noticeably less far than the real game did for the
+// same value), both mostly ordinary 8-bit two's complement, but each with its own glitchy patch
+// near the top of the positive range - and byte 0 differs between sprites and blocks:
+//   - byte 1 = X offset, ordinary 8-bit two's complement: 0xff/0xfe = -1/-2, and small positive
+//     values work normally too (0x1a = +26, confirmed) - so unlike byte 2's bit 0x01, this isn't
+//     "always glitchy", just bad in one spot. That spot is 0x7e AND 0x7f (which would be
+//     +126/+127) - BOTH glitchy, on sprites and blocks alike ("for objects it seems the same").
+//     0x00-0x7d and 0x80-0xfd beyond the tested points are inferred, not directly confirmed.
+//   - byte 0 = Y offset. For a SPRITE it reads as a SIGNED 7-BIT value with bit 0x80 ignored
+//     entirely: 0x7f and 0xff both = -1, 0x7e and 0xfe both = -2 (confirmed identical either
+//     way), 0x00/0x01/0x02 = +0/+1/+2. For a BLOCK/object, 0x7f does NOT act as -1 the way it
+//     does for a sprite - only 0xff does - so a block's byte 0 is ordinary two's complement like
+//     byte 1, not the sprite's bit-0x80-agnostic 7-bit scheme. Hugh: "just limit those two bytes
+//     to where it makes sense" rather than chase the exact glitch boundary further by hand.
+// Not yet exposed by the editor (display or edit) - when it is, clamp away from the known-bad
+// 0x7e/0x7f zone per byte/object-type above rather than exposing the full 0x00-0xff range.
+
+// Describe a TOGGLE_OBJECT command byte. Verified in DOSBox-X 2026-09-15 (see
+// levelset2/gen_levelset2.py and project memory): 0x00 stop; 0x10/0x20/0x30 down
+// slow/medium/fast; 0x50/0x60 up slow/medium (0x70 up fast is the same pattern but
+// untested); 0x01/0x02 right slow/normal (0x03 right fast untested); 0x05/0x06 left
+// slow/normal (0x07 left fast untested); 0x09-0x0f kills the object's sprite
+// instantly (room.h's older static-analysis notes; 0x0b is the value this codebase
+// actually uses, in the boss room). Anything else is shown as "?" by the callers,
+// which all print the raw hex value alongside this.
+const char *move_desc(uint8_t value) {
+    if (value == 0x00) return "stop";
+    if (value >= 0x09 && value <= 0x0f) return "kill";
+    if ((value & 0x0f) && !(value & 0x70)) {          // horizontal only
+        bool left = (value & 0x04) != 0;
+        switch (value & 0x03) {
+            case 0x01: return left ? "left (slow)" : "right (slow)";
+            case 0x02: return left ? "left" : "right";
+            case 0x03: return left ? "left (fast?)" : "right (fast?)";
+        }
     }
+    if ((value & 0x70) && !(value & 0x0f)) {          // vertical only
+        bool up = (value & 0x40) != 0;
+        switch (value & 0x30) {
+            case 0x10: return up ? "up (slow)" : "down (slow)";
+            case 0x20: return up ? "up" : "down";
+            case 0x30: return up ? "up (fast?)" : "down (fast?)";
+        }
+    }
+    return "?";
+}
+
+// Every value seen in the original game's MOVERTAB.DAT byte 2 (Spider-claude/COMMANDS.md
+// "Session 11", static analysis of the shipped table). Byte 2's meaning depends on whether
+// the object is a sprite or a block - confirmed by play/DOSBox testing (see
+// [[project-room-index-bases]]):
+//   - block, 0x00: static (doesn't move).
+//   - sprite, 0x00: DEAD ON ROOM ENTRY, not merely motionless - this was the actual cause of
+//     the "Mysterio's End? kills the player instantly" bug this editor's own test room hit
+//     (2026-09-18): the shark's entry had been left at a stale 0x00 (correct for the *block*
+//     objects elsewhere in that room, wrong for a sprite), and something about a dead sprite
+//     record at room load corrupted state badly enough to hang/crash rather than just show no
+//     shark. A relocated Lift car separately inheriting an R2D2's entry and falling by itself
+//     is the same lesson from the other direction: this byte is genuinely load-bearing, not a
+//     cosmetic default.
+//   - sprite, 0xb8: patrolling (moves back and forth) - confirmed.
+//   - block, 0x60: starts the room already moving up, matching the direction/speed bits
+//     move_desc() decodes for TOGGLE_OBJECT's value byte - confirmed. 0x60 isn't in
+//     MOVERTAB_KNOWN_BEHAVIORS below: it never appears in the original 768-byte table, so
+//     this is one confirmed data point for a wider hypothesis (byte 2 reuses move_desc()'s
+//     whole scheme for a block's initial movement), not a value anyone needs to pick from a
+//     list of "seen" ones.
+//   - sprite, 0x01-0x7f: GLITCHY, confirmed value-by-value across the entire range (2026-09-18)
+//     - NOT the directions (or kill, for 0x09-0x0f) move_desc() would read there for a block.
+//     Blocks and sprites are simply two different systems sharing one byte: the
+//     move_desc()-as-initial-movement hypothesis is block-only and never transfers to a
+//     sprite.
+// NOTE on every "x + 1" / "x - 1" / "y - 1" below: Hugh checked the actual sprite graphics and
+// believes these are NOT a real engine position shift - e.g. blue_man's frame 0x26 only draws
+// on the right half of its cell, so drawing it plain ("facing right") looks like "x + 1" next
+// to a centred sprite, and mirroring the same frame for "facing left" looks like "x - 1", with
+// no coordinate actually changing. Kept as "x +/- 1" phrasing below because that's what you'll
+// see if this editor's own renderer draws every frame un-mirrored at a fixed anchor (which it
+// currently does) - the real fix is for the renderer to flip the frame per these facing/
+// upside-down bits and stop shifting position at all, not to bake a fake offset into objects.
+//   - sprite, 0x80: stationary, alive, FACING RIGHT (distinct from 0x00's dead-on-entry) -
+//     confirmed. Its displayed/collision x is the object's stored x + 1 - byte 2 doesn't just
+//     pick a behaviour, it can shift where the sprite actually sits.
+//   - sprite, 0x82 (0x80 | 0x02): stationary, alive, FACING LEFT - confirmed, x is the
+//     object's stored x - 1. So bit 0x02 is a facing flag (0 = right/+1, 1 = left/-1) for a
+//     stationary sprite.
+//   - sprite, 0x84 (0x80 | 0x04): stationary, alive, UPSIDE DOWN, facing right - confirmed, x
+//     is the object's stored x + 1 (the same offset as plain 0x80), and maybe also y - 1. So
+//     bit 0x04 is an orientation flag, and being upside down might shift y as well as facing
+//     shifts x.
+//   - sprite, 0x86 (0x84 | 0x02, i.e. 0x80 | 0x04 | 0x02): stationary, alive, UPSIDE DOWN,
+//     FACING LEFT - confirmed, x is the object's stored x - 1, also y - 1 (confirmed more
+//     solidly here and at 0x90/0x94/0x96 than at plain 0x84/0x94, where it's still "maybe").
+//     Bits 0x02 (facing) and 0x04 (upside down) combine independently exactly as the
+//     0x80/0x82/0x84 pattern predicted.
+//   - sprite, 0x87 (0x86 | 0x01): GLITCHY - confirmed; bit 0x01 keeps breaking every base
+//     value it's tried against (0x80/0x82/0x84/0x86 all glitch when | 0x01).
+//   - sprite, 0x88 (0x80 | 0x08): MOVING LEFT, stopping at the first obstacle rather than
+//     turning around - confirmed, starting from the object's stored x + 1. This is in
+//     MOVERTAB_KNOWN_BEHAVIORS below (the original game really does use it) and reveals bit
+//     0x08 as a distinct "moving" flag on top of the stationary 0x80 base. 0xb8 (the other
+//     confirmed working value, patrol) is 0x88 | 0x30 - i.e. patrol = moving (0x08) plus two
+//     more bits (0x10, 0x20) that turn "stop at obstacle" into "turn around and keep going".
+//   - sprite, 0x89 (0x88 | 0x01): GLITCHY - confirmed, bit 0x01 strikes again.
+//   - sprite, 0x8a (0x88 | 0x02): MOVING LEFT, stops at first obstacle, same as 0x88 - but
+//     starting from the object's stored x - 1 instead of x + 1. So bit 0x02 here does NOT flip
+//     direction the way it flipped facing for the stationary case (0x80 -> 0x82): both 0x88
+//     and 0x8a move left, only the starting offset changes. Direction for this "moving, stop
+//     at obstacle" family may be fixed at left, or a different bit (untested) controls it.
+//   - sprite, 0x8b (0x8a | 0x01): GLITCHY - confirmed, bit 0x01 again.
+//   - sprite, 0x8c (0x80 | 0x08 | 0x04): behaves STATIONARY despite the moving bit (0x08)
+//     being set - upside down (0x04), facing right, x + 1, same as 0x84 - confirmed (Hugh:
+//     "you can't move upside down", so the engine presumably can't animate an upside-down
+//     sprite walking and it just sits there instead; the guess, untested, is that it would
+//     move-and-stop-at-obstacle the way 0x88 does if upside-down movement existed at all).
+//   - sprite, 0x8d (0x8c | 0x01): GLITCHY - confirmed, bit 0x01 again.
+//   - sprite, 0x8e (0x8c | 0x02): same situation as 0x8c - stationary despite the moving bit,
+//     upside down, facing left, x - 1 - confirmed. 0x8e is in MOVERTAB_KNOWN_BEHAVIORS below
+//     (the original game uses it, presumably for a hanging enemy facing left).
+//   - sprite, 0x8f (0x8e | 0x01): GLITCHY - confirmed, bit 0x01 again (every 0x88-0x8f | 0x01
+//     combination glitches; every 0x88-0x8e value without it works).
+//   - sprite, 0x90 (0x80 | 0x10): stationary, facing right, x + 1 - confirmed, and identical
+//     to plain 0x80. So bit 0x10 alone (without the moving bit 0x08) does nothing observable.
+//     0x90 is in MOVERTAB_KNOWN_BEHAVIORS below. Combined with 0xb8 = 0x88 | 0x10 | 0x20
+//     (patrol), the working theory is 0x10/0x20 are movement-style modifiers that only matter
+//     when bit 0x08 (moving) is set - patrol turns "stop at obstacle" into "turn around",
+//     while on a stationary base they're inert.
+//   - sprite, 0x81/0x83/0x85 (0x80, 0x82, 0x84 each | 0x01): all three GLITCHY - confirmed.
+//     Bit 0x01 breaks every base value it's tried against so far, regardless of the other
+//     flag bits, killing the simpler "bit 0x80 makes it real" hypothesis (having the high bit
+//     set is not sufficient by itself). The 0x80+ range needs the same value-by-value
+//     confirmation 0x00-0x7f got, not an extrapolated threshold - but bit 0x01 specifically
+//     looks like a bad/unimplemented flag on every combination tried so far.
+//   - sprite, 0x92/0x94/0x96: same as 0x82/0x84/0x86 respectively (bit 0x10 still inert without
+//     the moving bit) - confirmed, including the upside-down y - 1 offset at 0x94/0x96.
+//   - sprite, 0x98 (0x80 | 0x10 | 0x08): PATROLLING, starting facing right from x + 1 -
+//     confirmed, same behaviour as 0xb8. So bit 0x20 (present in 0xb8 but not 0x98) isn't
+//     needed for patrol once bit 0x10 is set alongside the moving bit - 0x10 alone is what
+//     turns "stop at obstacle" (0x88) into "turn around" (patrol); 0x20's role is still open.
+//
+// room.h has an older, pre-editor comment block ("when sprite (midnight obj 1 test 2)")
+// covering the *TOGGLE_OBJECT switch value byte* sent to a live sprite - a different
+// mechanism (a runtime command) that happens to share this same byte's bit layout, tested by
+// setting a switch's value on an already-patrolling (MOVERTAB 0xb8) sprite in After Midnight.
+// Its "b8 no action" / "98 no action" entries reconciled: they're not inert values, they're
+// exactly what you'd see commanding an already-patrolling sprite to patrol again - consistent
+// with, not contradicting, 0xb8/0x98 both meaning "patrol" here. Its "88/8f freeze on next
+// wall" and "80/90/97 freeze in place" independently corroborate this file's 0x88 (stop at
+// obstacle) and 0x80/0x90 (stationary) findings. Its "09-0f kills" and "d8/e8 moves right"
+// entries are for values this file hasn't reached yet in the 0x01-0x7f/0xa0+ ranges and are
+// worth checking against once testing gets there.
+// The rest of MOVERTAB_KNOWN_BEHAVIORS is listed because those are real, seen values in the
+// shipped table - not because their exact meaning is confirmed.
+const uint8_t MOVERTAB_KNOWN_BEHAVIORS[] = {
+    0x00, 0xb8, 0xba, 0xb0, 0x9a, 0x88, 0xd0, 0xe0, 0x90, 0xf8, 0x98, 0xa8, 0x10, 0xf0, 0x0a, 0x8e, 0x40,
+};
+const size_t MOVERTAB_KNOWN_BEHAVIORS_LEN = C_ARRAY_LEN(MOVERTAB_KNOWN_BEHAVIORS);
+
+const char *movertab_behavior_desc(uint8_t value, bool is_sprite) {
+    if (value == 0x00) return is_sprite ? "DEAD ON ROOM ENTRY, not just idle (verified)" : "static block (verified)";
+    if (is_sprite) {
+        if (value == 0x80) return "stationary, alive, facing right (verified) - actual x is object's x + 1";
+        if (value == 0x81) return "GLITCHY (verified) - bit 0x01 breaks it; 0x80 alone works";
+        if (value == 0x82) return "stationary, alive, facing left (verified) - actual x is object's x - 1";
+        if (value == 0x83) return "GLITCHY (verified) - bit 0x01 breaks it; 0x82 alone works";
+        if (value == 0x84) return "stationary, alive, upside down, facing right (verified) - actual x is object's x + 1, maybe also y - 1";
+        if (value == 0x85) return "GLITCHY (verified) - bit 0x01 breaks it; 0x84 alone works";
+        if (value == 0x86) return "stationary, alive, upside down, facing left (verified) - actual x is object's x - 1, also y - 1";
+        if (value == 0x87) return "GLITCHY (verified) - bit 0x01 breaks it; 0x86 alone works";
+        if (value == 0x88) return "moving left, stops at first obstacle (verified) - starts from object's x + 1";
+        if (value == 0x89) return "GLITCHY (verified) - bit 0x01 breaks it; 0x88 alone works";
+        if (value == 0x8a) return "moving left, stops at first obstacle (verified) - starts from object's x - 1";
+        if (value == 0x8b) return "GLITCHY (verified) - bit 0x01 breaks it; 0x8a alone works";
+        if (value == 0x8c) return "stationary (can't move upside down), upside down, facing right (verified) - actual x is object's x + 1";
+        if (value == 0x8d) return "GLITCHY (verified) - bit 0x01 breaks it; 0x8c alone works";
+        if (value == 0x8e) return "stationary (can't move upside down), upside down, facing left (verified) - actual x is object's x - 1";
+        if (value == 0x8f) return "GLITCHY (verified) - bit 0x01 breaks it; 0x8e alone works";
+        if (value == 0x90) return "stationary, alive, facing right (verified) - actual x is object's x + 1; same as plain 0x80, bit 0x10 alone does nothing";
+        if (value == 0x91) return "GLITCHY (verified) - bit 0x01 breaks it; 0x90 alone works";
+        if (value == 0x92) return "stationary, alive, facing left (verified) - actual x is object's x - 1; same as plain 0x82";
+        if (value == 0x94) return "stationary, alive, upside down, facing right (verified) - actual x is object's x + 1, maybe also y - 1; same as plain 0x84";
+        if (value == 0x96) return "stationary, alive, upside down, facing left (verified) - actual x is object's x - 1, also y - 1; same as plain 0x86";
+        if (value == 0x98) return "patrolling, starts facing right, x + 1 (verified) - same as 0xb8; bit 0x20 isn't needed once bit 0x10 is set";
+        if (value == 0x99) return "GLITCHY (verified) - bit 0x01 breaks it; 0x98 alone works";
+        if (value == 0x9a) return "patrolling, starts facing left, x - 1 (verified) - same as 0xba";
+        if (value == 0x9b) return "GLITCHY (verified) - bit 0x01 breaks it; 0x9a alone works";
+        if (value == 0x9c) return "stationary, alive, upside down, facing right (verified) - actual x is object's x + 1; same as 0x8c";
+        if (value == 0x9d) return "GLITCHY (verified) - bit 0x01 breaks it; 0x9c alone works";
+        if (value == 0x9e) return "stationary, alive, upside down, facing left (verified) - actual x is object's x - 1; same as 0x8e";
+        if (value == 0x9f) return "GLITCHY (verified) - bit 0x01 breaks it; 0x9e alone works";
+        if (value == 0xb0) return "stationary, alive, facing right (verified) - actual x is object's x + 1; same as 0x80/0x90";
+        if (value == 0xb8) return "patrolling, starts facing right, x + 1 (verified) - same as 0x98";
+        if (value == 0xba) return "patrolling, starts facing left, x - 1 (verified) - same as 0x9a";
+        // The move_desc() fallback below is confirmed for BLOCKS only (0x60 = up). Applying
+        // the same scheme to a sprite's byte 2 was a reasonable-looking guess that turned out
+        // wrong: the whole 0x01-0x7f range (which move_desc() would read as directions/kill
+        // for a block) is GLITCHY on a sprite instead (verified 2026-09-18, Hugh) - so for a
+        // sprite, anything past the confirmed values (dead / stationary / patrol) is just
+        // unknown, not a guessed direction.
+        if (value >= 0x01 && value <= 0x7f) return "GLITCHY (verified) - not the move_desc() direction it would be for a block";
+        for (size_t i = 0; i < MOVERTAB_KNOWN_BEHAVIORS_LEN; i++) {
+            if (MOVERTAB_KNOWN_BEHAVIORS[i] == value) return "seen in the original game, exact meaning unconfirmed";
+        }
+        return "not seen in the original game - unverified";
+    }
+    if (value == 0x60) return "block starts moving up (verified)";
+    const char *move = move_desc(value);
+    if (strcmp(move, "?") != 0) {
+        static char buf[64];
+        snprintf(buf, sizeof buf, "block starts moving %s (untested, matches the 0x60 pattern)", move);
+        return buf;
+    }
+    for (size_t i = 0; i < MOVERTAB_KNOWN_BEHAVIORS_LEN; i++) {
+        if (MOVERTAB_KNOWN_BEHAVIORS[i] == value) return "seen in the original game, exact meaning unconfirmed";
+    }
+    return "not seen in the original game - unverified";
+}
+
+// Cycle byte 2 to the next/previous entry in MOVERTAB_KNOWN_BEHAVIORS (dir > 0 forward, < 0
+// back), wrapping around; starts from the nearest known entry if the current value isn't one.
+uint8_t movertab_behavior_cycle(uint8_t current, int dir) {
+    int n = (int)MOVERTAB_KNOWN_BEHAVIORS_LEN, i = -1;
+    for (int j = 0; j < n; j++) if (MOVERTAB_KNOWN_BEHAVIORS[j] == current) { i = j; break; }
+    i = i < 0 ? (dir > 0 ? 0 : n - 1) : (i + dir + n) % n;
+    return MOVERTAB_KNOWN_BEHAVIORS[i];
 }
 
 void dumpRoom(Room *room, RoomFile *file, bool color) {
@@ -313,10 +533,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     }
 
                     case TOGGLE_OBJECT:
-                        printf("object: idx=%d value=0x%02x test=%d (move=%s, value_without_direction=0x%02x)",
+                        printf("object: idx=%d value=0x%02x test=%d (%s)",
                                 chunk->index, chunk->value, chunk->test >> 4,
-                                move_desc(chunk->value),
-                                chunk->value & ~(MOVE_UP | MOVE_DOWN | MOVE_LEFT | MOVE_RIGHT));
+                                move_desc(chunk->value));
                         break;
 
                     default:
@@ -898,7 +1117,7 @@ bool writeRoom(Room *room, FILE *fp) {
     return true;
 }
 
-bool writeFile(RoomFile *file, FILE *fp) {
+bool writeFile(RoomFile *file, FILE *fp, int *failed_room) {
     // structure:
     //   128 byte header, 2 byte indices to where that room is, ascending
     //   room marker 0x8f
@@ -911,12 +1130,18 @@ bool writeFile(RoomFile *file, FILE *fp) {
     if (fseek(fp, offset, SEEK_SET) == -1) return false;
 
     // Any room that will not fit fails the whole write: the caller must not
-    // end up with a file missing rooms.
+    // end up with a file missing rooms. failed_room (if given) says why: the
+    // index of the one room whose own compressed size overflowed, or -1 when
+    // it was the whole file's cumulative size that went over instead.
     for (size_t i = 0; i < C_ARRAY_LEN(file->rooms); i ++) {
         head.definitions[i] = htons(offset);
         if (!file->rooms[i].valid) continue;
-        if (!writeRoom(&file->rooms[i], fp)) return false;
+        if (!writeRoom(&file->rooms[i], fp)) {
+            if (failed_room) *failed_room = (int)i;
+            return false;
+        }
         if (ftell(fp) > MAX_ROOM_FILE_SIZE) {
+            if (failed_room) *failed_room = -1;
             fprintf(stderr, "%s:%d: Can't write room %ld @ 0x%2lx within the 0x%x byte limit. size now %lx\n",
                     __FILE__, __LINE__, i, offset, MAX_ROOM_FILE_SIZE, ftell(fp));
             return false;
@@ -1395,7 +1620,15 @@ bool readRooms(RoomFile *file) {
     return ret;
 }
 
-bool writeRooms(RoomFile *file) {
+bool writeRooms(RoomFile *file, int *failed_room, char *dangling_msg, size_t dangling_msg_size) {
+    if (failed_room) *failed_room = -1;
+    // Every room's object/switch index base is a cumulative count over lower-numbered
+    // rooms (recomputeBases' own comment), so it only ever depends on the file's current
+    // layout, never on history: recompute it on every save rather than trusting whatever
+    // a room happened to arrive with (e.g. from being built by cloning another room, or
+    // from switches/objects added one at a time in the interactive editor, which - unlike
+    // swap/import - never touched these fields on its own).
+    recomputeBases(file);
     for (size_t idx = 0; idx < C_ARRAY_LEN(file->rooms); idx ++) {
         Room *r = file->rooms + idx;
         if (!r->valid) continue;
@@ -1430,6 +1663,12 @@ bool writeRooms(RoomFile *file) {
                     goto next;
                 }
                 fprintf(stderr, "Could not find switch for room %lu switch %lu chunk %lu pointing to room %u switch %u\n", idx, sw, c, chunk->room_idx, chunk->switch_idx);
+                if (failed_room) *failed_room = -2;   // distinct from -1 (whole file over its total limit): not a size problem at all
+                if (dangling_msg) {
+                    snprintf(dangling_msg, dangling_msg_size,
+                             "room %02zx switch %zu toggles a switch that no longer exists (room %02x switch %u)",
+                             idx, sw, chunk->room_idx, chunk->switch_idx);
+                }
                 return false;
 next:
                 {}
@@ -1445,7 +1684,7 @@ next:
         fprintf(stderr, "Could not open %s for writing.\n", tmp);
         return false;
     }
-    bool ret = writeFile(file, fp);
+    bool ret = writeFile(file, fp, failed_room);
     if (fclose(fp) != 0) ret = false;
     if (!ret) { remove(tmp); return false; }
     if (rename(tmp, ROOMS_FILE) != 0) {

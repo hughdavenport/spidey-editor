@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "editor_types.h"
+#include "render.h"
 
 static bool quit_requested = false;
 static bool paint_pending = false;
@@ -77,6 +78,8 @@ static game_state *state_new(RoomFile *host) {
     s->cursors[1].y = HEIGHT_TILES - 2;
     s->help = false;                        // Ctrl-? shows it; it would hide the panels' space
     s->debug.hex = true;
+    s->debug.tiles = true;
+    movertab_load();
     return s;
 }
 
@@ -181,6 +184,11 @@ const GCell *ged_cells(int *stride) {
     return (const GCell *)state->screen_prev;   // the frame redraw() just flushed
 }
 
+// For render_set_movertab, so the room picture mirrors a sprite per its facing/upside-down
+// bits (movertab_behavior_desc in room.c). Loaded lazily by redraw() itself, same as the
+// object-panel display, so this is never stale/unloaded once any frame has drawn.
+const uint8_t *ged_movertab(void) { return state->movertab; }
+
 int ged_room(void) { return (int)state->current_level; }
 void ged_cursor(int *x, int *y) {
     *x = state->cursors[state->current_level].x;
@@ -232,6 +240,22 @@ int ged_item_at(int tx, int ty, int *idx) {
         if (hit) { *idx = (int)i; return 2; }
     }
     return 0;
+}
+
+// A sprite's x/y MOVERTAB offset can draw it well clear of its logical tile (px, py: room pixels,
+// 0..ROOM_PX_W/H) - this is what lets a click there still select it (ged_goto_object), same as a
+// click on its logical tile already does via ged_item_at. Checked after ged_item_at's plain tile
+// hit, not instead of it: a sprite drawn with no offset is still found by that faster path.
+int ged_sprite_hit(int px, int py) {
+    struct DecompressedRoom *room = cur_room();
+    for (size_t i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        if (o->type != SPRITE) continue;
+        int dx, dy, w, h; bool fh, fv;
+        if (!render_sprite_box(o, state->movertab, (unsigned)room->UNKNOWN_c + (unsigned)i, &dx, &dy, &w, &h, &fh, &fv)) continue;
+        if (px >= dx && px < dx + w && py >= dy && py < dy + h) return (int)i;
+    }
+    return -1;
 }
 
 bool ged_map_click(int room, bool right) {
@@ -324,6 +348,20 @@ void ged_goto_object(int idx) {
     editor_cancel_to_plain();
     editor_handle_key((Key){ .code = KEY_CHAR, .ch = 'o', .mod = MOD_NONE });
     editor_handle_key((Key){ .code = KEY_CHAR, .ch = "0123456789abcdef"[idx], .mod = MOD_NONE });
+}
+// Open object `idx`'s MOVERTAB editor without moving the cursor there first (unlike
+// ged_goto_object) - for the click-on-a-sprite's-rendered-position hit test in gui.c, where
+// Hugh didn't want a click warping the cursor away to the object's logical tile: "that also
+// warps which i wouldn't want". The cursor is left wherever the click itself already put it.
+void ged_edit_movertab(int idx) {
+    struct DecompressedRoom *room = cur_room();
+    if (idx < 0 || (size_t)idx >= room->num_objects || !plain_state()) return;
+    if (!state->movertab_loaded) movertab_load();
+    state->previous_state = state->current_state;
+    state->current_state = EDIT_MOVERTAB_OBJECT;
+    state->current_object = (size_t)idx;
+    state->movertab_raw = false;
+    state->movertab_block_focus = 0;
 }
 void ged_cancel(void) { editor_cancel_to_plain(); }
 void ged_left_room(int prev) { if (prev >= 0 && prev < 64) room_prune_blank((size_t)prev); }
@@ -447,7 +485,14 @@ void ged_block_set_tile(int idx, int bx, int by, uint8_t tile) {
 
 void ged_block_resize(int dx, int dy, bool grow) {
     if (!plain_state()) return;
+    /* stretch()/shrink() only touch a block OBJECT when state->debug.objects is set (it
+     * gates the same code path the 'o' debug overlay uses) - the GUI's block panel shows
+     * regardless of that flag (ged_block_at_cursor doesn't check it), so w+/w-/h+/h- did
+     * nothing whenever the overlay happened to be off. We already know a block is here. */
+    bool had_objects = state->debug.objects;
+    state->debug.objects = true;
     if (grow) stretch(dx, dy); else shrink(dx, dy);
+    state->debug.objects = had_objects;
 }
 
 void ged_paint_begin(void) { push_undo((uint8_t)state->current_level, false); }

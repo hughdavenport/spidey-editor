@@ -46,7 +46,13 @@ typedef struct {
 // Text-screen geometry the editor lays itself out on. The room's hex map is
 // cells (0..63, 1..22); everything else is status panels and help.
 #define GED_COLS 132
-#define GED_ROWS 50
+// Tall enough that the panel (scrollable) and the out-of-bounds switch list
+// (its own scroll, gui.c) always have somewhere to put every line the editor
+// draws - a room can have up to 15 switches, each with up to 16 chunks, and
+// several of those switches off-grid at once. 400 rows * 132 cols is well
+// under game_state's screen_curr/screen_prev cap (SCREEN_MAX_HEIGHT 512 *
+// SCREEN_MAX_WIDTH 512), so there is plenty of headroom either way.
+#define GED_ROWS 400
 #define GED_MAP_X 0
 #define GED_MAP_Y 1
 
@@ -64,6 +70,7 @@ void  ged_new_input_batch(void);   // clears the status line (per keypress, as t
 
 void  ged_redraw(void);            // run the editor's redraw into the cell buffer
 const GCell *ged_cells(int *stride);
+const uint8_t *ged_movertab(void); // state->movertab, for render_set_movertab
 
 // Queries for the picture layer.
 int   ged_room(void);
@@ -101,11 +108,13 @@ void  ged_link_block(int x, int y, int w, int h);          // TOGGLE_BLOCK cover
 void  ged_link_object(int object_idx);                     // TOGGLE_OBJECT
 void  ged_link_switch(int switch_idx);                     // TOGGLE_BIT to a switch in this room
 int   ged_item_at(int tx, int ty, int *idx);               // 1 switch preamble, 2 object, else 0
+int   ged_sprite_hit(int px, int py);                      // room-pixel (0..ROOM_PX_W/H) hit test against a sprite's rendered box (its MOVERTAB x/y offset may put this well outside its logical tile) - object index, or -1
 // Open switch `sw` of the current room for editing and select its chunk
 // `chunk` (0 = the switch itself), as s<id>, Ctrl-S, c<n> would.
 void  ged_select_chunk(int sw, int chunk);
 int   ged_current_chunk(void);     // the chunk selected for editing (0 = none / the switch itself)
 void  ged_goto_object(int idx);    // leave editing and put the cursor on object idx (as o<n> does)
+void  ged_edit_movertab(int idx);  // open object idx's MOVERTAB editor without moving the cursor there (unlike ged_goto_object)
 void  ged_cancel(void);            // leave any switch / chunk / room editing mode (Escape until plain)
 void  ged_left_room(int prev);     // the GUI moved from room `prev`: a still-blank room is removed again
 

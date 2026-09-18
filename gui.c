@@ -47,6 +47,9 @@ enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_TOOLS, FOCUS
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
 };
+// RGB for each attribute class (Ctrl-D t's room tint, and the legend under
+// the pass/solid/magnet/slip buttons); each use picks its own alpha.
+static const Color ATTR_COLOUR[4] = { {200, 200, 200, 255}, {0, 120, 255, 255}, {200, 60, 255, 255}, {0, 230, 230, 255} };
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
@@ -111,6 +114,7 @@ typedef struct {
     int mod_latch[3];       // frames a Shift/Alt/Ctrl press still counts as held (see feed_keys)
     int scroll;             // text rows scrolled off the top of the panel under the picture
     bool scroll_pinned;     // the user scrolled it: leave it; otherwise it follows the bottom
+    int oob_scroll;         // rows scrolled off the top of the out-of-bounds switch list
     bool scrolled;          // this frame's mouse input was a panel scroll
     Texture2D atlas;        // world map: every room rendered, 8x8 grid of ROOM_PX_W x ROOM_PX_H
     bool atlas_loaded;
@@ -875,9 +879,20 @@ static bool feed_mouse(GuiState *g) {
         g->scroll_pinned = true; g->scrolled = true;
         return true;
     }
+    // wheel over the pinned out-of-bounds switch list scrolls it instead, independently
+    if (wheel != 0 && m.x < pic_w(g) && m.y >= pinned_top(g) && m.y < GetScreenHeight() - pch(g)) {
+        g->oob_scroll -= (int)wheel * 3;
+        if (g->oob_scroll < 0) g->oob_scroll = 0;
+        return true;
+    }
 
-    // attribute buttons under the source buttons (tiles view)
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && tiles_view(g))
+    // attribute buttons under the source buttons (tiles view). attr_button() and
+    // block_button() share the same rectangles (the block panel takes over that space
+    // when a block is at the cursor), so this must not fire while that panel is up -
+    // otherwise a click on "w+" etc. lands here first and w+/w-/h+/h- never see it.
+    int block_bi, block_bx, block_by, block_bw, block_bh;
+    bool block_panel_up = ged_block_at_cursor(&block_bi, &block_bx, &block_by, &block_bw, &block_bh) && block_bi != g->block_hidden;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && tiles_view(g) && !block_panel_up)
         for (int i = 0; i < 4; i++)
             if (CheckCollisionPointRec(m, attr_button(g, i))) {
                 g->sel_attr = ATTRS[i].bits;
@@ -1036,6 +1051,19 @@ static bool feed_mouse(GuiState *g) {
         int cx, cy, room = ged_room();
         ged_cursor(&cx, &cy);
         bool drag = in_text && (col != g->lpress_col || row != g->lpress_row);
+        // A sprite's MOVERTAB x/y offset can draw it well outside its logical tile - a plain
+        // click there should still select it, the same as clicking its logical tile does
+        // (Hugh: "allow a click on the sprite at that location to select that sprite even if
+        // far away"). Pixel-precise, not text-cell: this is the one click path that needs to
+        // know exactly where the picture put the sprite, not just which tile was clicked.
+        int sprite_hit = -1;
+        if (!drag && !ged_map_is_text()) {
+            Vector2 m = GetMousePosition();
+            if (m.x >= pic_x(g) && m.x < pic_x(g) + pic_w(g) && m.y >= pic_y(g) && m.y < pic_y(g) + pic_h(g)) {
+                int px = (int)(m.x - pic_x(g)) / g->scale, py = (int)(m.y - pic_y(g)) / g->scale;
+                sprite_hit = ged_sprite_hit(px, py);
+            }
+        }
         GKey press = { .code = GK_MOUSE, .col = g->lpress_col, .row = g->lpress_row, .button = 0 };
         GKey release = { .code = GK_MOUSE, .col = drag ? col : g->lpress_col,
                          .row = drag ? row : g->lpress_row, .button = 0, .release = true };
@@ -1043,6 +1071,11 @@ static bool feed_mouse(GuiState *g) {
         if (!ged_map_is_text() && in_map_band(g->lpress_row)) ged_cancel();   // a click on the room, not on a link: the user wants out of whatever mode
         ged_key(press);
         ged_key(release);
+        // The cursor moves to the click itself (just above), same as any other plain click -
+        // opening the MOVERTAB editor here must not additionally warp it to the object's
+        // logical tile the way ged_goto_object would (Hugh: "that also warps which i wouldn't
+        // want").
+        if (sprite_hit >= 0) { ged_edit_movertab(sprite_hit); return true; }
         if (drag && ged_room() == room) { ged_set_cursor(cx, cy); ged_clear_selection(); }   // (a drag into a neighbour room follows the item)
         return true;
     }
@@ -1067,6 +1100,8 @@ static Color ansi(uint8_t n, bool bold) {
     return bold ? bright[n] : normal[n];
 }
 
+#define GCELL_ATTR_UNDER 2   // matches editor_types.h's ATTR_UNDER (GCell mirrors Cell; see gui_bridge.h)
+
 static void draw_cell(const GCell *c, int px, int py, int cw, int ch, Font *font, bool have_font, int fpx) {
     if (c->bg) DrawRectangle(px, py, cw, ch, ansi(c->bg, false));
     if (c->ch && c->ch != ' ') {
@@ -1074,6 +1109,7 @@ static void draw_cell(const GCell *c, int px, int py, int cw, int ch, Font *font
         int ty = py + (ch - fpx) / 2;
         if (have_font) DrawTextCodepoint(*font, c->ch, (Vector2){px, ty}, fpx, col);
         else DrawText(TextFormat("%c", c->ch), px, ty, fpx, col);
+        if (c->attr & GCELL_ATTR_UNDER) DrawRectangle(px, py + ch - 1, cw, 1, col);
     }
 }
 
@@ -1092,14 +1128,21 @@ static void ensure_panel_font(GuiState *g) {
 
 // The out-of-bounds switch list is pinned above the window's last row (the
 // editor's macro overlay); the rest of the panel scrolls between the picture
-// and it.
-static int oob_rows(int *r0) { int r1; ged_oob_rows(r0, &r1); return r1 > *r0 ? r1 - *r0 : 0; }
+// and it. The pinned list itself scrolls too (g->oob_scroll) once it has more
+// rows than OOB_MAX_ROWS - some rooms have most of their switches off-grid,
+// and letting the pinned band grow to fit all of them ate the whole window.
+#define OOB_MAX_ROWS 8
+static int oob_total_rows(int *r0) { int r1; ged_oob_rows(r0, &r1); return r1 > *r0 ? r1 - *r0 : 0; }
+static int oob_rows(int *r0) { int total = oob_total_rows(r0); return total < OOB_MAX_ROWS ? total : OOB_MAX_ROWS; }
 static int pinned_top(GuiState *g) { int r0; return GetScreenHeight() - pch(g) - oob_rows(&r0) * pch(g); }
 static int panel_rows_visible(GuiState *g) { int r = (pinned_top(g) - panel_top(g)) / pch(g); return r < 1 ? 1 : r; }
 
 // Rows the scrolling part has (everything under the map except the pinned list).
+// Skips the OOB section's full extent in the underlying text (not just the
+// capped height shown at once), or its unshown rows would be double-counted
+// as ordinary scrollable panel content.
 static int panel_content_rows(const GCell *cells, int stride) {
-    int r0, n = oob_rows(&r0), last = GED_MAP_Y + HEIGHT_TILES - 1, count = 0;
+    int r0, n = oob_total_rows(&r0), last = GED_MAP_Y + HEIGHT_TILES - 1, count = 0;
     for (int y = GED_MAP_Y + HEIGHT_TILES; y < GED_ROWS - 1; y++) {
         if (n && y >= r0 && y < r0 + n) continue;
         count++;
@@ -1140,10 +1183,10 @@ static void draw_text_screen(GuiState *g) {
     int max_scroll = panel_max_scroll(g);
     if (g->scroll > max_scroll) g->scroll = max_scroll;
     ensure_panel_font(g);
-    int r0, n = oob_rows(&r0), v = 0;
+    int r0, oob_total = oob_total_rows(&r0), n = oob_rows(&r0), v = 0;
     BeginScissorMode(0, panel_top(g), pic_w(g), pinned_top(g) - panel_top(g));
     for (int y = first_panel; y < GED_ROWS - 1; y++) {
-        if (n && y >= r0 && y < r0 + n) continue;
+        if (oob_total && y >= r0 && y < r0 + oob_total) continue;
         int py = panel_top(g) + (v++ - g->scroll) * pch(g);
         if (py + pch(g) <= panel_top(g) || py >= pinned_top(g)) continue;
         for (int x = 0; x < GED_COLS; x++) {
@@ -1160,11 +1203,14 @@ static void draw_text_screen(GuiState *g) {
         DrawRectangle(x, top, SCROLLBAR_W, hgt, (Color){40, 40, 40, 255});
         DrawRectangle(x + 1, ty, SCROLLBAR_W - 2, th < 12 ? 12 : th, (Color){170, 170, 170, 255});
     }
-    if (n) {                                    // pinned out-of-bounds switch list
-        int top = pinned_top(g);
+    if (n) {                                    // pinned out-of-bounds switch list, itself scrollable past OOB_MAX_ROWS
+        int top = pinned_top(g), oob_max_scroll = oob_total - n;
+        if (oob_max_scroll < 0) oob_max_scroll = 0;
+        if (g->oob_scroll > oob_max_scroll) g->oob_scroll = oob_max_scroll;
+        if (g->oob_scroll < 0) g->oob_scroll = 0;
         DrawLine(0, top - 1, pic_w(g), top - 1, (Color){90, 90, 90, 255});
         for (int i = 0; i < n; i++) {
-            int y = r0 + i, py = top + i * pch(g), sw = ged_oob_switch_at_row(y);
+            int y = r0 + g->oob_scroll + i, py = top + i * pch(g), sw = ged_oob_switch_at_row(y);
             int shift = sw >= 0 ? 3 : 0;        // room for the badge
             for (int x = 0; x < GED_COLS; x++)
                 draw_cell(&cells[y * stride + x], (x + shift) * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
@@ -1172,6 +1218,12 @@ static void draw_text_screen(GuiState *g) {
                 DrawRectangle(0, py, 3 * pcw(g) - 2, pch(g), (Color){60, 20, 60, 255});
                 gtext(&g->panel_font, g->panel_font_loaded, TextFormat("S%d", sw), 2, py, g->panel_font_px, MAGENTA);
             }
+        }
+        if (oob_max_scroll > 0) {                // its own scrollbar, same edge, below the main one
+            int hgt = GetScreenHeight() - pch(g) - top, x = pic_w(g) - SCROLLBAR_W;
+            int th = hgt * n / oob_total, ty = top + hgt * g->oob_scroll / oob_total;
+            DrawRectangle(x, top, SCROLLBAR_W, hgt, (Color){40, 40, 40, 255});
+            DrawRectangle(x + 1, ty, SCROLLBAR_W - 2, th < 12 ? 12 : th, (Color){170, 170, 170, 255});
         }
     }
     for (int y = 0; y < first_panel; y++) {     // header + (F2 / room list) map band
@@ -1985,7 +2037,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     bool dirty = g->backs_dirty;
     for (int i = 0; i < GFX_SOURCES; i++) dirty |= g->gfx_dirty[i];
     gtext(&g->font, g->font_loaded,
-          g->pix_src == GFX_TILES ? TextFormat("tile 0x%02x  colour %d", idx, g->sel_colour)
+          g->pix_src == GFX_TILES ? TextFormat("tile 0x%02x  colour %d", idx | g->sel_attr, g->sel_colour)
           : g->pix_src == GFX_SCENERY ? TextFormat("scenery tile 0x%02x  colour %d", idx, g->sel_colour)
           : g->pix_src == GFX_CHARSET ? TextFormat("font tile 0x%02x  colour %d", idx, g->sel_colour)
           : render_gfx_is_screen(g->pix_src) ? TextFormat("%s %dx%d  colour %d", render_gfx_name(g->rctx, g->pix_src), w, h, g->sel_colour)
@@ -2020,7 +2072,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
                 gtext(&g->font, g->font_loaded, "Shift+click in the room places one", x0, ty + 4 * ch(g), fs, SKYBLUE);
         }
     }
-    if (tiles_view(g))
+    if (tiles_view(g)) {
         for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
             Rectangle rb = attr_button(g, i);
             bool on = ATTRS[i].bits == g->sel_attr;
@@ -2030,6 +2082,20 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
             int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
             gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
         }
+        // type of the currently selected tile, then a colour-code legend
+        // matching Ctrl-D t's room tint (grey pass, blue solid, violet
+        // magnet, cyan slip), so the tint can be read at a glance.
+        int lx = (int)attr_button(g, 0).x;
+        int ly = (int)(attr_button(g, 2).y + attr_button(g, 2).height) + PAD;
+        gtext(&g->font, g->font_loaded, TextFormat("type: %s", ATTRS[g->sel_attr >> 6].name), lx, ly, fs, RAYWHITE);
+        ly += ch(g) + 4;
+        for (int i = 0; i < 4; i++) {
+            int cy = ly + i * (fs + 2);
+            DrawRectangle(lx, cy, fs, fs, ATTR_COLOUR[i]);
+            DrawRectangleLines(lx, cy, fs, fs, GRAY);
+            gtext(&g->font, g->font_loaded, ATTRS[i].name, lx + fs + 4, cy, fs, RAYWHITE);
+        }
+    }
     (void)block_available;
 }
 
@@ -2553,13 +2619,14 @@ static void draw_overlay(GuiState *g) {
     // stays clear; other pass-through tiles are faint grey so scenery and hazards you can
     // walk through read as such next to solid (blue), magnetic (violet) and slippery (cyan).
     if (ged_show_tiles() && !g->text_map) {
-        static const Color tint[4] = { {200, 200, 200, 60}, {0, 120, 255, 110}, {200, 60, 255, 120}, {0, 230, 230, 120} };
+        static const uint8_t tint_alpha[4] = {60, 110, 120, 120};
         for (int y = 0; y < HEIGHT_TILES; y++)
             for (int x = 0; x < WIDTH_TILES; x++) {
                 uint8_t t = r->tiles[TILE_IDX(x, y)];
                 if (t == 0) continue;
                 Vector2 p = tile_pt(g, x, y);
-                DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, tint[t >> 6]);
+                Color c = ATTR_COLOUR[t >> 6]; c.a = tint_alpha[t >> 6];
+                DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, c);
             }
     }
 
@@ -2668,6 +2735,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         g->es = ged_open(file, g->es);   // re-adopt (or reset) the editor state after a reload
     }
     render_show_player(g->rctx, false);  // he is drawn at the cursor instead
+    render_set_movertab(g->rctx, ged_movertab());   // mirror sprites per their facing/upside-down bits
     g->data_dir = data_dir;
     g->drawn_room = -1;
     g->room_dirty = true;

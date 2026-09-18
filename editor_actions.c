@@ -1,6 +1,7 @@
 #include "editor_types.h"
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 /* ── Undo/redo helpers ─────────────────────────────────────────────────── */
 
@@ -254,6 +255,16 @@ static bool sprite_at(struct DecompressedRoom *room, struct RoomObject *exclude,
     return false;
 }
 
+// After an object moves within the same room, its MOVERTAB x/y offset (whole tiles - see
+// room.c's doc comment above move_desc()) can now push it out of the room at its new position,
+// even though it didn't at the old one - pull it back in rather than let it draw off the map
+// (Hugh: "if a sprite is moved, it should check its offset and clamp to wall if needed").
+static void clamp_object_movertab_offset(struct DecompressedRoom *room, struct RoomObject *object, size_t object_idx) {
+    unsigned global = (unsigned)room->UNKNOWN_c + (unsigned)object_idx;
+    if (global >= C_ARRAY_LEN(state->movertab) / 3) return;
+    movertab_clamp_offset(state->movertab + global * 3, object->type == SPRITE, object->x, object->y);
+}
+
 void move(int dx, int dy) {
     int x = state->cursors[state->current_level].x;
     int y = state->cursors[state->current_level].y;
@@ -360,12 +371,13 @@ void move(int dx, int dy) {
     }
     if (!moved && state->debug.objects) {
         struct RoomObject *object = NULL;
+        size_t object_idx = 0;
         bool obj = false;
         /* Prefer sprite at cursor over block */
         for (size_t i = 0; i < room->num_objects; i++) {
             struct RoomObject *o = room->objects + i;
             if (o->type == SPRITE && x == o->x && y == o->y) {
-                object = o; obj = true; break;
+                object = o; object_idx = i; obj = true; break;
             }
         }
         if (!obj) for (size_t i = 0; i < room->num_objects; i++) {
@@ -373,7 +385,7 @@ void move(int dx, int dy) {
             if (o->type == BLOCK &&
                     x >= o->x && x < o->x + o->block.width &&
                     y >= o->y && y < o->y + o->block.height) {
-                object = o; obj = true; break;
+                object = o; object_idx = i; obj = true; break;
             }
         }
         if (obj) {
@@ -403,6 +415,7 @@ void move(int dx, int dy) {
                         object->y = new_y;
                         state->cursors[state->current_level].x = new_x;
                         state->cursors[state->current_level].y = new_y;
+                        clamp_object_movertab_offset(room, object, object_idx);
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                         redraw();
@@ -426,6 +439,7 @@ void move(int dx, int dy) {
                         object->y += dy;
                         state->cursors[state->current_level].x += dx;
                         state->cursors[state->current_level].y += dy;
+                        clamp_object_movertab_offset(room, object, object_idx);
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         snprintf(state->status_message, sizeof(state->status_message), "Writing room");
                         redraw();
@@ -757,16 +771,32 @@ void shrink(int dx, int dy) {
 // Write ROOMS.SPL. writeRooms() refuses (and leaves the file as it was) when
 // the result would pass the game's size limits; then everything done since
 // the last successful write is undone so the editor shows what is on disk,
-// and the status line says why.
+// and the status line says why. The limit that actually bites almost always
+// belongs to one room (its own 960-byte compressed budget), not the whole
+// file, so name that room rather than blaming "the game" in general.
 bool editor_save(void) {
-    if (writeRooms(&state->rooms)) {
+    int failed_room = -1;
+    char dangling[128] = {0};
+    if (writeRooms(&state->rooms, &failed_room, dangling, sizeof dangling)) {
         state->saved_undo_len = state->undo_stack.length;
+        struct stat st;
+        if (stat(ROOMS_FILE, &st) == 0) state->last_own_write_mtim = st.st_mtim;
         return true;
     }
     bool undone = false;
     while (state->undo_stack.length > state->saved_undo_len) { do_undo(); undone = true; }
-    snprintf(state->status_message, sizeof(state->status_message),
-             undone ? "NOT SAVED: over the game's size limit, change undone" : "NOT SAVED: over the game's size limit");
+    if (failed_room >= 0) {
+        snprintf(state->status_message, sizeof(state->status_message),
+                 undone ? "NOT SAVED: room %02x is over its size limit, change undone"
+                        : "NOT SAVED: room %02x is over its size limit", failed_room);
+    } else if (failed_room == -2) {
+        snprintf(state->status_message, sizeof(state->status_message),
+                 undone ? "NOT SAVED: %s, change undone" : "NOT SAVED: %s", dangling);
+    } else {
+        snprintf(state->status_message, sizeof(state->status_message),
+                 undone ? "NOT SAVED: ROOMS.SPL is over its total size limit, change undone"
+                        : "NOT SAVED: ROOMS.SPL is over its total size limit");
+    }
     return false;
 }
 
@@ -789,13 +819,17 @@ bool room_create(size_t room_idx) {
 
 // Is this room entirely blank: every tile 0, no objects or switches, every
 // setting 0, no name, nothing trailing? (What room_create makes, untouched.)
+// UNKNOWN_c/UNKNOWN_f/_num_switches's low bits are not checked here even
+// though room_create zeroes them too: writeRooms() now recomputes them on
+// every save as a cumulative count over lower rooms, so a blank room still
+// picks up a real (non-zero) base the moment anything is saved - that alone
+// must not stop it from counting as blank and being pruned back out.
 static bool room_is_blank(Room *r) {
     struct DecompressedRoom *d = &r->data;
     for (size_t i = 0; i < C_ARRAY_LEN(d->tiles); i++) if (d->tiles[i]) return false;
     if (d->num_objects || d->num_switches || r->rest.length) return false;
     if (d->tile_offset || d->background || d->room_north || d->room_east || d->room_south || d->room_west ||
-        d->room_damage || d->gravity_vertical || d->gravity_horizontal || d->UNKNOWN_b || d->UNKNOWN_c || d->UNKNOWN_f ||
-        (d->_num_switches & 0x3)) return false;
+        d->room_damage || d->gravity_vertical || d->gravity_horizontal || d->UNKNOWN_b) return false;
     for (size_t i = 0; i < C_ARRAY_LEN(d->name); i++) if (d->name[i] != ' ' && d->name[i] != '\0') return false;
     return true;
 }
@@ -810,6 +844,37 @@ bool room_prune_blank(size_t room_idx) {
     ARRAY_FREE(r->rest); ARRAY_FREE(r->compressed); ARRAY_FREE(r->decompressed);
     editor_save();
     return true;
+}
+
+// MOVERTAB.DAT: 256 entries x 3 bytes, indexed by global object number (see recomputeBases'
+// own comment for how a room's UNKNOWN_c gives the global index of its own object 0). A
+// levelset's own table lives beside its ROOMS.SPL (repo root, "./MOVERTAB.DAT"); with none
+// there yet, fall back to the game's original table so there is always something sane to
+// look at and edit.
+static bool movertab_read_file(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) return false;
+    size_t n = fread(state->movertab, 1, sizeof state->movertab, fp);
+    fclose(fp);
+    return n == sizeof state->movertab;
+}
+
+void movertab_load(void) {
+    state->movertab_load_attempted = true;
+    if (movertab_read_file("MOVERTAB.DAT")) { state->movertab_loaded = true; return; }
+    if (movertab_read_file("Spider/MOVERTAB.DAT.original")) { state->movertab_loaded = true; return; }
+    if (movertab_read_file("Spider/MOVERTAB.DAT")) { state->movertab_loaded = true; return; }
+    memset(state->movertab, 0, sizeof state->movertab);
+    state->movertab_loaded = false;
+}
+
+bool movertab_save(void) {
+    FILE *fp = fopen("MOVERTAB.DAT", "wb");
+    if (fp == NULL) return false;
+    size_t n = fwrite(state->movertab, 1, sizeof state->movertab, fp);
+    fclose(fp);
+    state->movertab_loaded = (n == sizeof state->movertab);
+    return state->movertab_loaded;
 }
 
 bool transfer_item_to_room(size_t room_idx) {

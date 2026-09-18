@@ -15,11 +15,19 @@
 
 #define BLANK_TILE 0x00
 
-// This is wrong
+// Kept for the few places that still bit-test a specific direction/speed value
+// directly; for a human-readable label use move_desc() instead (room.c), which
+// covers the full verified table (see its own comment).
 #define MOVE_UP    0x60
 #define MOVE_DOWN  0x20
 #define MOVE_LEFT  0x06
 #define MOVE_RIGHT 0x02
+
+const char *move_desc(uint8_t value);
+const char *movertab_behavior_desc(uint8_t value, bool is_sprite);   // best-guess label for a MOVERTAB entry's byte 2
+uint8_t movertab_behavior_cycle(uint8_t current, int dir);   // next/prev known byte-2 value (wraps)
+extern const uint8_t MOVERTAB_KNOWN_BEHAVIORS[];
+extern const size_t MOVERTAB_KNOWN_BEHAVIORS_LEN;
 /*
  * 0x00 - stop
  * 0x01 - right slow
@@ -204,7 +212,14 @@ struct __attribute__((__packed__)) DecompressedRoom {
     uint8_t gravity_vertical;
     uint8_t gravity_horizontal;
 
-    uint8_t UNKNOWN_b; // unused?
+    uint8_t UNKNOWN_b; // Every room in the original game has this set to 1. Disassembly of
+                       // SPIDEY.EXE found no code path that ever reads this byte (searched
+                       // both a direct absolute address and a base+displacement access into
+                       // the room's resident struct - two other nearby fields, tile_offset
+                       // and the gravity bytes, were found this way with no trouble), and
+                       // setting it to 2 in-game showed no observable effect either. Not
+                       // editable in the interactive editor for that reason (main.c's `patch`
+                       // command still reaches it, for anyone who wants to poke at it further).
     uint8_t UNKNOWN_c; // ??
     uint8_t num_objects;
     uint8_t _num_switches; // num_switches << 2 | ... counter lsb & 0x3
@@ -236,10 +251,13 @@ typedef struct RoomFile {
 
 void freeRoomFile(RoomFile *file);
 bool readFile(RoomFile *file, FILE *fp);
-bool writeFile(RoomFile *file, FILE *fp);
+bool writeFile(RoomFile *file, FILE *fp, int *failed_room);   // failed_room (optional): the one room that overflowed, or -1
 bool readRooms(RoomFile *file);
 bool readRoomFromFile(Room *room, FILE *fp, const char *filename);
-bool writeRooms(RoomFile *file);
+bool writeRooms(RoomFile *file, int *failed_room, char *dangling_msg, size_t dangling_msg_size);
+// failed_room (optional): the one room that overflowed its own limit, -1 for the whole file over its
+// total limit, or -2 for a TOGGLE_BIT chunk pointing at a switch that no longer exists (not a size
+// problem at all - dangling_msg, if given, is filled with which chunk and what it pointed to).
 bool importRooms(FILE *fp, RoomFile *file, int force_room_id);
 bool recomputeToggleBits(RoomFile *file);
 void recomputeBases(RoomFile *file);

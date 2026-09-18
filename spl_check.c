@@ -318,14 +318,14 @@ static void check_rooms_limit(const char *rooms_path) {
         for (size_t i = 0; i < sizeof room->data.tiles; i++) room->data.tiles[i] = (uint8_t)(rand() % 256);
         ARRAY_FREE(room->compressed);
     }
-    CHECK(!writeRooms(&file), "an oversized ROOMS.SPL was written");
+    CHECK(!writeRooms(&file, NULL, NULL, 0), "an oversized ROOMS.SPL was written");
     size_t after_len = 0;
     uint8_t *after = read_whole(copy, &after_len);
     CHECK(before && after && before_len == after_len && memcmp(before, after, before_len) == 0,
           "ROOMS.SPL changed although the write was refused");
     // and a file that fits still writes
     for (size_t r = 0; r < 64; r++) { memset(file.rooms[r].data.tiles, 0, sizeof file.rooms[r].data.tiles); ARRAY_FREE(file.rooms[r].compressed); }
-    CHECK(writeRooms(&file), "a small ROOMS.SPL was refused");
+    CHECK(writeRooms(&file, NULL, NULL, 0), "a small ROOMS.SPL was refused");
     free(before); free(after);
     freeRoomFile(&file);
     if (chdir(cwd) != 0) CHECK(false, "chdir back");

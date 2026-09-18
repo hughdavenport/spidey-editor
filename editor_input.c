@@ -1,4 +1,5 @@
 #include "editor_types.h"
+#include "render.h"
 #include <ctype.h>
 #include <errno.h>
 #include <poll.h>
@@ -18,6 +19,7 @@ static bool handle_edit_roomdetails(Key key);
 static bool handle_edit_roomdetails_num(Key key);
 static bool handle_edit_roomdetails_room(Key key);
 static bool handle_edit_switchdetails(Key key);
+static bool handle_edit_switchdetails_xy(Key key);
 static bool handle_edit_switchdetails_select_chunk(Key key);
 static bool handle_edit_switchdetails_chunk_switch(Key key);
 static bool handle_edit_switchdetails_chunk_switch_room(Key key);
@@ -336,8 +338,23 @@ static void delete_item_at_cursor(void) {
         }
         memset(chunk_switch_underneath->chunks.data + c, 0, sizeof(struct SwitchChunk));
         chunk_switch_underneath->chunks.length --;
-    } else {
+    } else if (room->tiles[TILE_IDX(x, y)] != BLANK_TILE) {
         room->tiles[TILE_IDX(x, y)] = 0;
+    } else {
+        // Nothing at all under the cursor: matches yank_at_cursor's "empty cell -> whole
+        // room" rule, so this completes the cut half of a room move (y/x here, navigate
+        // elsewhere, p there). Unlike room_blank_and_stay (Ctrl-D in the room picker,
+        // which keeps exits so other rooms' links to it still make sense), this clears
+        // exits too: the room is now entirely blank, so leaving it prunes the slot away
+        // (room_prune_blank) rather than leaving a linked-but-empty room behind.
+        Room *r = &state->rooms.rooms[state->current_level];
+        room_snapshot_free(room);
+        memset(room, 0, sizeof(*room));
+        memset(room->name, ' ', sizeof(room->name));
+        ARRAY_FREE(r->rest);
+        snprintf(state->status_message, sizeof(state->status_message),
+                 "Cleared room %02x (exits cleared too); leave it to remove the slot, u to undo",
+                 (unsigned)state->current_level);
     }
     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
     editor_save();
@@ -489,18 +506,57 @@ static bool handle_goto_switch(Key key) {
     return true;
 }
 
-/* Helper macro for goto_room navigation */
+/* Ctrl-D delete mode in GOTO_ROOM: blank the picked room in place (tiles,
+ * objects, switches, name all cleared) instead of entering it. Exits are
+ * kept as-is, so other rooms' links to it are undisturbed and the room
+ * doesn't move on the map; it just becomes empty. Stays in GOTO_ROOM so
+ * several rooms can be cleared in a row. */
+static void room_blank_and_stay(size_t dest) {
+    if (!state->rooms.rooms[dest].valid) {
+        snprintf(state->status_message, sizeof(state->status_message), "Room %02zx is already empty", dest);
+    } else {
+        push_undo((uint8_t)dest, false);
+        Room *r = &state->rooms.rooms[dest];
+        struct DecompressedRoom *room = &r->data;
+        uint8_t n = room->room_north, e = room->room_east, s = room->room_south, w = room->room_west;
+        room_snapshot_free(room);
+        memset(room, 0, sizeof(*room));
+        memset(room->name, ' ', sizeof(room->name));
+        room->room_north = n; room->room_east = e; room->room_south = s; room->room_west = w;
+        ARRAY_FREE(r->rest);
+        ARRAY_FREE(r->compressed);
+        editor_save();
+        snprintf(state->status_message, sizeof(state->status_message),
+                 "Deleted room %02zx (exits kept); u to undo", dest);
+    }
+    state->partial_byte = 0;
+    if (state->roomname_cursor) {
+        memset(state->room_name, 0, state->roomname_cursor);
+        state->roomname_cursor = 0;
+    }
+}
+
+/* Helper macro for goto_room navigation. In GOTO_ROOM with delete mode
+ * armed, a picked room is blanked instead of entered (see room_blank_and_stay);
+ * the other two states that reuse this macro (room-detail neighbour editing,
+ * a switch chunk's target room) always navigate normally. */
 #define GOTO_ROOM_NAVIGATE(dest_level) do { \
-    *cursorlevel = (dest_level); \
-    state->current_state = state->previous_state; \
-    state->current_switch = 0; \
-    state->switch_on = false; \
-    state->current_chunk = 0; \
-    state->previous_state = NORMAL; \
-    state->partial_byte = 0; \
-    if (state->roomname_cursor) { \
-        memset(state->room_name, 0, state->roomname_cursor); \
-        state->roomname_cursor = 0; \
+    if (state->current_state == GOTO_ROOM && state->room_delete_mode) { \
+        room_blank_and_stay((dest_level)); \
+    } else { \
+        size_t prev_level = *cursorlevel; \
+        *cursorlevel = (dest_level); \
+        if (state->current_state == GOTO_ROOM) room_prune_blank(prev_level); \
+        state->current_state = state->previous_state; \
+        state->current_switch = 0; \
+        state->switch_on = false; \
+        state->current_chunk = 0; \
+        state->previous_state = NORMAL; \
+        state->partial_byte = 0; \
+        if (state->roomname_cursor) { \
+            memset(state->room_name, 0, state->roomname_cursor); \
+            state->roomname_cursor = 0; \
+        } \
     } \
 } while (0)
 
@@ -599,6 +655,7 @@ static bool handle_goto_room(Key key) {
                 state->current_chunk = 0;
                 state->previous_state = NORMAL;
                 state->partial_byte = 0;
+                state->room_delete_mode = false;
                 if (state->roomname_cursor) {
                     memset(state->room_name, 0, state->roomname_cursor);
                     state->roomname_cursor = 0;
@@ -608,6 +665,16 @@ static bool handle_goto_room(Key key) {
         case KEY_CTRL:
             switch (key.ch) {
                 case '_': state->help = !state->help; break;
+                // Ctrl-X, not Ctrl-D: Ctrl-D is the well-known, documented toggle-display key
+                // everywhere else in the editor (TOGGLE_DISPLAY, handle_normal) - reusing it
+                // here for something destructive would mean the exact same muscle-memory
+                // keystroke quietly arms room deletion instead of showing debug info.
+                case 'X':
+                    state->room_delete_mode = !state->room_delete_mode;
+                    snprintf(state->status_message, sizeof(state->status_message),
+                             state->room_delete_mode ? "Delete mode: next room picked is blanked, not entered"
+                                                      : "Delete mode off");
+                    break;
                 case 'H':
                     state->debug.hex = !state->debug.hex;
                     if (state->partial_byte) {
@@ -628,6 +695,7 @@ static bool handle_goto_room(Key key) {
                         state->current_chunk = 0;
                         state->previous_state = NORMAL;
                         state->partial_byte = 0;
+                        state->room_delete_mode = false;
                         if (state->roomname_cursor) {
                             memset(state->room_name, 0, state->roomname_cursor);
                             state->roomname_cursor = 0;
@@ -648,12 +716,19 @@ static bool handle_edit_roomname(Key key) {
 
     switch (key.code) {
         case KEY_CTRL:
-            if (key.ch == 'J') {
-                /* ENTER (Ctrl-J = \n) */
+            if (key.ch == 'J' || key.ch == 'M') {
+                /* ENTER: Ctrl-J (\n) from a terminal, Ctrl-M (\r) from the GUI's KEY_ENTER */
                 struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
                 assert(C_ARRAY_LEN(state->room_name) <= C_ARRAY_LEN(room->name));
                 push_undo((uint8_t)state->current_level, false);
-                strncpy(room->name, state->room_name, C_ARRAY_LEN(room->name));
+                /* Every room name shipped with the game is space-padded to the full field
+                 * width (e.g. "Foyer                   "), not NUL-padded: strncpy's normal
+                 * NUL-fill left leftover game data behind a short name, since the game reads
+                 * the whole field rather than stopping at a terminator - the next thing that
+                 * wrote near it in memory would show through, and saving again could as well. */
+                size_t len = strnlen(state->room_name, C_ARRAY_LEN(room->name));
+                memcpy(room->name, state->room_name, len);
+                memset(room->name + len, ' ', C_ARRAY_LEN(room->name) - len);
                 state->current_state = state->previous_state;
                 state->current_switch = 0;
                 state->switch_on = false;
@@ -836,10 +911,6 @@ static bool handle_edit_roomdetails(Key key) {
                 case 'd':
                 case '|':
                 case '-':
-                case 'b':
-                case 'c':
-                case 'e':
-                case 'f':
                     state->room_detail = key.ch;
                     state->current_state = EDIT_ROOMDETAILS_NUM;
                     state->current_switch = 0;
@@ -930,15 +1001,10 @@ static bool handle_edit_roomdetails_num(Key key) {
                         case '|': room->gravity_vertical = value; break;
                         case '-': room->gravity_horizontal = value; break;
 
-                        case 'b': room->UNKNOWN_b = value; break;
-                        case 'c': room->UNKNOWN_c = value; break;
-                        case 'e':
-                            if ((value & ~0x3) == 0) {
-                                room->_num_switches |= value;
-                            }
-                            break;
-
-                        case 'f': room->UNKNOWN_f = value; break;
+                        // UNKNOWN_b is no longer edited here: every original room has it set to 1,
+                        // and testing (disassembly + play) found no code path that ever reads it.
+                        // Object/switch bases (c, e, f) are no longer edited here either: writeRooms()
+                        // recomputes them fresh from the file's actual layout on every save.
 
                         default: UNREACHABLE();
                     }
@@ -1388,6 +1454,16 @@ static bool handle_edit_switchdetails(Key key) {
                     editor_save();
                 }; break;
 
+                case 'X':
+                    state->room_detail = 'X';
+                    state->current_state = EDIT_SWITCHDETAILS_XY;
+                    break;
+
+                case 'Y':
+                    state->room_detail = 'Y';
+                    state->current_state = EDIT_SWITCHDETAILS_XY;
+                    break;
+
                 case 'q':
                     if (state->help) {
                         state->help = false;
@@ -1415,6 +1491,94 @@ static bool handle_edit_switchdetails(Key key) {
                 state->current_switch = 0;
                 state->switch_on = false;
                 state->previous_state = TILE_EDIT;
+            }
+            break;
+        case KEY_CTRL:
+            switch (key.ch) {
+                case '_': state->help = !state->help; break;
+                case 'H':
+                    state->debug.hex = !state->debug.hex;
+                    if (state->partial_byte) {
+                        if (state->debug.hex) {
+                            state->partial_byte = ((state->partial_byte & 0xFF) * 10 / 16) % 16 + 1;
+                        } else {
+                            state->partial_byte = ((state->partial_byte & 0xFF) * 16 / 10) % 10 + 1;
+                        }
+                    }
+                    break;
+                case 'P': fork_play(); break;
+                case 'S': exit_switchdetails(); break;
+            }
+            break;
+        default: break;
+    }
+    return true;
+}
+
+// X/Y move an existing switch's own position (chunks.data[0], the PREAMBLE):
+// digits accumulate exactly like handle_edit_roomdetails_num, but write into
+// the switch's x or y (masked to 5 bits - the on-disk field is that wide, which
+// is also why (0,31)/similar off-grid coordinates are how a switch is placed
+// out of bounds - visible rooms only use rows/cols 0-21|0-31 x, 0-21 y, so
+// anything with y or x above 21 already reads as "off grid" to the rest of the
+// editor and the game, with no separate flag needed).
+static bool handle_edit_switchdetails_xy(Key key) {
+    switch (key.code) {
+        case KEY_CHAR:
+            if ((state->debug.hex && isxdigit(key.ch)) || (!state->debug.hex && isdigit(key.ch))) {
+                int digit;
+                if (key.ch > '9') {
+                    digit = tolower(key.ch) - 'a' + 10;
+                } else {
+                    digit = key.ch - '0';
+                }
+                if (state->partial_byte) {
+                    size_t value = digit;
+                    if (state->debug.hex) {
+                        value += 16 * (state->partial_byte & 0xFF);
+                    } else {
+                        value += 10 * (state->partial_byte & 0xFF);
+                    }
+                    value &= 0x1f;
+
+                    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                    struct SwitchChunk *preamble = room->switches[state->current_switch - 1].chunks.data;
+                    push_undo((uint8_t)state->current_level, false);
+                    if (state->room_detail == 'X') preamble->x = (uint8_t)value;
+                    else preamble->y = (uint8_t)value;
+                    state->current_state = EDIT_SWITCHDETAILS;
+                    state->partial_byte = 0;
+                    state->room_detail = 0;
+                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                    editor_save();
+                } else {
+                    state->partial_byte = 0xFF00 | digit;
+                }
+            } else switch (key.ch) {
+                case 'q':
+                    if (state->help) {
+                        state->help = !state->help;
+                    } else {
+                        state->current_state = EDIT_SWITCHDETAILS;
+                        state->partial_byte = 0;
+                        state->room_detail = 0;
+                    }
+                    break;
+                case '?': state->help = !state->help; break;
+                default: break;
+            }
+            break;
+        case KEY_BS:
+        case KEY_DELETE:
+            state->partial_byte = 0;
+            break;
+        case KEY_ESC:
+            if (state->help) {
+                state->help = false;
+            } else {
+                state->current_state = EDIT_SWITCHDETAILS;
+                state->partial_byte = 0;
+                state->room_detail = 0;
             }
             break;
         case KEY_CTRL:
@@ -1744,10 +1908,12 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                             if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
                             switch (chunk->type) {
                                 case TOGGLE_BIT:
+                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
                                     break;
                                 case TOGGLE_OBJECT:
+                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
                                     break;
                                 case TOGGLE_BLOCK:
@@ -2106,10 +2272,12 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                             if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
                             switch (chunk->type) {
                                 case TOGGLE_BIT:
+                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
                                     break;
                                 case TOGGLE_OBJECT:
+                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
                                     break;
                                 case TOGGLE_BLOCK:
@@ -2354,10 +2522,12 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                             if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
                             switch (chunk->type) {
                                 case TOGGLE_BIT:
+                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
                                     break;
                                 case TOGGLE_OBJECT:
+                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
                                     break;
                                 case TOGGLE_BLOCK:
@@ -2471,6 +2641,22 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
     return true;
 }
 
+// Named presets for a TOGGLE_OBJECT chunk's value byte, in the order 'v'/'V' cycle
+// through (see move_desc() in room.c for what each one means and how sure we are
+// of it): stop; up/down/left/right at slow, normal and fast (fast is the same bit
+// pattern as slow/normal one step further and untested, but included so it is one
+// keypress away rather than something you'd have to know the raw byte for); kill.
+static const uint8_t OBJECT_VALUE_PRESETS[] = {
+    0x00, 0x50, 0x60, 0x70, 0x10, 0x20, 0x30, 0x01, 0x02, 0x03, 0x05, 0x06, 0x07, 0x0b,
+};
+
+static void cycle_object_value(struct SwitchChunk *chunk, int dir) {
+    int n = (int)C_ARRAY_LEN(OBJECT_VALUE_PRESETS), i = -1;
+    for (int j = 0; j < n; j++) if (OBJECT_VALUE_PRESETS[j] == chunk->value) { i = j; break; }
+    i = i < 0 ? (dir > 0 ? 0 : n - 1) : (i + dir + n) % n;   // not a preset: start at either end
+    chunk->value = OBJECT_VALUE_PRESETS[i];
+}
+
 static bool handle_edit_switchdetails_chunk_object(Key key) {
     size_t *cursorlevel = &state->current_level;
     switch (key.code) {
@@ -2527,10 +2713,12 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                             if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
                             switch (chunk->type) {
                                 case TOGGLE_BIT:
+                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
                                     break;
                                 case TOGGLE_OBJECT:
+                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
                                     break;
                                 case TOGGLE_BLOCK:
@@ -2555,6 +2743,22 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     push_undo((uint8_t)state->current_level, false);
                     chunk->test = (((chunk->test >> 4) + 1) % 4) << 4;
+                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                    editor_save();
+                }; break;
+                case 'v': {
+                    struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                    struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                    push_undo((uint8_t)state->current_level, false);
+                    cycle_object_value(chunk, 1);
+                    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                    editor_save();
+                }; break;
+                case 'V': {
+                    struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
+                    struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
+                    push_undo((uint8_t)state->current_level, false);
+                    cycle_object_value(chunk, -1);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
@@ -2645,7 +2849,9 @@ static bool handle_normal(Key key) {
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_west;
                             state->cursors[level].y = state->cursors[*cursorlevel].y;
                             state->cursors[level].x = WIDTH_TILES - 1;
+                            size_t old_level = *cursorlevel;
                             *cursorlevel = level;
+                            room_prune_blank(old_level);
                         }
                     }
                     break;
@@ -2661,7 +2867,9 @@ static bool handle_normal(Key key) {
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_south;
                             state->cursors[level].y = 0;
                             state->cursors[level].x = state->cursors[*cursorlevel].x;
+                            size_t old_level = *cursorlevel;
                             *cursorlevel = level;
+                            room_prune_blank(old_level);
                         }
                     }
                     break;
@@ -2677,7 +2885,9 @@ static bool handle_normal(Key key) {
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_north;
                             state->cursors[level].y = HEIGHT_TILES - 1;
                             state->cursors[level].x = state->cursors[*cursorlevel].x;
+                            size_t old_level = *cursorlevel;
                             *cursorlevel = level;
+                            room_prune_blank(old_level);
                         }
                     }
                     break;
@@ -2693,7 +2903,9 @@ static bool handle_normal(Key key) {
                             size_t level = state->rooms.rooms[*cursorlevel].data.room_east;
                             state->cursors[level].x = 0;
                             state->cursors[level].y = state->cursors[*cursorlevel].y;
+                            size_t old_level = *cursorlevel;
                             *cursorlevel = level;
+                            room_prune_blank(old_level);
                         }
                     }
                     break;
@@ -2784,7 +2996,9 @@ static bool handle_normal(Key key) {
                     size_t level = state->rooms.rooms[*cursorlevel].data.room_west;
                     state->cursors[level].y = state->cursors[*cursorlevel].y;
                     state->cursors[level].x = WIDTH_TILES - 1;
+                    size_t old_level = *cursorlevel;
                     *cursorlevel = level;
+                    room_prune_blank(old_level);
                 }
             }
             break;
@@ -2800,7 +3014,9 @@ static bool handle_normal(Key key) {
                     size_t level = state->rooms.rooms[*cursorlevel].data.room_south;
                     state->cursors[level].y = 0;
                     state->cursors[level].x = state->cursors[*cursorlevel].x;
+                    size_t old_level = *cursorlevel;
                     *cursorlevel = level;
+                    room_prune_blank(old_level);
                 }
             }
             break;
@@ -2816,7 +3032,9 @@ static bool handle_normal(Key key) {
                     size_t level = state->rooms.rooms[*cursorlevel].data.room_north;
                     state->cursors[level].y = HEIGHT_TILES - 1;
                     state->cursors[level].x = state->cursors[*cursorlevel].x;
+                    size_t old_level = *cursorlevel;
                     *cursorlevel = level;
+                    room_prune_blank(old_level);
                 }
             }
             break;
@@ -2832,7 +3050,9 @@ static bool handle_normal(Key key) {
                     size_t level = state->rooms.rooms[*cursorlevel].data.room_east;
                     state->cursors[level].x = 0;
                     state->cursors[level].y = state->cursors[*cursorlevel].y;
+                    size_t old_level = *cursorlevel;
                     *cursorlevel = level;
+                    room_prune_blank(old_level);
                 }
             }
             break;
@@ -3482,6 +3702,78 @@ static bool handle_tile_edit(Key key) {
                 done_cycle:
                 return true;
             }
+
+            // Enter, over an object: edit its MOVERTAB.DAT entry. A raw \r or \n both
+            // decode to KEY_CTRL 'M'/'J' (see the ENTER handling elsewhere in this file) -
+            // there is no separate "Ctrl-M" a terminal can send that isn't just Enter.
+            case 'J':
+            case 'M':
+            {
+                struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+                size_t x = state->cursors[state->current_level].x;
+                size_t y = state->cursors[state->current_level].y;
+                // Lazy, not just at editor startup: a long-running hot-reloaded session never
+                // re-runs the startup init that first called movertab_load(), so without this it
+                // would still show an all-zero table from before this feature existed. Needed
+                // before the hit-test below too, not just after it: a sprite's x/y tile offset
+                // (which shifts where it's actually drawn - see room.c's doc comment above
+                // move_desc()) has to be known to match the cursor against where it now sits,
+                // not just its logical tile (Hugh: "when the spidey cursor also selects over the
+                // sprite, it should allow edits").
+                if (!state->movertab_loaded) movertab_load();
+                size_t obj_idx;
+                struct RoomObject *found_obj = NULL;
+                for (obj_idx = 0; obj_idx < room->num_objects; obj_idx++) {
+                    struct RoomObject *obj = room->objects + obj_idx;
+                    // Its logical (x,y) - the definition - always counts as "on" a sprite,
+                    // regardless of how far an x/y offset has since moved it away from there
+                    // (Hugh: "when i go to where it is defined in the level... it is as if i
+                    // were on an empty tile"). The GUI additionally matches the sprite's actual
+                    // rendered box (wider than one tile, and shifted even with no offset at all -
+                    // see render.c's SPRITE_X_PAD), matching what a click there already can do
+                    // (ged_sprite_hit in gui.c, same math) - but the plain TUI never draws that
+                    // picture at all, so that box is invisible and meaningless there: only the
+                    // definition point should work (Hugh: "the sprite doesn't get drawn in the
+                    // tui, so you should only be able to edit via the definition point").
+                    bool sprite_hit = obj->type == SPRITE && (int)x == obj->x && (int)y == obj->y;
+                    if (obj->type == SPRITE && !sprite_hit && screen_headless) {
+                        int dx, dy, w, h; bool fh, fv;
+                        unsigned global = (unsigned)room->UNKNOWN_c + (unsigned)obj_idx;
+                        render_sprite_box(obj, state->movertab, global, &dx, &dy, &w, &h, &fh, &fv);
+                        int px = (int)x * 8, py = (int)y * 8;
+                        sprite_hit = px < dx + w && px + 8 > dx && py < dy + h && py + 8 > dy;
+                    }
+                    // A block's definition rectangle always counts, same as a sprite's logical
+                    // (x,y) - plus, unlike a sprite's rendered box, a block's x/y-offset
+                    // rectangle is a plain, well-defined set of tiles in the TUI too (no picture
+                    // needed to know where it is), so it applies regardless of screen_headless.
+                    bool block_hit = obj->type == BLOCK &&
+                        (int)x >= obj->x && (int)x < obj->x + obj->block.width &&
+                        (int)y >= obj->y && (int)y < obj->y + obj->block.height;
+                    if (obj->type == BLOCK && !block_hit) {
+                        int ox, oy;
+                        unsigned global = (unsigned)room->UNKNOWN_c + (unsigned)obj_idx;
+                        render_block_offset(obj, state->movertab, global, &ox, &oy);
+                        block_hit = (int)x >= ox && (int)x < ox + obj->block.width &&
+                                    (int)y >= oy && (int)y < oy + obj->block.height;
+                    }
+                    if (block_hit || sprite_hit) {
+                        found_obj = obj;
+                        break;
+                    }
+                }
+                if (found_obj == NULL) {
+                    snprintf(state->status_message, sizeof(state->status_message),
+                             "No object here to edit a MOVERTAB entry for");
+                    return true;
+                }
+                state->previous_state = state->current_state;
+                state->current_state = EDIT_MOVERTAB_OBJECT;
+                state->current_object = obj_idx;
+                state->movertab_raw = false;   // always open in the attribute picker, not raw hex
+                state->movertab_block_focus = 0;
+                return true;
+            }
         }
         break;
     case KEY_MOUSE: {
@@ -3608,6 +3900,398 @@ static bool handle_goto_coord(Key key) {
     return true;
 }
 
+// Every bit of a sprite's MOVERTAB byte 2 the attribute picker below assigns a meaning to,
+// per movertab.txt (Hugh's own notes: facing 0x02, upside-down 0x04, moving 0x08, wall-turn
+// 0x10, edge-turn 0x20, chase-Spider-Man 0x40) - i.e. everything except bit 0x01 (glitch) and
+// bit 0x80 (handled separately: 0x00 exactly is "dead", not part of this mask at all).
+#define MOVERTAB_ATTR_MASK 0x7e
+
+// 0x08 is not simply "patrol mode" on its own - live testing (2026-09-18) found 0xc2 (0x40 set,
+// 0x08 clear) is a chaser standing STOPPED, not patrolling, while 0xf8 (0x40 and 0x08 both set)
+// is one actively chasing. So once 0x40 (chase) is set, 0x08 becomes chase's own "currently
+// moving" sub-flag rather than the alternative-to-chase "patrol a fixed direction" mode it is
+// when 0x40 is clear. Also noted: a chaser only stops once it reaches Spider-Man if it's facing
+// the same direction he's on - a gameplay nuance, not something this picker exposes.
+
+// A block's MOVERTAB byte 2, per movertab.txt's "heli" table (Hugh's own notes, confirmed
+// against the whole 0x00-0xf0 range): the low nibble is horizontal, the high nibble vertical,
+// each independently 0 (stationary) or [speed 1-3][direction bit][bounce-at-wall bit] - e.g.
+// 0x09-0x0b is "goes right, bounces off walls" at speed 1-3 (bit 0x08 set), vs 0x01-0x03 "moves
+// right, stops at wall" (bit 0x08 clear) at the same speeds; 0x10-0x30 down/stop, 0x90-0xb0
+// down/bounce, mirrored for up with bits 0x40 (direction) and 0x80 (bounce) in the high nibble.
+// Both nibbles are independent, so e.g. 0x11 (right + down together) should work too, though
+// that specific combination isn't itself in movertab.txt's table. No bit here is ever "always
+// glitchy" the way sprite byte 2's 0x01 is - every value 0x00-0xff decodes to *some* meaning.
+// 's' focus: a directional ratchet, not a plain +-1 (Hugh: "when pressing down on 0 should
+// change dir to v and then speed to 1... if speed > 0 and dir is v then speed++, otherwise
+// speed--... pressing up should do the opposite; vice versa for the other axis"). At speed 0,
+// the key pressed sets the direction and jumps to speed 1; pressing the same direction again
+// increases speed (capped at 3); pressing the opposite direction decreases it (down to 0, where
+// the next same-or-opposite press starts the cycle over). `shift`/`dir_bit` locate that axis's
+// 2-bit speed field and direction bit within byte 2 (horizontal: bits 0-1, 0x04; vertical: bits
+// 4-5, 0x40 - see the "heli" table comment above handle_edit_movertab_object). `pressed_dir` is
+// which way of that axis was pressed, as that axis's direction bit would represent it.
+static void block_speed_ratchet(uint8_t *entry, int shift, uint8_t dir_bit, bool pressed_dir) {
+    int speed = (*entry >> shift) & 0x03;
+    if (speed == 0) {
+        *entry = pressed_dir ? (*entry | dir_bit) : (uint8_t)(*entry & ~dir_bit);
+        speed = 1;
+    } else if (((*entry & dir_bit) != 0) == pressed_dir) {
+        speed = speed < 3 ? speed + 1 : 3;
+    } else {
+        speed--;
+    }
+    *entry = (uint8_t)((*entry & ~(0x03 << shift)) | (speed << shift));
+}
+// 'd' focus: hjkl/arrows set that axis's direction outright (Hugh: "swapping direction for dir"),
+// independent of its current speed.
+static void block_direction_set(uint8_t *entry, uint8_t dir_bit, bool set) {
+    *entry = set ? (*entry | dir_bit) : (uint8_t)(*entry & ~dir_bit);
+}
+
+// MOVERTAB bytes 0/1 (y/x offset in whole tiles - see room.c's doc comment above move_desc()) as
+// signed ints, clamped well clear of the only known-bad spots rather than to a proven safe
+// boundary (Hugh: "just limit those two bytes to where it makes sense" rather than chase the
+// exact glitch edges by hand). X (byte 1) and a block's Y (byte 0) are ordinary two's complement;
+// a sprite's Y (byte 0) is signed in the low 7 bits only, with bit 0x80 untested and left alone.
+#define MOVERTAB_OFFSET_STD_LIMIT 100
+#define MOVERTAB_OFFSET_SPRITE_Y_LIMIT 32
+static int movertab_offset_get_std(uint8_t b) { return (int8_t)b; }
+static uint8_t movertab_offset_set_std(int v) {
+    if (v < -MOVERTAB_OFFSET_STD_LIMIT) v = -MOVERTAB_OFFSET_STD_LIMIT;
+    if (v > MOVERTAB_OFFSET_STD_LIMIT) v = MOVERTAB_OFFSET_STD_LIMIT;
+    return (uint8_t)(int8_t)v;
+}
+static int movertab_offset_get_sprite_y(uint8_t b) {
+    int v = b & 0x7f;
+    if (v & 0x40) v -= 0x80;
+    return v;
+}
+static uint8_t movertab_offset_set_sprite_y(uint8_t b, int v) {
+    if (v < -MOVERTAB_OFFSET_SPRITE_Y_LIMIT) v = -MOVERTAB_OFFSET_SPRITE_Y_LIMIT;
+    if (v > MOVERTAB_OFFSET_SPRITE_Y_LIMIT) v = MOVERTAB_OFFSET_SPRITE_Y_LIMIT;
+    return (uint8_t)((b & 0x80) | ((uint8_t)v & 0x7f));
+}
+int movertab_offset_x(const uint8_t *entry) { return movertab_offset_get_std(entry[1]); }
+int movertab_offset_y(const uint8_t *entry, bool is_sprite) {
+    return is_sprite ? movertab_offset_get_sprite_y(entry[0]) : movertab_offset_get_std(entry[0]);
+}
+// However far `off` already is from `base`, pull it back in if base+off would land outside the
+// room (0..room_tiles-1) - the offset can push a sprite out of its logical tile, but not off the
+// map (Hugh: "that offset should not allow going out of bounds"). One tile of leeway past the
+// low edge (Hugh: "we are allowed -1 more" for y, then "i still can't set offset to make target
+// x = -1... gets clamped too early" - x gets the same -1 leeway as y after all). `extra` shifts
+// both bounds the same way when flip mirrors the axis being clamped (tightens the low/left or
+// top side, loosens the high/right or bottom side - Hugh confirmed the direction, then measured
+// the exact magnitude live per axis: see movertab_clamp_offset).
+static int movertab_offset_in_room(int base, int off, int room_tiles, int extra) {
+    int lo = -1 + extra, hi = room_tiles - 2 + extra;
+    if (base + off < lo) off = lo - base;
+    if (base + off > hi) off = hi - base;
+    return off;
+}
+// Re-clamp an object's stored offset to its current (possibly just-changed) tile position,
+// without otherwise altering it - call this whenever obj->x/obj->y change (see move() in
+// editor_actions.c; Hugh: "if a sprite is moved, it should check its offset and clamp to wall").
+void movertab_clamp_offset(uint8_t *entry, bool is_sprite, int x, int y) {
+    int extra_x = (is_sprite && (entry[2] & 0x02)) ? 2 : 0;   // flip: < (horizontal)
+    int extra_y = (is_sprite && (entry[2] & 0x04)) ? 1 : 0;   // flip: ^ (vertical) - same shift, smaller magnitude (Hugh measured 3 off with -2: "3 more than i should be clamped at [top], then 3 short... at bottom" - both bounds needed +3 from that, landing on +1 overall, not -2)
+    entry[1] = movertab_offset_set_std(movertab_offset_in_room(x, movertab_offset_get_std(entry[1]), WIDTH_TILES, extra_x));
+    int y_off = is_sprite ? movertab_offset_get_sprite_y(entry[0]) : movertab_offset_get_std(entry[0]);
+    y_off = movertab_offset_in_room(y, y_off, HEIGHT_TILES, extra_y);
+    entry[0] = is_sprite ? movertab_offset_set_sprite_y(entry[0], y_off) : movertab_offset_set_std(y_off);
+}
+static void movertab_offset_adjust(uint8_t *entry, bool is_sprite, int x, int y, int dx, int dy) {
+    if (dx) entry[1] = movertab_offset_set_std(movertab_offset_get_std(entry[1]) + dx);
+    if (dy) entry[0] = is_sprite
+        ? movertab_offset_set_sprite_y(entry[0], movertab_offset_get_sprite_y(entry[0]) + dy)
+        : movertab_offset_set_std(movertab_offset_get_std(entry[0]) + dy);
+    movertab_clamp_offset(entry, is_sprite, x, y);
+}
+// hjkl/arrows: adjust the x/y tile offset by default; for a block with 's' or 'd' focus armed,
+// adjust the movement byte instead (up/right = +1 speed or set up/right; down/left = -1 speed or
+// set down/left - see block_speed_adjust/block_direction_set above).
+static void movertab_dir_key(uint8_t *entry, bool is_sprite, int x, int y, int dx, int dy) {
+    if (!is_sprite && (state->movertab_block_focus == 's' || state->movertab_block_focus == 'd')) {
+        bool speed = state->movertab_block_focus == 's';
+        if (dx) {
+            if (speed) block_speed_ratchet(entry + 2, 0, 0x04, dx < 0);   // left = bit set
+            else block_direction_set(entry + 2, 0x04, dx < 0);
+        }
+        if (dy) {
+            if (speed) block_speed_ratchet(entry + 2, 4, 0x40, dy < 0);   // up = bit set
+            else block_direction_set(entry + 2, 0x40, dy < 0);
+        }
+        return;
+    }
+    if (!is_sprite && state->movertab_block_focus == 'w') {
+        // Either direction of an axis toggles that axis's wall bit here - up and down both mean
+        // "|", left and right both mean "-" (Hugh: "allow arrows to toggle their axis... as if
+        // they were both | in this context").
+        if (dx) entry[2] ^= 0x08;
+        if (dy) entry[2] ^= 0x80;
+        return;
+    }
+    movertab_offset_adjust(entry, is_sprite, x, y, dx, dy);
+}
+
+// Enter over an object (handle_tile_edit) enters this to edit that object's MOVERTAB.DAT
+// entry. Opens in the attribute picker, not raw hex entry: every byte-2 value it can produce
+// there is one that's been confirmed to actually work (see room.c's movertab_behavior_desc/
+// MOVERTAB_KNOWN_BEHAVIORS comment) - picking attributes instead of typing hex makes it
+// impossible to land on a glitchy value by accident.
+//   sprite: d toggles dead/alive; f cycles flip (none -> horizontal -> vertical -> both); m/M
+//   cycle movement mode (stopped -> patrol -> chase -> stopped); s toggles chase's own
+//   currently-stopped/moving sub-flag (chase mode only); w/e toggle wall-turning/edge-turning
+//   (patrol or chase only) - all while alive only. See MOVERTAB_ATTR_MASK and the 0x08/0x40
+//   comment just above for where each bit comes from.
+//   block: two independent axes, per movertab.txt's "heli" table (see block_axis_cycle's
+//   comment) - f cycles horizontal stopped/right/left + speed 1-3, w toggles its stop-at-wall/
+//   bounce bit (only while moving horizontally); u/e do the same for vertical (down/up); d/s/m/M
+//   don't apply to a block and are a no-op with a message.
+// hjkl/arrows nudge bytes 1/0 (x/y tile offset - see room.c's doc comment above move_desc() and
+// movertab_offset_adjust above) by 1, for sprite and block alike; the same for both entity types.
+// r toggles into raw hex entry of byte 2 for a combination the attribute picker can't reach yet.
+// No validation once every bit is understood this could refuse a save on a value known to be
+// bad, but that day isn't here yet.
+static bool handle_edit_movertab_object(Key key) {
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    if (state->current_object >= room->num_objects) {
+        state->current_state = state->previous_state;
+        state->previous_state = NORMAL;
+        return true;
+    }
+    struct RoomObject *obj = room->objects + state->current_object;
+    bool is_sprite = obj->type == SPRITE;
+    unsigned global = (unsigned)room->UNKNOWN_c + (unsigned)state->current_object;
+    if (global >= C_ARRAY_LEN(state->movertab) / 3) global = C_ARRAY_LEN(state->movertab) / 3 - 1;
+    uint8_t *entry = state->movertab + global * 3;
+#define SAVE_MOVERTAB() snprintf(state->status_message, sizeof(state->status_message), \
+                                 movertab_save() ? "Saved MOVERTAB.DAT" : "Could not write MOVERTAB.DAT")
+
+    if (state->movertab_raw) {
+        // Just byte 2 now - bytes 0/1 (the x/y offsets) have their own hjkl/arrow controls
+        // below instead of raw hex entry, so there's no second or third byte to navigate to.
+        switch (key.code) {
+            case KEY_CHAR:
+                if (isxdigit(key.ch)) {
+                    int digit = key.ch > '9' ? tolower(key.ch) - 'a' + 10 : key.ch - '0';
+                    if (state->partial_byte & 0xFF00) {
+                        entry[2] = (uint8_t)(((state->partial_byte & 0xFF) << 4) | digit);
+                        state->partial_byte = 0;
+                        SAVE_MOVERTAB();
+                    } else {
+                        state->partial_byte = 0xFF00 | (unsigned)digit;
+                    }
+                } else switch (key.ch) {
+                    case 'r':
+                        state->movertab_raw = false;
+                        state->partial_byte = 0;
+                        break;
+                    case 'q':
+                        if (state->help) { state->help = false; }
+                        else { state->current_state = state->previous_state; state->previous_state = NORMAL; state->partial_byte = 0; }
+                        break;
+                    case '?': state->help = !state->help; break;
+                    default: break;
+                }
+                break;
+            case KEY_BS:
+            case KEY_DELETE:
+                state->partial_byte = 0;
+                break;
+            case KEY_ESC:
+                if (state->help) { state->help = false; }
+                else { state->current_state = state->previous_state; state->previous_state = NORMAL; state->partial_byte = 0; }
+                break;
+            case KEY_CTRL:
+                switch (key.ch) {
+                    case '_': state->help = !state->help; break;
+                    case 'H': state->debug.hex = !state->debug.hex; break;
+                    case 'P': fork_play(); break;
+                }
+                break;
+            default: break;
+        }
+        return true;
+    }
+
+    switch (key.code) {
+        case KEY_CHAR:
+            switch (key.ch) {
+                case 'r':
+                    state->movertab_raw = true;
+                    break;
+                case 'd':
+                    if (!is_sprite) {
+                        state->movertab_block_focus = (state->movertab_block_focus == 'd') ? 0 : 'd';
+                    } else {
+                        // Dead is exactly 0x00, nothing else - remembering the other bits and
+                        // restoring them on revive (as tried before) let a live-tested-glitchy
+                        // combination survive a round trip through dead (Hugh: "it goes glitchy
+                        // on other bits set"). Only byte 2; bytes 0/1 (x/y offset) untouched.
+                        entry[2] = (entry[2] == 0x00) ? 0x80 : 0x00;
+                        SAVE_MOVERTAB();
+                    }
+                    break;
+                case 'f':
+                    if (!is_sprite) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Blocks: s/d/w for speed/direction/walls, then arrows or |/-");
+                    } else if (entry[2] == 0x00) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Dead - press d to make it alive first");
+                    } else {
+                        // Normalise first (drop bit 0x01 and anything outside this picker's
+                        // model, force the 0x80 base): a value raw mode left behind - or,
+                        // once more is known, one an older editor version wrote - must not
+                        // silently keep a glitch bit alive just because attribute mode only
+                        // ever *toggles* relative to whatever was already there.
+                        entry[2] = (entry[2] & MOVERTAB_ATTR_MASK) | 0x80;
+                        // One cycle through both flip bits together (facing 0x02, upside-down
+                        // 0x04) instead of two separate toggle keys: none -> horizontal ->
+                        // vertical -> both -> none.
+                        uint8_t flip = (uint8_t)(((entry[2] & 0x06) + 0x02) & 0x06);
+                        entry[2] = (entry[2] & ~(uint8_t)0x06) | flip;
+                        // The flip bits change which side of the room the offset can safely
+                        // reach (see movertab_clamp_offset) - an offset that was fine before this
+                        // flip might not be any more, so re-check it now rather than only on the
+                        // next hjkl/arrow press (Hugh: "when you do a flip action, it should also
+                        // ensure any clamp necessary").
+                        movertab_clamp_offset(entry, is_sprite, obj->x, obj->y);
+                        SAVE_MOVERTAB();
+                    }
+                    break;
+                case 's':
+                    if (!is_sprite) {
+                        state->movertab_block_focus = (state->movertab_block_focus == 's') ? 0 : 's';
+                    } else if (entry[2] == 0x00) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Dead - press d to make it alive first");
+                    } else if (!(entry[2] & 0x40)) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Only a chasing enemy can be stopped - press m to chase first");
+                    } else {
+                        entry[2] = (entry[2] & MOVERTAB_ATTR_MASK) | 0x80;   // see the comment in 'f' above
+                        entry[2] ^= 0x08;
+                        SAVE_MOVERTAB();
+                    }
+                    break;
+                case 'm':
+                case 'M':
+                    if (!is_sprite) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Blocks: f/w for horizontal, u/e for vertical");
+                    } else if (entry[2] == 0x00) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Dead - press d to make it alive first");
+                    } else {
+                        entry[2] = (entry[2] & MOVERTAB_ATTR_MASK) | 0x80;   // see the comment in 'f' above
+                        // 3 movement modes: stopped (neither bit), patrol (0x08 alone, per
+                        // movertab.txt's 0x8X/0x9X/0xaX/0xbX families), chase (0x40 set, the
+                        // 0xcX-0xfX families) - checked chase-first because 0x40 and 0x08 can
+                        // now coexist (see the 0x08/0x40 comment above): within chase, 0x08 is
+                        // its own "currently moving, not stopped" sub-flag (toggled by 's'), not
+                        // an alternative mode.
+                        int mode = (entry[2] & 0x40) ? 2 : (entry[2] & 0x08) ? 1 : 0;
+                        mode = (mode + (key.ch == 'm' ? 1 : 2)) % 3;
+                        entry[2] &= ~(uint8_t)0x48;
+                        if (mode == 0) entry[2] &= ~(uint8_t)0x30;   // stopped: wall/edge modifiers are meaningless too
+                        else if (mode == 1) entry[2] |= 0x08;
+                        else entry[2] |= 0x48;   // chase defaults to actively moving, not stopped - 's' can stop it
+                        SAVE_MOVERTAB();
+                    }
+                    break;
+                case 'w':
+                    if (!is_sprite) {
+                        // Only one axis moving means only one wall option exists - toggle it
+                        // directly rather than making the user disambiguate with |/- (Hugh: "if
+                        // there is only one wall option, w should just toggle it... but if two,
+                        // then | -"). Both, or neither, moving: arm focus as before.
+                        bool v_moving = ((entry[2] >> 4) & 0x03) != 0, h_moving = (entry[2] & 0x03) != 0;
+                        if (v_moving && !h_moving) { entry[2] ^= 0x80; SAVE_MOVERTAB(); }
+                        else if (h_moving && !v_moving) { entry[2] ^= 0x08; SAVE_MOVERTAB(); }
+                        else state->movertab_block_focus = (state->movertab_block_focus == 'w') ? 0 : 'w';
+                    } else if (entry[2] == 0x00) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Dead - press d to make it alive first");
+                    } else if (!(entry[2] & 0x48)) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Not moving - press m first");
+                    } else {
+                        entry[2] = (entry[2] & MOVERTAB_ATTR_MASK) | 0x80;   // see the comment in 'f' above
+                        entry[2] ^= 0x10;
+                        SAVE_MOVERTAB();
+                    }
+                    break;
+                case 'u':
+                    if (!is_sprite) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Blocks: s/d/w for speed/direction/walls, then arrows or |/-");
+                    } else {
+                        snprintf(state->status_message, sizeof(state->status_message), "Sprites don't have a vertical movement axis");
+                    }
+                    break;
+                case '|':
+                case '-':
+                    if (!is_sprite && state->movertab_block_focus) {
+                        // | acts on the vertical axis, - the horizontal - same convention as
+                        // "gravity (|)"/"gravity (-)" in EDIT_ROOMDETAILS. In s/d focus this
+                        // negates that axis's direction (Hugh: "s also does speed = -speed" -
+                        // flips the sign, keeps the magnitude); in w focus it toggles that
+                        // axis's stop-at-wall/bounce-back bit.
+                        uint8_t dir_bit = key.ch == '|' ? 0x40 : 0x04;
+                        uint8_t wall_bit = key.ch == '|' ? 0x80 : 0x08;
+                        if (state->movertab_block_focus == 'w') entry[2] ^= wall_bit;
+                        else entry[2] ^= dir_bit;
+                        SAVE_MOVERTAB();
+                    }
+                    break;
+                case 'e':
+                    if (!is_sprite) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Blocks: s/d/w for speed/direction/walls, then arrows or |/-");
+                    } else if (entry[2] == 0x00) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Dead - press d to make it alive first");
+                    } else if (!(entry[2] & 0x48)) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Not moving - press m first");
+                    } else {
+                        entry[2] = (entry[2] & MOVERTAB_ATTR_MASK) | 0x80;   // see the comment in 'f' above
+                        entry[2] ^= 0x20;
+                        SAVE_MOVERTAB();
+                    }
+                    break;
+                case 'q':
+                    if (state->help) {
+                        state->help = false;
+                    } else {
+                        state->current_state = state->previous_state;
+                        state->previous_state = NORMAL;
+                    }
+                    break;
+                case '?': state->help = !state->help; break;
+                case 'h': movertab_dir_key(entry, is_sprite, obj->x, obj->y, -1, 0); SAVE_MOVERTAB(); break;
+                case 'l': movertab_dir_key(entry, is_sprite, obj->x, obj->y, 1, 0); SAVE_MOVERTAB(); break;
+                case 'k': movertab_dir_key(entry, is_sprite, obj->x, obj->y, 0, -1); SAVE_MOVERTAB(); break;
+                case 'j': movertab_dir_key(entry, is_sprite, obj->x, obj->y, 0, 1); SAVE_MOVERTAB(); break;
+                default: break;
+            }
+            break;
+        case KEY_LEFT:  movertab_dir_key(entry, is_sprite, obj->x, obj->y, -1, 0); SAVE_MOVERTAB(); break;
+        case KEY_RIGHT: movertab_dir_key(entry, is_sprite, obj->x, obj->y, 1, 0); SAVE_MOVERTAB(); break;
+        case KEY_UP:    movertab_dir_key(entry, is_sprite, obj->x, obj->y, 0, -1); SAVE_MOVERTAB(); break;
+        case KEY_DOWN:  movertab_dir_key(entry, is_sprite, obj->x, obj->y, 0, 1); SAVE_MOVERTAB(); break;
+        case KEY_ESC:
+            if (state->help) {
+                state->help = false;
+            } else {
+                state->current_state = state->previous_state;
+                state->previous_state = NORMAL;
+            }
+            break;
+        case KEY_CTRL:
+            switch (key.ch) {
+                case '_': state->help = !state->help; break;
+                case 'H': state->debug.hex = !state->debug.hex; break;
+                case 'P': fork_play(); break;
+            }
+            break;
+        default: break;
+    }
+#undef SAVE_MOVERTAB
+    return true;
+}
+
 static state_handler_fn state_handlers[NUM_STATES] = {
     [GOTO_OBJECT]      = handle_goto_object,
     [GOTO_SWITCH]      = handle_goto_switch,
@@ -3619,12 +4303,14 @@ static state_handler_fn state_handlers[NUM_STATES] = {
     [EDIT_ROOMDETAILS_NUM]                         = handle_edit_roomdetails_num,
     [EDIT_ROOMDETAILS_ROOM]                        = handle_edit_roomdetails_room,
     [EDIT_SWITCHDETAILS]                           = handle_edit_switchdetails,
+    [EDIT_SWITCHDETAILS_XY]                        = handle_edit_switchdetails_xy,
     [EDIT_SWITCHDETAILS_SELECT_CHUNK]              = handle_edit_switchdetails_select_chunk,
     [EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS]      = handle_edit_switchdetails_chunk_switch,
     [EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS_ROOM] = handle_edit_switchdetails_chunk_switch_room,
     [EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS]      = handle_edit_switchdetails_chunk_memory,
     [EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS]       = handle_edit_switchdetails_chunk_block,
     [EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS]      = handle_edit_switchdetails_chunk_object,
+    [EDIT_MOVERTAB_OBJECT]                         = handle_edit_movertab_object,
     [TILE_EDIT]        = handle_tile_edit,
     [NORMAL]           = handle_normal,
 };
@@ -3696,7 +4382,6 @@ static void open_switch(int id) {
 
 static const struct { const char *label; char key; } room_fields[] = {
     {"bkgrnd", 'g'}, {"tiles", 't'}, {"dmg", 'd'}, {"gravity (|)", '|'}, {"gravity (-)", '-'},
-    {"UNKNOWN_b", 'b'}, {"UNKNOWN_c", 'c'}, {"UNKNOWN_e", 'e'}, {"UNKNOWN_f", 'f'},
     {"left", 'h'}, {"down", 'j'}, {"up", 'k'}, {"right", 'l'},
 };
 

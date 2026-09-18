@@ -166,14 +166,21 @@ static void draw_tile(uint8_t *cv, const uint8_t *data, size_t len, int idx, int
 }
 
 // One 24x21 SPIDS frame, its key colour left undrawn.
-static void draw_spids(uint8_t *cv, const uint8_t *data, size_t len, const uint8_t *mask, size_t mask_len, int frame, int dx, int dy, bool cga) {
+// flip_h/flip_v mirror which source pixel is sampled (not where it's drawn): a MOVERTAB byte 2
+// facing-left or upside-down sprite is the same frame data, mirrored, at the same anchor - see
+// room.c's movertab_behavior_desc comment on why this replaced an earlier "shift x by 1"
+// theory (an asymmetric frame like blue_man's 0x26, which only draws on one half of its cell,
+// looks shifted when mirrored even though the anchor never moved).
+static void draw_spids(uint8_t *cv, const uint8_t *data, size_t len, const uint8_t *mask, size_t mask_len, int frame, int dx, int dy, bool cga, bool flip_h, bool flip_v) {
     size_t base = (size_t)frame * spids_stride(cga);
     if (base >= len) return;
     bool masked = cga && mask != NULL && base < mask_len;
     for (int y = 0; y < SPIDS_H; y++)
         for (int x = 0; x < SPIDS_W; x++) {
-            int c = img_pixel(data + base, len - base, SPIDS_W, SPIDS_H, x, y, cga, false);
-            bool clear = masked ? img_pixel(mask + base, mask_len - base, SPIDS_W, SPIDS_H, x, y, true, false) == MASK_KEEP
+            int sx = flip_h ? (SPIDS_W - 1 - x) : x;
+            int sy = flip_v ? (SPIDS_H - 1 - y) : y;
+            int c = img_pixel(data + base, len - base, SPIDS_W, SPIDS_H, sx, sy, cga, false);
+            bool clear = masked ? img_pixel(mask + base, mask_len - base, SPIDS_W, SPIDS_H, sx, sy, true, false) == MASK_KEEP
                                 : c == sprite_key(cga);
             if (!clear) put_px(cv, dx + x, dy + y, palette(cga)[c]);
         }
@@ -451,22 +458,32 @@ static void free_assets(Assets *a) {
 }
 
 // One frame of a sprite sheet of an asset set, through its CGA mask if any.
-static void draw_sprite(uint8_t *cv, const Assets *a, GfxSource src, int frame, int dx, int dy) {
+static void draw_sprite(uint8_t *cv, const Assets *a, GfxSource src, int frame, int dx, int dy, bool flip_h, bool flip_v) {
     GfxSource m = mask_of(src);
-    draw_spids(cv, a->data[src], a->len[src], a->cga && m != GFX_SOURCES ? a->data[m] : NULL, m != GFX_SOURCES ? a->len[m] : 0, frame, dx, dy, a->cga);
+    draw_spids(cv, a->data[src], a->len[src], a->cga && m != GFX_SOURCES ? a->data[m] : NULL, m != GFX_SOURCES ? a->len[m] : 0, frame, dx, dy, a->cga, flip_h, flip_v);
 }
 
 // Effective foreground tile at (x,y), mirroring dumpRoom's resolution: a BLOCK
 // object's own tile data overrides the base tilemap, and a TOGGLE_BLOCK switch
 // chunk (shown in its "on" state) overrides that. Sprites are NOT applied here
-// (they're drawn as real sprite graphics on top).
-static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y) {
+// (they're drawn as real sprite graphics on top). A block with a nonzero
+// MOVERTAB x/y offset is drawn only at its offset position (see the pass in
+// render_room_base right after this), not at its logical (x,y) too - so it
+// doesn't override the base tile at both places at once.
+static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y, const uint8_t *movertab) {
     uint8_t tile = room->tiles[y * WIDTH_TILES + x];
     for (int o = 0; o < room->num_objects; o++) {
         struct RoomObject *ob = room->objects + o;
         if (ob->type == BLOCK && ob->tiles &&
             x >= ob->x && x < ob->x + ob->block.width &&
             y >= ob->y && y < ob->y + ob->block.height) {
+            if (movertab) {
+                unsigned global = (unsigned)room->UNKNOWN_c + (unsigned)o;
+                if (global < 256) {
+                    const uint8_t *entry = movertab + global * 3;
+                    if ((int8_t)entry[1] != 0 || (int8_t)entry[0] != 0) break;   // drawn at the offset position instead, below
+                }
+            }
             return ob->tiles[(y - ob->y) * ob->block.width + (x - ob->x)];
         }
     }
@@ -484,10 +501,61 @@ static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y) {
     return tile;
 }
 
+// A block object's tile-space origin once its MOVERTAB x/y offset (bytes 1/0, ordinary two's
+// complement for both - see room.c's doc comment above move_desc()) is applied; block.width/
+// height are unaffected. False for anything but a BLOCK. Shared with gui_editor.c's click
+// hit-test and the TUI's Enter-key/display hit-tests, the same reasoning as render_sprite_box.
+bool render_block_offset(struct RoomObject *o, const uint8_t *movertab, unsigned global, int *ox, int *oy) {
+    if (o->type != BLOCK) return false;
+    *ox = o->x;
+    *oy = o->y;
+    if (movertab && global < 256) {
+        const uint8_t *entry = movertab + global * 3;
+        *ox += (int8_t)entry[1];
+        *oy += (int8_t)entry[0];
+    }
+    return true;
+}
+
+// Where a sprite object actually draws (top-left, plus its frame size) once flip and the x/y
+// pixel offset (MOVERTAB bytes 1/0 - see room.c's doc comment above move_desc()) are applied.
+// Exposed so gui_editor.c's click hit-testing can select a sprite at its rendered position, not
+// just its logical tile, without duplicating this math a third time.
+bool render_sprite_box(struct RoomObject *o, const uint8_t *movertab, unsigned global,
+                        int *dx, int *dy, int *w, int *h, bool *flip_h, bool *flip_v) {
+    if (o->type != SPRITE) return false;
+    *dx = (o->x + 1 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE;
+    *dy = (o->y + 1 + 1) * 8 - SPIDS_H;
+    *w = SPIDS_W;
+    *h = SPIDS_H;
+    *flip_h = *flip_v = false;
+    if (movertab && global < 256) {
+        const uint8_t *entry = movertab + global * 3;
+        uint8_t b2 = entry[2];
+        *flip_h = (b2 & 0x02) != 0;
+        *flip_v = (b2 & 0x04) != 0;
+        // The anchor itself moves, not just the bitmap (confirmed against the real game,
+        // 2026-09-18: mirroring the frame alone didn't match what loads) - one tile (8px),
+        // not two: movertab.txt's "+1"/"-1" feet position is relative to a raw/unshifted
+        // anchor neither of dx/dy actually is (both already carry their own base offset), so
+        // the flip only needs to move by the one-tile difference this renderer's own baseline
+        // and its mirrored counterpart actually have, not literally re-derive "+1 to -1".
+        if (*flip_h) *dx -= 8;
+        if (*flip_v) *dy -= 8;
+        // bytes 0/1: x/y offset in whole tiles, not pixels (Hugh, 2026-09-18: the sprite wasn't
+        // moving as far in this renderer as it does in the real game - each unit is a tile, 8px).
+        *dx += (int8_t)entry[1] * 8;
+        int offy = entry[0] & 0x7f;
+        if (offy & 0x40) offy -= 0x80;
+        *dy += offy * 8;
+    }
+    return true;
+}
+
 // Fill a BW*BH*3 RGB buffer with one room (background + foreground + sprites,
 // plus the overlay if requested). Assumes the room is valid.
 static void render_room_base(RoomFile *file, int room_id,
-                             const Assets *a, bool debug, bool player, uint8_t *cv) {
+                             const Assets *a, bool debug, bool player, uint8_t *cv, const uint8_t *movertab) {
     struct DecompressedRoom *room = &file->rooms[room_id].data;
     memset(cv, 0, (size_t)BW * BH * 3);
 
@@ -499,20 +567,37 @@ static void render_room_base(RoomFile *file, int room_id,
         }
     for (int ty = 0; ty < HEIGHT_TILES; ty++)
         for (int tx = 0; tx < WIDTH_TILES; tx++) {
-            int v = effective_tile(room, tx, ty) & 0x3f;
+            int v = effective_tile(room, tx, ty, movertab) & 0x3f;
             if (v) draw_tile(cv, a->data[GFX_TILES], a->len[GFX_TILES], v + room->tile_offset * 16, tx * 8, ty * 8, a->cga);
         }
+    // A block with a nonzero x/y offset draws there instead of at its logical (x,y) - effective_tile
+    // (above) already skipped it at the logical position once it saw the same offset.
+    for (int i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        if (o->type != BLOCK || !o->tiles) continue;
+        int ox, oy;
+        render_block_offset(o, movertab, (unsigned)room->UNKNOWN_c + (unsigned)i, &ox, &oy);
+        if (ox == o->x && oy == o->y) continue;
+        for (int by = 0; by < (int)o->block.height; by++)
+            for (int bx = 0; bx < (int)o->block.width; bx++) {
+                int tx = ox + bx, ty = oy + by;
+                if (tx < 0 || tx >= WIDTH_TILES || ty < 0 || ty >= HEIGHT_TILES) continue;
+                uint8_t v = o->tiles[by * (int)o->block.width + bx] & 0x3f;
+                if (v) draw_tile(cv, a->data[GFX_TILES], a->len[GFX_TILES], v + room->tile_offset * 16, tx * 8, ty * 8, a->cga);
+            }
+    }
     for (int i = 0; i < room->num_objects; i++) {
         struct RoomObject *o = room->objects + i;
         if (o->type != SPRITE) continue;
         int s2, frame;
         creature_frame(o->sprite.type, o->sprite.damage, &s2, &frame);
-        int dx = (o->x + 1 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE;
-        int dy = (o->y + 1 + 1) * 8 - SPIDS_H;
-        draw_sprite(cv, a, s2 ? GFX_SPIDS2 : GFX_SPIDS1, frame, dx, dy);
+        int dx, dy, w, h;
+        bool flip_h, flip_v;
+        render_sprite_box(o, movertab, (unsigned)room->UNKNOWN_c + (unsigned)i, &dx, &dy, &w, &h, &flip_h, &flip_v);
+        draw_sprite(cv, a, s2 ? GFX_SPIDS2 : GFX_SPIDS1, frame, dx, dy, flip_h, flip_v);
     }
     if (player && room_id == PLAYER_ROOM)
-        draw_sprite(cv, a, GFX_SPIDS1, PLAYER_FRAME, (3 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE, (20 + 1) * 8 - SPIDS_H);
+        draw_sprite(cv, a, GFX_SPIDS1, PLAYER_FRAME, (3 - SPRITE_X_PAD) * 8 + SPRITE_X_NUDGE, (20 + 1) * 8 - SPIDS_H, false, false);
     if (debug) draw_overlay(cv, room);
 }
 
@@ -543,7 +628,7 @@ bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOp
     uint8_t *cv = malloc((size_t)BW * BH * 3);
     bool ok = cv != NULL;
     if (ok) {
-        render_room_base(file, room_id, &a, opts.debug, true, cv);
+        render_room_base(file, room_id, &a, opts.debug, true, cv, opts.movertab);
         ok = write_scaled(out_path, cv, opts.scale > 0 ? opts.scale : 1);
     }
     free(cv); free_assets(&a);
@@ -565,7 +650,7 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
         if (!file->rooms[rid].valid) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/room%02d.png", out_dir, rid);
-        render_room_base(file, rid, &a, opts.debug, true, cv);
+        render_room_base(file, rid, &a, opts.debug, true, cv, opts.movertab);
         ok = write_scaled(path, cv, opts.scale > 0 ? opts.scale : 1);
         n++;
     }
@@ -581,6 +666,7 @@ struct RenderCtx {
     Assets a;
     char dir[1024];
     bool hide_player;
+    const uint8_t *movertab;
 };
 
 RenderCtx *render_open(const char *data_dir, bool cga) {
@@ -606,8 +692,12 @@ void render_close(RenderCtx *ctx) {
 bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out) {
     if (ctx == NULL || room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid)
         return false;
-    render_room_base(file, room_id, &ctx->a, false, !ctx->hide_player, out);
+    render_room_base(file, room_id, &ctx->a, false, !ctx->hide_player, out, ctx->movertab);
     return true;
+}
+
+void render_set_movertab(RenderCtx *ctx, const uint8_t *movertab) {
+    if (ctx) ctx->movertab = movertab;
 }
 
 void render_show_player(RenderCtx *ctx, bool show) {
@@ -911,7 +1001,7 @@ bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
         for (int i = 0; i < mw * mh; i++) { m[i*3] = 40; m[i*3+1] = 40; m[i*3+2] = 48; }
         for (int rid = 0; rid < 64; rid++) {
             if (!file->rooms[rid].valid) continue;
-            render_room_base(file, rid, &a, opts.debug, true, cv);
+            render_room_base(file, rid, &a, opts.debug, true, cv, opts.movertab);
             int ox = pad + (rid % 8) * (cw + pad), oy = pad + (rid / 8) * (ch + pad);
             for (int y = 0; y < ch; y++)
                 for (int x = 0; x < cw; x++) {
