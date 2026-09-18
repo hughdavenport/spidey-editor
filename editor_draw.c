@@ -208,8 +208,8 @@ help_keys help[][100] = {
         {"Down/j", "side: bottom"},
         {"Up/k", "side: top"},
         {"Right/l", "side: right"},
-        {"X", "edit x (0-31; 22-31 is off-grid)"},
-        {"Y", "edit y (0-31; 22-31 is off-grid)"},
+        {"X", "edit x (0-31 / 0x00-0x1f)"},
+        {"Y", "edit y (0-21 / 0x00-0x15 on grid; 22 / 0x16 is off screen)"},
         {"+", "increase switch id"},
         {"-", "decrease switch id"},
         {"y", "yank switch"},
@@ -225,7 +225,7 @@ help_keys help[][100] = {
     },
 
     [EDIT_SWITCHDETAILS_XY]={
-        {"0-9a-fA-F", "value (0-31; wraps into the 5-bit field)"},
+        {"0-9a-fA-F", "value (see switchdetails_xy_help - text depends on X vs Y)"},
         {"ESC/q/Ctrl-s", "cancel"},
         {"Ctrl-p", "play (play.sh)"},
         {"Ctrl-?", "help"},
@@ -335,6 +335,16 @@ help_keys help[][100] = {
 };
 _Static_assert(C_ARRAY_LEN(help) == NUM_STATES, "Unhandled for all states");
 
+// EDIT_SWITCHDETAILS_XY's first line depends on which field is being entered: X's full
+// 0-31 range is on screen (WIDTH_TILES=32), but Y's on-screen range is only 0-21
+// (HEIGHT_TILES=22) - row 22 is the switch-out-of-bounds convention, a single row, not
+// a range up to 31.
+static const char *switchdetails_xy_help(void) {
+    return state->room_detail == 'X'
+        ? "value 0-31 / 0x00-0x1f"
+        : "value 0-21 / 0x00-0x15 on grid; 22 / 0x16 is off screen";
+}
+
 void show_help()
 {
     int x = 0, x1 = 0, x2 = 0, y = 0;
@@ -345,7 +355,9 @@ void show_help()
         if (help[state->current_state][i].action == NULL) {
             fprintf(stderr, "here\n");
         }
-        len = strlen(help[state->current_state][i].action);
+        const char *action = (state->current_state == EDIT_SWITCHDETAILS_XY && i == 0)
+            ? switchdetails_xy_help() : help[state->current_state][i].action;
+        len = strlen(action);
         if (len > x2) x2 = len;
     }
     x = x1 + x2 + 5;
@@ -388,7 +400,9 @@ void show_help()
     for (size_t i = 0; i < C_ARRAY_LEN(help[state->current_state]); i ++) {
         if (help[state->current_state][i].key == NULL) break;
         GOTO(hx, hy + line); line ++;
-        scr_printf("|%-*s - %-*s|", x1, help[state->current_state][i].key, x - x1 - 5, help[state->current_state][i].action);
+        const char *action = (state->current_state == EDIT_SWITCHDETAILS_XY && i == 0)
+            ? switchdetails_xy_help() : help[state->current_state][i].action;
+        scr_printf("|%-*s - %-*s|", x1, help[state->current_state][i].key, x - x1 - 5, action);
     }
 }
 

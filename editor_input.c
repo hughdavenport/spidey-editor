@@ -39,6 +39,9 @@ static void sprite_toggle_stopped(uint8_t *v);
 static void sprite_toggle_wall(uint8_t *v);
 static void sprite_toggle_edge(uint8_t *v);
 static void sprite_cycle_mode(uint8_t *v, int dir);
+static uint8_t movertab_offset_set_std(int v);
+static uint8_t movertab_offset_set_sprite_y(uint8_t b, int v);
+static void movertab_reset_entry(unsigned global, bool is_sprite);
 
 /* Run play.sh detached. PLAY_ROOM tells it which room to start in (it swaps
  * that room into slot 1, the game's start room, in the copy the game runs). */
@@ -3865,6 +3868,7 @@ static bool handle_tile_edit(Key key) {
                     assert(room->objects[idx].tiles != NULL);
                     room->objects[idx].tiles[0] = room->tiles[TILE_IDX(x, y)];
                     room->num_objects++;
+                    movertab_reset_entry((unsigned)room->UNKNOWN_c + (unsigned)idx, false);
                 } else {
                     static const char *sprite_names[] = {
                         "Shark", "Mummy", "Blue man", "Wolf",
@@ -3882,12 +3886,14 @@ static bool handle_tile_edit(Key key) {
                         }
                     }
                     push_undo((uint8_t)state->current_level, false);
+                    unsigned found_global = (unsigned)room->UNKNOWN_c + (unsigned)(found_obj - room->objects);
                     if (found_obj->type == BLOCK) {
                         free(found_obj->tiles);
                         found_obj->tiles = NULL;
                         found_obj->type = SPRITE;
                         found_obj->sprite.type = SHARK;
                         found_obj->sprite.damage = 1;
+                        movertab_reset_entry(found_global, true);
                         snprintf(state->status_message, sizeof(state->status_message),
                                  "Sprite: %s", sprite_names[SHARK]);
                     } else if ((int)found_obj->sprite.type + 1 >= NUM_SPRITE_TYPES) {
@@ -3897,6 +3903,7 @@ static bool handle_tile_edit(Key key) {
                         found_obj->tiles = malloc(1);
                         assert(found_obj->tiles != NULL);
                         found_obj->tiles[0] = room->tiles[TILE_IDX(found_obj->x, found_obj->y)];
+                        movertab_reset_entry(found_global, false);
                         snprintf(state->status_message, sizeof(state->status_message), "Block");
                     } else {
                         found_obj->sprite.type = (SpriteType)(found_obj->sprite.type + 1);
@@ -4232,6 +4239,20 @@ static uint8_t movertab_offset_set_sprite_y(uint8_t b, int v) {
     if (v < -MOVERTAB_OFFSET_SPRITE_Y_LIMIT) v = -MOVERTAB_OFFSET_SPRITE_Y_LIMIT;
     if (v > MOVERTAB_OFFSET_SPRITE_Y_LIMIT) v = MOVERTAB_OFFSET_SPRITE_Y_LIMIT;
     return (uint8_t)((b & 0x80) | ((uint8_t)v & 0x7f));
+}
+// Reset a newly-created or type-cycled object's MOVERTAB entry to each type's baseline
+// (Hugh, 2026-09-19): a block gets 0,0 offset and byte 2 = 0x88 (stationary, confirmed in
+// room.c's byte-2 survey); a sprite gets -1,-1 offset and byte 2 = 0xb8 (patrolling, the
+// original game's own default for a live sprite). Applies on Ctrl-O create-new-block,
+// block->sprite, and sprite(last type)->block - not the plain sprite-type cycle in between.
+static void movertab_reset_entry(unsigned global, bool is_sprite) {
+    if (!state->movertab_loaded) movertab_load();
+    if (global >= C_ARRAY_LEN(state->movertab) / 3) return;
+    uint8_t *entry = state->movertab + global * 3;
+    entry[1] = movertab_offset_set_std(is_sprite ? -1 : 0);
+    entry[0] = is_sprite ? movertab_offset_set_sprite_y(0, -1) : movertab_offset_set_std(0);
+    entry[2] = is_sprite ? 0xb8 : 0x88;
+    movertab_save();
 }
 int movertab_offset_x(const uint8_t *entry) { return movertab_offset_get_std(entry[1]); }
 int movertab_offset_y(const uint8_t *entry, bool is_sprite) {
