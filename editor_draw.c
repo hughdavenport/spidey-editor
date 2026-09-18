@@ -1532,6 +1532,125 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
     }
 
+    // Sprite/block hover info right after the neighbours compass - previously this sat after
+    // the switches section (including its out-of-bounds listing, which can run long), so it
+    // could end up many lines below the compass instead of just after that one blank line
+    // (Hugh: "blocks, sprites show up below the out of bounds switches. they should be
+    // above, just with one blank line below the down room").
+    if (state->debug.objects || state->current_state == EDIT_MOVERTAB_OBJECT) {
+        bool obj_selected = switch_underneath == NULL && chunk_switch_underneath == NULL;
+        bool first_hit = true;
+        /* Pass 1: sprites first (on top) */
+        for (size_t i = 0; i < room.num_objects; i++) {
+            struct RoomObject *obj = room.objects + i;
+            if (obj->type != SPRITE) continue;
+            // Its logical (x,y) - the definition - always counts as "on" a sprite, regardless of
+            // how far an x/y offset has since moved it away from there (Hugh: "when i go to
+            // where it is defined in the level... it is as if i were on an empty tile"). The GUI
+            // additionally matches the sprite's actual rendered box (SPRITE_X_PAD widens and
+            // shifts it even with no offset at all, see render.c) - but the plain TUI never
+            // draws that picture at all, so that box is invisible and meaningless there: only
+            // the definition point should work there (Hugh: "the sprite doesn't get drawn in
+            // the tui, so you should only be able to edit via the definition point"). The
+            // Enter-key hit-test in handle_tile_edit (editor_input.c) uses this same pair.
+            bool hit = (int)x == obj->x && (int)y == obj->y;
+            if (!hit && screen_headless) {
+                int dx, dy, w, h; bool fh, fv;
+                render_sprite_box(obj, state->movertab, (unsigned)room.UNKNOWN_c + (unsigned)i, &dx, &dy, &w, &h, &fh, &fv);
+                int px = (int)x * 8, py = (int)y * 8;
+                hit = px < dx + w && px + 8 > dx && py < dy + h && py + 8 > dy;
+            }
+            if (!hit) continue;
+            // The box/offset checks above can now match several sprites/blocks around the
+            // cursor at once (unlike the old exact-tile-only test, which could match at most
+            // one) - stop adding rows once the screen is nearly full rather than assert past its
+            // bottom (a real crash Hugh hit: "editor_draw.c:1859: redraw: Assertion `(bottom) <
+            // state->screen_dimensions.y ... failed"). Two rows of margin: the summary line
+            // below plus draw_movertab_entry's own line.
+            if (bottom >= state->screen_dimensions.y - 2) continue;
+            bool is_active = first_hit && obj_selected;
+            first_hit = false;
+            GOTO(0, bottom); bottom++;
+            scr_printf("sprite ");
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
+            PRINTF_DATA((uint16_t)i);
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
+            scr_printf(": ");
+            switch(obj->sprite.type) {
+                case SHARK:
+                    switch (obj->sprite.damage) {
+                        case 1:
+                        case 2: scr_printf("Shark"); break;
+                        case 3: scr_printf("Mysterio"); break;
+                        case 4: scr_printf("Mary Jane"); break;
+                        default: UNREACHABLE();
+                    }
+                    break;
+                case MUMMY: scr_printf("Mummy"); break;
+                case BLUE_MAN: scr_printf("Blue man"); break;
+                case WOLF: scr_printf("Wolf"); break;
+                case R2D2: scr_printf("R2D2"); break;
+                case DINOSAUR: scr_printf("Dinosaur"); break;
+                case RAT: scr_printf("Rat"); break;
+                case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
+                default: UNREACHABLE();
+            }
+            scr_printf(" (x,y)=");
+            PRINTF_DATA(obj->x);
+            scr_printf(",");
+            PRINTF_DATA(obj->y);
+            scr_printf(" (dmg)=");
+            PRINTF_DATA(obj->sprite.damage);
+            draw_movertab_offset((unsigned)room.UNKNOWN_c + (unsigned)i, true,
+                                  state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i);
+            draw_movertab_entry((unsigned)room.UNKNOWN_c + (unsigned)i,
+                                 state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i,
+                                 &bottom, true);
+        }
+        /* Pass 2: blocks underneath */
+        for (size_t i = 0; i < room.num_objects; i++) {
+            struct RoomObject *obj = room.objects + i;
+            if (obj->type != BLOCK) continue;
+            // Its definition rectangle always counts as "on" a block, same reasoning as a
+            // sprite's logical (x,y) - plus, unlike a sprite's rendered box (only meaningful
+            // where there's an actual picture), a block's x/y-offset rectangle is a plain,
+            // well-defined set of tiles regardless of TUI or GUI, so it applies in both (Hugh:
+            // "i would like to be able to edit it when spidey is over its drawn location, and
+            // also its definition byte... i want both").
+            bool in_def = x >= obj->x && x < obj->x + (int)obj->block.width &&
+                          y >= obj->y && y < obj->y + (int)obj->block.height;
+            bool in_off = false;
+            if (!in_def) {
+                int ox, oy;
+                render_block_offset(obj, state->movertab, (unsigned)room.UNKNOWN_c + (unsigned)i, &ox, &oy);
+                in_off = x >= ox && x < ox + (int)obj->block.width &&
+                         y >= oy && y < oy + (int)obj->block.height;
+            }
+            if (!in_def && !in_off) continue;
+            if (bottom >= state->screen_dimensions.y - 2) continue;   // see the same guard in the sprite pass above
+            bool is_active = first_hit && obj_selected;
+            first_hit = false;
+            GOTO(0, bottom); bottom++;
+            scr_printf("block ");
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
+            PRINTF_DATA((uint16_t)i);
+            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
+            scr_printf(": (x,y)=");
+            PRINTF_DATA(obj->x);
+            scr_printf(",");
+            PRINTF_DATA(obj->y);
+            scr_printf(" (w,h)=");
+            PRINTF_DATA(obj->block.width);
+            scr_printf(",");
+            PRINTF_DATA(obj->block.height);
+            draw_movertab_offset((unsigned)room.UNKNOWN_c + (unsigned)i, false,
+                                  state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i);
+            draw_movertab_entry((unsigned)room.UNKNOWN_c + (unsigned)i,
+                                 state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i,
+                                 &bottom, false);
+        }
+    }
+
     if (state->current_state == EDIT_ROOMNAME) {
         GOTO(0, bottom); bottom +=2;
         scr_printf("\nEnter new room name in space highlighted at top of screen");
@@ -2089,120 +2208,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             }
         }
         if (found) panel_oob_row1 = bottom;
-    }
-
-    if (state->debug.objects || state->current_state == EDIT_MOVERTAB_OBJECT) {
-        bool obj_selected = switch_underneath == NULL && chunk_switch_underneath == NULL;
-        bool first_hit = true;
-        /* Pass 1: sprites first (on top) */
-        for (size_t i = 0; i < room.num_objects; i++) {
-            struct RoomObject *obj = room.objects + i;
-            if (obj->type != SPRITE) continue;
-            // Its logical (x,y) - the definition - always counts as "on" a sprite, regardless of
-            // how far an x/y offset has since moved it away from there (Hugh: "when i go to
-            // where it is defined in the level... it is as if i were on an empty tile"). The GUI
-            // additionally matches the sprite's actual rendered box (SPRITE_X_PAD widens and
-            // shifts it even with no offset at all, see render.c) - but the plain TUI never
-            // draws that picture at all, so that box is invisible and meaningless there: only
-            // the definition point should work there (Hugh: "the sprite doesn't get drawn in
-            // the tui, so you should only be able to edit via the definition point"). The
-            // Enter-key hit-test in handle_tile_edit (editor_input.c) uses this same pair.
-            bool hit = (int)x == obj->x && (int)y == obj->y;
-            if (!hit && screen_headless) {
-                int dx, dy, w, h; bool fh, fv;
-                render_sprite_box(obj, state->movertab, (unsigned)room.UNKNOWN_c + (unsigned)i, &dx, &dy, &w, &h, &fh, &fv);
-                int px = (int)x * 8, py = (int)y * 8;
-                hit = px < dx + w && px + 8 > dx && py < dy + h && py + 8 > dy;
-            }
-            if (!hit) continue;
-            // The box/offset checks above can now match several sprites/blocks around the
-            // cursor at once (unlike the old exact-tile-only test, which could match at most
-            // one) - stop adding rows once the screen is nearly full rather than assert past its
-            // bottom (a real crash Hugh hit: "editor_draw.c:1859: redraw: Assertion `(bottom) <
-            // state->screen_dimensions.y ... failed"). Two rows of margin: the summary line
-            // below plus draw_movertab_entry's own line.
-            if (bottom >= state->screen_dimensions.y - 2) continue;
-            bool is_active = first_hit && obj_selected;
-            first_hit = false;
-            GOTO(0, bottom); bottom++;
-            scr_printf("sprite ");
-            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
-            PRINTF_DATA((uint16_t)i);
-            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
-            scr_printf(": ");
-            switch(obj->sprite.type) {
-                case SHARK:
-                    switch (obj->sprite.damage) {
-                        case 1:
-                        case 2: scr_printf("Shark"); break;
-                        case 3: scr_printf("Mysterio"); break;
-                        case 4: scr_printf("Mary Jane"); break;
-                        default: UNREACHABLE();
-                    }
-                    break;
-                case MUMMY: scr_printf("Mummy"); break;
-                case BLUE_MAN: scr_printf("Blue man"); break;
-                case WOLF: scr_printf("Wolf"); break;
-                case R2D2: scr_printf("R2D2"); break;
-                case DINOSAUR: scr_printf("Dinosaur"); break;
-                case RAT: scr_printf("Rat"); break;
-                case SHOTGUN_LADY: scr_printf("Shotgun_lady"); break;
-                default: UNREACHABLE();
-            }
-            scr_printf(" (x,y)=");
-            PRINTF_DATA(obj->x);
-            scr_printf(",");
-            PRINTF_DATA(obj->y);
-            scr_printf(" (dmg)=");
-            PRINTF_DATA(obj->sprite.damage);
-            draw_movertab_offset((unsigned)room.UNKNOWN_c + (unsigned)i, true,
-                                  state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i);
-            draw_movertab_entry((unsigned)room.UNKNOWN_c + (unsigned)i,
-                                 state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i,
-                                 &bottom, true);
-        }
-        /* Pass 2: blocks underneath */
-        for (size_t i = 0; i < room.num_objects; i++) {
-            struct RoomObject *obj = room.objects + i;
-            if (obj->type != BLOCK) continue;
-            // Its definition rectangle always counts as "on" a block, same reasoning as a
-            // sprite's logical (x,y) - plus, unlike a sprite's rendered box (only meaningful
-            // where there's an actual picture), a block's x/y-offset rectangle is a plain,
-            // well-defined set of tiles regardless of TUI or GUI, so it applies in both (Hugh:
-            // "i would like to be able to edit it when spidey is over its drawn location, and
-            // also its definition byte... i want both").
-            bool in_def = x >= obj->x && x < obj->x + (int)obj->block.width &&
-                          y >= obj->y && y < obj->y + (int)obj->block.height;
-            bool in_off = false;
-            if (!in_def) {
-                int ox, oy;
-                render_block_offset(obj, state->movertab, (unsigned)room.UNKNOWN_c + (unsigned)i, &ox, &oy);
-                in_off = x >= ox && x < ox + (int)obj->block.width &&
-                         y >= oy && y < oy + (int)obj->block.height;
-            }
-            if (!in_def && !in_off) continue;
-            if (bottom >= state->screen_dimensions.y - 2) continue;   // see the same guard in the sprite pass above
-            bool is_active = first_hit && obj_selected;
-            first_hit = false;
-            GOTO(0, bottom); bottom++;
-            scr_printf("block ");
-            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
-            PRINTF_DATA((uint16_t)i);
-            if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[m");
-            scr_printf(": (x,y)=");
-            PRINTF_DATA(obj->x);
-            scr_printf(",");
-            PRINTF_DATA(obj->y);
-            scr_printf(" (w,h)=");
-            PRINTF_DATA(obj->block.width);
-            scr_printf(",");
-            PRINTF_DATA(obj->block.height);
-            draw_movertab_offset((unsigned)room.UNKNOWN_c + (unsigned)i, false,
-                                  state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i);
-            draw_movertab_entry((unsigned)room.UNKNOWN_c + (unsigned)i,
-                                 state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i,
-                                 &bottom, false);
-        }
     }
 
     /* GOTO(0, bottom); bottom ++; */
