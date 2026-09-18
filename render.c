@@ -465,12 +465,16 @@ static void draw_sprite(uint8_t *cv, const Assets *a, GfxSource src, int frame, 
 
 // Effective foreground tile at (x,y), mirroring dumpRoom's resolution: a BLOCK
 // object's own tile data overrides the base tilemap, and a TOGGLE_BLOCK switch
-// chunk (shown in its "on" state) overrides that. Sprites are NOT applied here
+// chunk (shown in its idle/"off" state, same as the room looks on entry, or
+// its "on" state for the one chunk currently open for editing with the
+// switch-on preview active - hot_switch/hot_chunk/hot_on, -1 for none)
+// overrides that. Sprites are NOT applied here
 // (they're drawn as real sprite graphics on top). A block with a nonzero
 // MOVERTAB x/y offset is drawn only at its offset position (see the pass in
 // render_room_base right after this), not at its logical (x,y) too - so it
 // doesn't override the base tile at both places at once.
-static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y, const uint8_t *movertab) {
+uint8_t effective_tile(struct DecompressedRoom *room, int x, int y, const uint8_t *movertab,
+                        int hot_switch, int hot_chunk, bool hot_on) {
     uint8_t tile = room->tiles[y * WIDTH_TILES + x];
     for (int o = 0; o < room->num_objects; o++) {
         struct RoomObject *ob = room->objects + o;
@@ -495,7 +499,7 @@ static uint8_t effective_tile(struct DecompressedRoom *room, int x, int y, const
             bool hit = (ch->dir == HORIZONTAL)
                 ? (y == ch->y && x >= ch->x && x < ch->x + ch->size)
                 : (x == ch->x && y >= ch->y && y < ch->y + ch->size);
-            if (hit) return ch->on;
+            if (hit) return (s == hot_switch && (int)c == hot_chunk && hot_on) ? ch->on : ch->off;
         }
     }
     return tile;
@@ -553,9 +557,11 @@ bool render_sprite_box(struct RoomObject *o, const uint8_t *movertab, unsigned g
 }
 
 // Fill a BW*BH*3 RGB buffer with one room (background + foreground + sprites,
-// plus the overlay if requested). Assumes the room is valid.
+// plus the overlay if requested). Assumes the room is valid. hot_switch/
+// hot_chunk/hot_on: see effective_tile (-1/-1/false for none).
 static void render_room_base(RoomFile *file, int room_id,
-                             const Assets *a, bool debug, bool player, uint8_t *cv, const uint8_t *movertab) {
+                             const Assets *a, bool debug, bool player, uint8_t *cv, const uint8_t *movertab,
+                             int hot_switch, int hot_chunk, bool hot_on) {
     struct DecompressedRoom *room = &file->rooms[room_id].data;
     memset(cv, 0, (size_t)BW * BH * 3);
 
@@ -567,7 +573,7 @@ static void render_room_base(RoomFile *file, int room_id,
         }
     for (int ty = 0; ty < HEIGHT_TILES; ty++)
         for (int tx = 0; tx < WIDTH_TILES; tx++) {
-            int v = effective_tile(room, tx, ty, movertab) & 0x3f;
+            int v = effective_tile(room, tx, ty, movertab, hot_switch, hot_chunk, hot_on) & 0x3f;
             if (v) draw_tile(cv, a->data[GFX_TILES], a->len[GFX_TILES], v + room->tile_offset * 16, tx * 8, ty * 8, a->cga);
         }
     // A block with a nonzero x/y offset draws there instead of at its logical (x,y) - effective_tile
@@ -628,7 +634,7 @@ bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOp
     uint8_t *cv = malloc((size_t)BW * BH * 3);
     bool ok = cv != NULL;
     if (ok) {
-        render_room_base(file, room_id, &a, opts.debug, true, cv, opts.movertab);
+        render_room_base(file, room_id, &a, opts.debug, true, cv, opts.movertab, -1, -1, false);
         ok = write_scaled(out_path, cv, opts.scale > 0 ? opts.scale : 1);
     }
     free(cv); free_assets(&a);
@@ -650,7 +656,7 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
         if (!file->rooms[rid].valid) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/room%02d.png", out_dir, rid);
-        render_room_base(file, rid, &a, opts.debug, true, cv, opts.movertab);
+        render_room_base(file, rid, &a, opts.debug, true, cv, opts.movertab, -1, -1, false);
         ok = write_scaled(path, cv, opts.scale > 0 ? opts.scale : 1);
         n++;
     }
@@ -689,10 +695,12 @@ void render_close(RenderCtx *ctx) {
     free(ctx);
 }
 
-bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out) {
+bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out,
+                      int hot_switch, int hot_chunk, bool hot_on) {
     if (ctx == NULL || room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid)
         return false;
-    render_room_base(file, room_id, &ctx->a, false, !ctx->hide_player, out, ctx->movertab);
+    render_room_base(file, room_id, &ctx->a, false, !ctx->hide_player, out, ctx->movertab,
+                      hot_switch, hot_chunk, hot_on);
     return true;
 }
 
@@ -1001,7 +1009,7 @@ bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
         for (int i = 0; i < mw * mh; i++) { m[i*3] = 40; m[i*3+1] = 40; m[i*3+2] = 48; }
         for (int rid = 0; rid < 64; rid++) {
             if (!file->rooms[rid].valid) continue;
-            render_room_base(file, rid, &a, opts.debug, true, cv, opts.movertab);
+            render_room_base(file, rid, &a, opts.debug, true, cv, opts.movertab, -1, -1, false);
             int ox = pad + (rid % 8) * (cw + pad), oy = pad + (rid / 8) * (ch + pad);
             for (int y = 0; y < ch; y++)
                 for (int x = 0; x < cw; x++) {

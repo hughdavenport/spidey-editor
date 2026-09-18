@@ -41,7 +41,6 @@ void debugalltoggle(void) {
     state->debug.objects = !state->debug.all;
     state->debug.switches = !state->debug.all;
     state->debug.neighbours = !state->debug.all;
-    state->debug.unknowns = !state->debug.all;
     state->debug.pos = !state->debug.all;
     state->debug.all = !state->debug.all;
 }
@@ -51,7 +50,6 @@ bool debugany(void) {
         state->debug.objects ||
         state->debug.switches ||
         state->debug.neighbours ||
-        state->debug.unknowns ||
         state->debug.pos;
 }
 #endif /* !SPIDEY_RELEASE */
@@ -343,6 +341,24 @@ void ged_select_chunk(int sw, int chunk) {
 }
 
 int ged_current_chunk(void) { return (int)state->current_chunk; }
+
+// Whether a TOGGLE_BLOCK/memory chunk is open for editing, and if so which
+// one and whether the "switch on" preview ('o') is active - the picture
+// then shows that chunk's on tile there instead of the idle off tile
+// (Hugh: "when editing a block chunk, change the displayed tiles for the
+// on/off value depending on which being edited").
+bool ged_hot_block_preview(int *switch_idx, int *chunk_idx, bool *on) {
+    if ((state->current_state != EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS &&
+         state->current_state != EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS) ||
+        state->current_switch == 0) {
+        return false;
+    }
+    *switch_idx = (int)state->current_switch - 1;
+    *chunk_idx = (int)state->current_chunk;
+    *on = state->switch_on;
+    return true;
+}
+
 void ged_goto_object(int idx) {
     if (idx < 0 || idx > 15) return;
     editor_cancel_to_plain();

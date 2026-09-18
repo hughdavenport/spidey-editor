@@ -48,8 +48,10 @@ static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
 };
 // RGB for each attribute class (Ctrl-D t's room tint, and the legend under
-// the pass/solid/magnet/slip buttons); each use picks its own alpha.
-static const Color ATTR_COLOUR[4] = { {200, 200, 200, 255}, {0, 120, 255, 255}, {200, 60, 255, 255}, {0, 230, 230, 255} };
+// the pass/solid/magnet/slip buttons); each use picks its own alpha. pass and
+// solid are swapped from their natural order (Hugh: "swap the pass and solid
+// colour's") - blue is pass-through, grey is solid.
+static const Color ATTR_COLOUR[4] = { {0, 120, 255, 255}, {200, 200, 200, 255}, {200, 60, 255, 255}, {0, 230, 230, 255} };
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
@@ -217,6 +219,7 @@ static void draw_screen_mode(GuiState *g);
 static bool screen_mode_mouse(GuiState *g);
 static void smode_button_press(GuiState *g, int i);
 static void draw_swatches(GuiState *g, int x0, int sy, int sp);
+static void draw_transparent_swatch(int x, int y, int size);
 static int  swatch_pick(GuiState *g, int x0, int sy, int sp, Vector2 m);
 static void import_png(GuiState *g, const char *path);
 static void export_png(GuiState *g);
@@ -1216,7 +1219,7 @@ static void draw_text_screen(GuiState *g) {
                 draw_cell(&cells[y * stride + x], (x + shift) * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
             if (sw >= 0) {
                 DrawRectangle(0, py, 3 * pcw(g) - 2, pch(g), (Color){60, 20, 60, 255});
-                gtext(&g->panel_font, g->panel_font_loaded, TextFormat("S%d", sw), 2, py, g->panel_font_px, MAGENTA);
+                gtext(&g->panel_font, g->panel_font_loaded, TextFormat("S%X", sw), 2, py, g->panel_font_px, MAGENTA);
             }
         }
         if (oob_max_scroll > 0) {                // its own scrollbar, same edge, below the main one
@@ -1273,7 +1276,7 @@ static void draw_help(GuiState *g) {
     static const char *gui_help[] = {
         "GUI  (mouse and keys on top of the editor's)",
         "F2 hex map     F3 switch between the .EGA and .CGA graphics     q quit     wheel over text: scroll",
-        "Ctrl-D t: tint tiles by class (grey pass-through, blue solid, violet magnetic, cyan slippery)",
+        "Ctrl-D t: tint tiles by class (blue pass-through, grey solid, violet magnetic, cyan slippery)",
         "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
         "        that creature); middle-click on the room picks the tile",
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
@@ -1325,28 +1328,35 @@ static void draw_help(GuiState *g) {
         for (int x = x0; x <= x1; x++)
             draw_cell(&cells[y * stride + x], ox + (x - x0) * hcw, oy + (y - y0) * hch, hcw, hch, font, have, fpx);
     // the overlay's colour legend, right of the editor's box
-    static const struct { Color col; const char *what; } legend[] = {
-        { {0, 0, 0, 0},      "Overlay colours" },
-        { MAGENTA,           "switch marker S#" },
-        { ORANGE,            "block toggle: the tile run it flips" },
-        { {255, 150, 0, 255}, "memory chunk on an exit: arrows to its off / on rooms" },
-        { {96, 160, 255, 255}, "object toggle: line to the object" },
-        { SKYBLUE,           "block object outline; map: neighbour room" },
-        { GREEN,             "switch toggle; other room: arrow to its map room" },
-        { {150, 80, 220, 255}, "a switch elsewhere toggling one here: arrow back" },
-        { YELLOW,            "sprite object; goto emphasis; map: this room" },
-        { GOLD,              "keyboard focus" },
-        { WHITE,             "mouse hover on the map; thick = the hot switch" },
-        { {0, 120, 255, 255}, "Ctrl-D t tile classes: blue solid" },
-        { {200, 60, 255, 255}, "  violet magnetic (no web)" },
-        { {0, 230, 230, 255}, "  cyan slippery, grey pass-through" },
+    static const struct { Color col; const char *what; bool checker; } legend[] = {
+        { {0, 0, 0, 0},      "Overlay colours", false },
+        { MAGENTA,           "switch marker S#", false },
+        { ORANGE,            "block toggle: the tile run it flips", false },
+        { {255, 150, 0, 255}, "memory chunk on an exit: arrows to its off / on rooms", false },
+        { {96, 160, 255, 255}, "object toggle: line to the object", false },
+        { SKYBLUE,           "block object outline; map: neighbour room", false },
+        { GREEN,             "switch toggle; other room: arrow to its map room", false },
+        { {150, 80, 220, 255}, "a switch elsewhere toggling one here: arrow back", false },
+        { YELLOW,            "sprite object; goto emphasis; map: this room", false },
+        { GOLD,              "keyboard focus", false },
+        { WHITE,             "mouse hover on the map; thick = the hot switch", false },
+        // Ctrl-D t tile classes, one row per class with its actual tint colour next to it
+        // (Hugh: "show each class in the list of colors with the same colors next to them
+        // (incl the transparent)") - solid gets the sprite editor's transparent checker since
+        // it's the one class that isn't actually tinted (see draw_overlay's tile-tint loop).
+        { {0, 120, 255, 255}, "Ctrl-D t tile classes: pass-through", false },
+        { {200, 200, 200, 255}, "  solid (no tint - shown as-is)", true },
+        { {200, 60, 255, 255}, "  magnetic (no web)", false },
+        { {0, 230, 230, 255}, "  slippery", false },
     };
     int lx = ox + (x1 - x0 + 3) * hcw, nleg = (int)(sizeof legend / sizeof legend[0]);
     if (lx + 52 * hcw <= ox + w && nleg <= rows)
         for (int i = 0; i < nleg; i++) {
             int yy = oy + i * hch;
-            if (legend[i].col.a) DrawRectangle(lx, yy + 2, hch - 4, hch - 4, legend[i].col);
-            gtext(font, have, legend[i].what, lx + (legend[i].col.a ? hch : 0), yy + (hch - fpx) / 2, fpx, i == 0 ? GOLD : RAYWHITE);
+            bool has_swatch = legend[i].col.a || legend[i].checker;
+            if (legend[i].checker) draw_transparent_swatch(lx, yy + 2, hch - 4);
+            else if (legend[i].col.a) DrawRectangle(lx, yy + 2, hch - 4, hch - 4, legend[i].col);
+            gtext(font, have, legend[i].what, lx + (has_swatch ? hch : 0), yy + (hch - fpx) / 2, fpx, i == 0 ? GOLD : RAYWHITE);
         }
     for (int i = 0; i < nextra; i++) {
         int yy = oy + (rows + 1 + i) * hch;
@@ -1391,6 +1401,14 @@ static void screen_tex_build(GuiState *g) {
     g->scr_loaded = true; g->scr_src = g->pix_src; g->scr_stale = false;
 }
 
+// The dark 2x2 checker the pixel editor uses for a sprite's transparent colour (see
+// draw_swatches) - reused wherever a swatch needs to say "no colour here" instead of a flat one.
+static void draw_transparent_swatch(int x, int y, int size) {
+    DrawRectangle(x, y, size, size, (Color){50, 50, 50, 255});
+    DrawRectangle(x, y, size / 2, size / 2, (Color){70, 70, 70, 255});
+    DrawRectangle(x + size / 2, y + size / 2, size - size / 2, size - size / 2, (Color){70, 70, 70, 255});
+}
+
 // The palette swatches (8 across, 2 rows; CGA sprites add a 5th "transparent"
 // one), the selected colour outlined; shared by the pixel editor and screen mode.
 static void draw_swatches(GuiState *g, int x0, int sy, int sp) {
@@ -1400,9 +1418,7 @@ static void draw_swatches(GuiState *g, int x0, int sy, int sp) {
     for (int c = 0; c < nsw; c++) {
         int sx = x0 + (c % 8) * sp, yy = sy + (c / 8) * sp;
         if (c == key) {                          // the game draws this colour as transparent in sprites
-            DrawRectangle(sx, yy, sp, sp, (Color){50, 50, 50, 255});
-            DrawRectangle(sx, yy, sp / 2, sp / 2, (Color){70, 70, 70, 255});
-            DrawRectangle(sx + sp / 2, yy + sp / 2, sp - sp / 2, sp - sp / 2, (Color){70, 70, 70, 255});
+            draw_transparent_swatch(sx, yy, sp);
             gtext(&g->font, g->font_loaded, "T", sx + 2, yy, g->font_px, RAYWHITE);
         } else {
             DrawRectangle(sx, yy, sp, sp, (Color){pal[c][0], pal[c][1], pal[c][2], 255});
@@ -2083,7 +2099,7 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
             gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
         }
         // type of the currently selected tile, then a colour-code legend
-        // matching Ctrl-D t's room tint (grey pass, blue solid, violet
+        // matching Ctrl-D t's room tint (blue pass, grey solid, violet
         // magnet, cyan slip), so the tint can be read at a glance.
         int lx = (int)attr_button(g, 0).x;
         int ly = (int)(attr_button(g, 2).y + attr_button(g, 2).height) + PAD;
@@ -2091,7 +2107,11 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         ly += ch(g) + 4;
         for (int i = 0; i < 4; i++) {
             int cy = ly + i * (fs + 2);
-            DrawRectangle(lx, cy, fs, fs, ATTR_COLOUR[i]);
+            // Solid gets the pixel editor's transparent checker, not a flat colour, since it's
+            // the one class Ctrl-D t doesn't actually tint (Hugh: "make the color on the side
+            // show the transparent background you used for sprite editing").
+            if (ATTRS[i].bits == ATTR_SOLID) draw_transparent_swatch(lx, cy, fs);
+            else DrawRectangle(lx, cy, fs, fs, ATTR_COLOUR[i]);
             DrawRectangleLines(lx, cy, fs, fs, GRAY);
             gtext(&g->font, g->font_loaded, ATTRS[i].name, lx + fs + 4, cy, fs, RAYWHITE);
         }
@@ -2177,7 +2197,7 @@ static int world_room_at(GuiState *g, Vector2 m) {
 // Render room `room` into its slot of the atlas.
 static void world_update_room(GuiState *g, RoomFile *rooms, int room, uint8_t *buf) {
     if (!rooms->rooms[room].valid) { memset(buf, 0, (size_t)ROOM_PX_W * ROOM_PX_H * 3); }
-    else render_room_rgb(g->rctx, rooms, room, buf);
+    else render_room_rgb(g->rctx, rooms, room, buf, -1, -1, false);
     UpdateTextureRec(g->atlas, (Rectangle){(room % 8) * ROOM_PX_W, (room / 8) * ROOM_PX_H, ROOM_PX_W, ROOM_PX_H}, buf);
 }
 
@@ -2616,14 +2636,24 @@ static void draw_overlay(GuiState *g) {
     int fs = g->font_px;
 
     // Ctrl-D t: every tile tinted by the class its top two bits give it. Empty (0x00)
-    // stays clear; other pass-through tiles are faint grey so scenery and hazards you can
-    // walk through read as such next to solid (blue), magnetic (violet) and slippery (cyan).
+    // stays clear; other pass-through tiles are faint blue so scenery and hazards you can
+    // walk through read as such next to solid (grey), magnetic (violet) and slippery (cyan).
     if (ged_show_tiles() && !g->text_map) {
         static const uint8_t tint_alpha[4] = {60, 110, 120, 120};
+        // A TOGGLE_BLOCK chunk's currently-shown tile (on or off - see
+        // ged_hot_block_preview) gets tinted by its own class too, not the base
+        // tilemap's, matching what effective_tile actually draws there (Hugh:
+        // "make sure they have tile debug colouring applied if its on").
+        int hot_switch = -1, hot_chunk = -1; bool hot_on = false;
+        ged_hot_block_preview(&hot_switch, &hot_chunk, &hot_on);
         for (int y = 0; y < HEIGHT_TILES; y++)
             for (int x = 0; x < WIDTH_TILES; x++) {
-                uint8_t t = r->tiles[TILE_IDX(x, y)];
-                if (t == 0) continue;
+                uint8_t t = effective_tile(r, x, y, NULL, hot_switch, hot_chunk, hot_on);
+                // Solid gets no overlay at all - it's the common case, so tinting it would
+                // just tint most of the room; showing it as the tile actually looks leaves
+                // the tint for the classes worth calling out (Hugh: "make solid be no
+                // overlay, just the tile as it is defined").
+                if (t == 0 || (t >> 6) == 1) continue;
                 Vector2 p = tile_pt(g, x, y);
                 Color c = ATTR_COLOUR[t >> 6]; c.a = tint_alpha[t >> 6];
                 DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, c);
@@ -2660,7 +2690,23 @@ static void draw_overlay(GuiState *g) {
         Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
         bool hot_sw = i == sel_sw;
         DrawCircleV(o, emph_sw || hot_sw ? 6 : 4, emph_sw ? YELLOW : C_SW);
-        label(g, TextFormat("S%d", i), o.x + 6, o.y - fs / 2, C_SW, emph_sw);
+        label(g, TextFormat("S%X", i), o.x + 6, o.y - fs / 2, C_SW, emph_sw);
+        // A wee arrow toward the side the switch button faces, and a small "E" in
+        // the tile's corner for a room-entry sensor (Hugh: "add a wee arrow to the
+        // sides of switches, and E in the corner if entry").
+        Vector2 tip = o;
+        switch (sw->chunks.data[0].side) {
+            case TOP:    tip.y -= s * 1.0f; break;
+            case RIGHT:  tip.x += s * 1.0f; break;
+            case BOTTOM: tip.y += s * 1.0f; break;
+            case LEFT:   tip.x -= s * 1.0f; break;
+            default: break;
+        }
+        draw_arrow(o, tip, emph_sw || hot_sw ? 4 : 2, 4, emph_sw ? YELLOW : C_SW);
+        if (sw->chunks.data[0].room_entry) {
+            Vector2 corner = tile_pt(g, sw->chunks.data[0].x, sw->chunks.data[0].y);
+            gtext(&g->font, g->font_loaded, "E", (int)corner.x + 1, (int)corner.y, fs, emph_sw ? YELLOW : C_SW);
+        }
         for (size_t c = 1; c < sw->chunks.length; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
             bool hot = hot_sw;
@@ -2809,7 +2855,9 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         RoomFile *rooms = ged_rooms();
         int room = ged_room();
         if (g->room_dirty || g->drawn_room != room) {
-            render_room_rgb(g->rctx, rooms, room, buf);
+            int hot_switch = -1, hot_chunk = -1; bool hot_on = false;
+            ged_hot_block_preview(&hot_switch, &hot_chunk, &hot_on);
+            render_room_rgb(g->rctx, rooms, room, buf, hot_switch, hot_chunk, hot_on);
             Image img = { .data = buf, .width = ROOM_PX_W, .height = ROOM_PX_H,
                           .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8 };
             if (!g->tex_loaded) {

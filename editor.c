@@ -76,7 +76,6 @@ void debugalltoggle() {
     state->debug.objects = !state->debug.all;
     state->debug.switches = !state->debug.all;
     state->debug.neighbours = !state->debug.all;
-    state->debug.unknowns = !state->debug.all;
     state->debug.pos = !state->debug.all;
     state->debug.all = !state->debug.all;
 }
@@ -86,7 +85,6 @@ bool debugany() {
         state->debug.objects ||
         state->debug.switches ||
         state->debug.neighbours ||
-        state->debug.unknowns ||
         state->debug.pos;
 }
 

@@ -116,7 +116,6 @@ struct debug {
     bool pos;
     bool data;
     bool neighbours;
-    bool unknowns;
     bool objects;
     bool switches;
     bool tiles;     /* GUI: tint every tile by its class (pass-through / solid / magnetic / slippery) */
@@ -220,6 +219,8 @@ typedef struct {
     size_t current_object;   /* EDIT_MOVERTAB_OBJECT: which of the current room's objects */
     bool movertab_raw;       /* EDIT_MOVERTAB_OBJECT: raw hex entry (byte 2 only) instead of the attribute picker */
     char movertab_block_focus;   /* EDIT_MOVERTAB_OBJECT, block only: 0 (hjkl/arrows adjust the x/y offset), or 's'/'d'/'w' (hjkl/arrows and |/- adjust speed/direction/walls instead) */
+    char chunk_value_focus;      /* EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS: 0, or 's'/'d'/'w' (same speed/direction/walls scheme as a block's MOVERTAB entry, see block_speed_ratchet/block_direction_set) */
+    bool chunk_value_raw;        /* EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS: raw hex entry for chunk->value instead of the attribute picker (toggled by 'r', same convention as movertab_raw) */
 
     Clipboard clipboard;
 
@@ -304,6 +305,7 @@ bool movertab_save(void);            // write state->movertab to ./MOVERTAB.DAT
 int movertab_offset_x(const uint8_t *entry);                     // decode a MOVERTAB entry's byte 1 (x offset, whole tiles)
 int movertab_offset_y(const uint8_t *entry, bool is_sprite);     // decode a MOVERTAB entry's byte 0 (y offset, whole tiles) - sprite/block encodings differ
 void movertab_clamp_offset(uint8_t *entry, bool is_sprite, int x, int y);   // pull the x/y offset back in if it would draw outside the room at this tile position
+bool chunk_target_is_sprite(struct SwitchChunk *chunk);   // whether chunk->index currently names a sprite in this room (false, incl. out of bounds, means treat as a block)
 bool editor_save(void);              // writeRooms(); a refused write (room/file size limits) undoes the change and names which in the status line
 void clipboard_clear(void);          // free whatever the clipboard holds; type becomes CLIP_NONE
 void room_snapshot_copy(struct DecompressedRoom *dst, const struct DecompressedRoom *src);   // deep copy (objects, switches)

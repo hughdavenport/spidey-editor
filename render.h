@@ -12,6 +12,14 @@ typedef struct {
     const uint8_t *movertab;   // optional (NULL = draw every sprite un-mirrored); see render_set_movertab
 } RenderOpts;
 
+// The tile actually shown at (x,y): a BLOCK object's own tile data or a
+// TOGGLE_BLOCK chunk's on/off tile overrides the base tilemap - see the
+// comment on its definition. hot_switch/hot_chunk/hot_on: as render_room_rgb
+// (-1/-1/false for none); movertab may be NULL (skips the offset-draw check,
+// fine for anything that isn't pixel-perfect rendering, e.g. a debug overlay).
+uint8_t effective_tile(struct DecompressedRoom *room, int x, int y, const uint8_t *movertab,
+                        int hot_switch, int hot_chunk, bool hot_on);
+
 // Render one room to a PNG at out_path. Returns false (with a message on
 // stderr) if an asset is missing or the file can't be written.
 bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOpts opts);
@@ -40,7 +48,12 @@ void render_close(RenderCtx *ctx);
 
 // Fill `out` (ROOM_PX_W*ROOM_PX_H*3 RGB bytes) with the room's pixels:
 // background + foreground + sprites, no debug overlay (the GUI draws its own).
-bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out);
+// hot_switch/hot_chunk (0-indexed switch, chunk array index; -1/-1 for none)
+// and hot_on: while that TOGGLE_BLOCK chunk is open for editing, draw its
+// "on" tile there instead of the idle "off" one when hot_on is true (see
+// ged_hot_block_preview) - every other chunk still draws its idle tile.
+bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out,
+                      int hot_switch, int hot_chunk, bool hot_on);
 
 // Whether render_room_rgb draws Spider-Man at his start position in room 1
 // (default true; the GUI draws him at the cursor instead).

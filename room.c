@@ -378,16 +378,17 @@ void dumpRoom(Room *room, RoomFile *file, bool color) {
             for (size_t c = 1; !colored && c < sw->chunks.length; c ++) {
                 struct SwitchChunk *chunk = sw->chunks.data + c;
                 if (chunk->type == TOGGLE_BLOCK) {
+                    // Idle (no switch state to preview here) - the room shows the off tile.
                     if (chunk->dir == HORIZONTAL) {
                         if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
                             if (color) printf("\033[m\033[3%ld;40m", (s % 3) + 4);
                             colored = true;
-                            tile = chunk->on;
+                            tile = chunk->off;
                         }
                     } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
                         if (color) printf("\033[m\033[3%ld;40m", (s % 3) + 4);
                         colored = true;
-                        tile = chunk->on;
+                        tile = chunk->off;
                     }
                 }
             }
@@ -732,8 +733,12 @@ bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
                     uint8_t size = ((lsb >> 5) & 0x7) + 1;
                     uint8_t off, on;
                     enum SwitchChunkDirection dir = ((msb & 0x20) == 0) ? HORIZONTAL : VERTICAL;
-                    read_decompressed(off, tmp.decompressed);
+                    // .on/.off were swapped from what their names say (Hugh, verified: "the
+                    // first number is the off value... the second number shows the on value") -
+                    // read them into the other local var so chunk->on/chunk->off end up meaning
+                    // what they say, without changing the on-disk byte order itself.
                     read_decompressed(on, tmp.decompressed);
+                    read_decompressed(off, tmp.decompressed);
                     // All bits accounted for
                     ARRAY_ADD(switches[i].chunks, ((struct SwitchChunk){ .type = TOGGLE_BLOCK, .x = x, .y = y, .size = size, .dir = dir, .off = off, .on = on }));
                 }; break;
@@ -1039,8 +1044,8 @@ bool writeRoom(Room *room, FILE *fp) {
                 case TOGGLE_BLOCK:
                     decompressed[d_len++] = 0x80 | (chunk->y & 0x1f) | (chunk->dir == VERTICAL ? 0x20 : 0);
                     decompressed[d_len++] = (chunk->x & 0x1f) | ((chunk->size - 1) << 5);
-                    decompressed[d_len++] = chunk->off;
                     decompressed[d_len++] = chunk->on;
+                    decompressed[d_len++] = chunk->off;
                     break;
 
                 case TOGGLE_BIT: {

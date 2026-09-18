@@ -296,6 +296,75 @@ static void check_backs_store(const char *data_dir) {
     }
 }
 
+// dumpRoom() prints to stdout; capture it into a string by redirecting stdout
+// through a tmpfile for the duration of the call.
+static char *capture_dump(Room *room, RoomFile *file) {
+    fflush(stdout);
+    int saved_fd = dup(STDOUT_FILENO);
+    FILE *tmp = tmpfile();
+    if (saved_fd < 0 || tmp == NULL) { CHECK(false, "dup/tmpfile for dump capture"); if (saved_fd >= 0) close(saved_fd); return NULL; }
+    dup2(fileno(tmp), STDOUT_FILENO);
+    dumpRoom(room, file, false);
+    fflush(stdout);
+    dup2(saved_fd, STDOUT_FILENO);
+    close(saved_fd);
+    long len = ftell(tmp);
+    rewind(tmp);
+    char *buf = malloc((size_t)len + 1);
+    size_t n = buf ? fread(buf, 1, (size_t)len, tmp) : 0;
+    if (buf) buf[n] = 0;
+    fclose(tmp);
+    return buf;
+}
+
+// A save is a full decompress -> recompress round trip through the higher-level
+// room/switch/chunk parsing (not just the raw LZ byte stream, which
+// check_spl_file already covers) - a decode/encode formula that doesn't agree
+// with itself (e.g. the on/off and block-size mixups from 2026-09-18) silently
+// changes a room's values on every save/reload. Catch that by comparing each
+// room's full dumpRoom() text before and after one round trip.
+static void check_room_values(const char *rooms_path) {
+    const char *tmpdir = getenv("TMPDIR");
+    char dir[1024], cwd[1024];
+    snprintf(dir, sizeof dir, "%s/spl_check_values.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
+    if (mkdtemp(dir) == NULL || getcwd(cwd, sizeof cwd) == NULL) { CHECK(false, "scratch dir for %s values check", rooms_path); return; }
+    char copy[1200];
+    snprintf(copy, sizeof copy, "%s/%s", dir, ROOMS_FILE);
+    if (!copy_file(rooms_path, copy)) { CHECK(false, "cannot copy %s", rooms_path); return; }
+    if (chdir(dir) != 0) { CHECK(false, "chdir %s", dir); return; }
+
+    RoomFile before = {0};
+    CHECK(readRooms(&before), "%s: readRooms (before) failed", rooms_path);
+
+    char *dumps[C_ARRAY_LEN(before.rooms)] = {0};
+    for (size_t r = 0; r < C_ARRAY_LEN(before.rooms); r++) {
+        if (before.rooms[r].valid) dumps[r] = capture_dump(&before.rooms[r], &before);
+    }
+    for (size_t r = 0; r < C_ARRAY_LEN(before.rooms); r++) {
+        if (before.rooms[r].valid) ARRAY_FREE(before.rooms[r].compressed);   // force recompression from .data
+    }
+    CHECK(writeRooms(&before, NULL, NULL, 0), "%s: writeRooms failed", rooms_path);
+
+    RoomFile after = {0};
+    CHECK(readRooms(&after), "%s: readRooms (after) failed", rooms_path);
+    int rooms = 0;
+    for (size_t r = 0; r < C_ARRAY_LEN(before.rooms); r++) {
+        if (!before.rooms[r].valid) continue;
+        char *dump2 = capture_dump(&after.rooms[r], &after);
+        CHECK(dumps[r] && dump2 && strcmp(dumps[r], dump2) == 0,
+              "%s room %u: values changed after a decompress/recompress round trip", rooms_path, before.rooms[r].index);
+        free(dump2);
+        free(dumps[r]);
+        rooms++;
+    }
+
+    freeRoomFile(&before);
+    freeRoomFile(&after);
+    if (chdir(cwd) != 0) CHECK(false, "chdir back");
+    if (failures == 0) { unlink(copy); rmdir(dir); }
+    printf("%s: %d rooms' values stable across a recompress round trip\n", rooms_path, rooms);
+}
+
 // writeRooms() must refuse a file over the game's limit and leave ROOMS.SPL
 // as it was: a scratch copy of `rooms_path` gets 64 rooms of random tiles.
 static void check_rooms_limit(const char *rooms_path) {
@@ -338,6 +407,7 @@ int main(int argc, char **argv) {
     check_random();
     for (int i = 2; i < argc; i++) check_spl_file(argv[i]);
     check_backs_store(argv[1]);
+    if (argc > 2) check_room_values(argv[2]);
     if (argc > 2) check_rooms_limit(argv[2]);
     if (failures) { fprintf(stderr, "%d check(s) failed\n", failures); return 1; }
     printf("all checks passed\n");
