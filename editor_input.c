@@ -4271,19 +4271,26 @@ static bool handle_edit_movertab_object(Key key) {
         case KEY_RIGHT: movertab_dir_key(entry, is_sprite, obj->x, obj->y, 1, 0); SAVE_MOVERTAB(); break;
         case KEY_UP:    movertab_dir_key(entry, is_sprite, obj->x, obj->y, 0, -1); SAVE_MOVERTAB(); break;
         case KEY_DOWN:  movertab_dir_key(entry, is_sprite, obj->x, obj->y, 0, 1); SAVE_MOVERTAB(); break;
+        // Layered: close the help overlay if it's up; else drop a block's s/d/w focus back to
+        // the plain attribute view if one's armed; else leave the picker entirely, back to view
+        // only (Hugh: "enter goes back to view only not edit... enter in [an] s/etc mode... as
+        // if enter was escape in these contexts" - so Enter (Ctrl-J/Ctrl-M) mirrors Escape here).
         case KEY_ESC:
-            if (state->help) {
-                state->help = false;
-            } else {
-                state->current_state = state->previous_state;
-                state->previous_state = NORMAL;
-            }
+            if (state->help) state->help = false;
+            else if (state->movertab_block_focus) state->movertab_block_focus = 0;
+            else { state->current_state = state->previous_state; state->previous_state = NORMAL; }
             break;
         case KEY_CTRL:
             switch (key.ch) {
                 case '_': state->help = !state->help; break;
                 case 'H': state->debug.hex = !state->debug.hex; break;
                 case 'P': fork_play(); break;
+                case 'J':
+                case 'M':
+                    if (state->help) state->help = false;
+                    else if (state->movertab_block_focus) state->movertab_block_focus = 0;
+                    else { state->current_state = state->previous_state; state->previous_state = NORMAL; }
+                    break;
             }
             break;
         default: break;
