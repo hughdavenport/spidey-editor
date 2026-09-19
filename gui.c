@@ -2426,14 +2426,52 @@ typedef struct {
     int kind;                   // the chunk's type
     int obj, bx, by;            // TOGGLE_OBJECT: the object; TOGGLE_BLOCK: the run's first tile
 } LinkSeg;
+
+// The switch that owns a chunk whose TARGET (a TOGGLE_BLOCK's tile run, or a TOGGLE_OBJECT's
+// object) sits at the cursor - so parking on, or clicking, what a switch's chunk touches
+// highlights every one of that switch's links, not just the one under the cursor (Hugh:
+// "automatically select the switch, even if offscreen, but the cursor stays on the selected
+// chunk"). A same-room TOGGLE_BIT's target is already covered by ged_item_at()'s own
+// switch-marker check (cur_kind == 1), so it isn't repeated here. -1 if none.
+static int switch_owning_target(int cx, int cy, int cur_kind, int cur_idx) {
+    struct DecompressedRoom *r = &ged_rooms()->rooms[ged_room()].data;
+    for (int i = 0; i < r->num_switches; i++) {
+        struct SwitchObject *sw = r->switches + i;
+        for (size_t c = 1; c < sw->chunks.length; c++) {
+            struct SwitchChunk *ch = sw->chunks.data + c;
+            if (ch->type == TOGGLE_BLOCK && exit_memory_offset(ch) < 0) {
+                int w = ch->dir == HORIZONTAL ? ch->size : 1;
+                int h = ch->dir == VERTICAL ? ch->size : 1;
+                if (cx >= ch->x && cx < ch->x + w && cy >= ch->y && cy < ch->y + h) return i;
+            } else if (ch->type == TOGGLE_OBJECT && cur_kind == 2 && cur_idx == (int)ch->index) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+// The switch to treat as "selected" for highlighting/click purposes: the one open for editing
+// or chosen with s<n> (ged_current_switch()), the one under the cursor's own marker, or the
+// one found by switch_owning_target() above. -1 if none of those apply.
+static int effective_sel_sw(int cx, int cy) {
+    int cur_idx, cur_kind = ged_item_at(cx, cy, &cur_idx);
+    int sel_sw = cur_kind == 1 ? cur_idx : ged_current_switch();
+    int owner = switch_owning_target(cx, cy, cur_kind, cur_idx);
+    return owner >= 0 ? owner : sel_sw;
+}
+
 static int collect_links(GuiState *g, LinkSeg *out, int max) {
     RoomFile *rooms = ged_rooms();
-    int cur = ged_room(), n = 0, tw, th;
+    int cur = ged_room(), n = 0, tw, th, cx, cy;
     struct DecompressedRoom *r = &rooms->rooms[cur].data;
     world_geom(g, &tw, &th);
+    ged_cursor(&cx, &cy);
+    int sel_sw = effective_sel_sw(cx, cy);
+    bool show_all = ged_show_switch_links();
     for (int i = 0; i < r->num_switches && n < max; i++) {
         struct SwitchObject *sw = r->switches + i;
-        if (sw->chunks.length == 0) continue;
+        if (sw->chunks.length == 0 || (!show_all && i != sel_sw)) continue;
         Vector2 o = tile_pt(g, sw->chunks.data[0].x + 0.5f, sw->chunks.data[0].y + 0.5f);
         for (size_t c = 1; c < sw->chunks.length && n < max; c++) {
             struct SwitchChunk *ch = sw->chunks.data + c;
@@ -2475,11 +2513,13 @@ static int collect_links(GuiState *g, LinkSeg *out, int max) {
                 struct SwitchChunk *ch = sw->chunks.data + c;
                 int ex = exit_memory_offset(ch);
                 if (ex >= 0 && (ch->off == cur || ch->on == cur)) {
+                    if (!show_all) continue;   // no switch of ours is "active" for a foreign exit-memory chunk
                     Rectangle d = world_cell(g, rid, tw, th);
                     out[n++] = (LinkSeg){ (Vector2){ d.x + d.width / 2, d.y + d.height / 2 }, arrival_edge(g, ex), rid, i, (int)c, cur, -1, TOGGLE_BLOCK, -1, -1, -1 };
                     continue;
                 }
                 if (ch->type != TOGGLE_BIT || ch->room_idx != cur || ch->switch_idx >= r->num_switches || r->switches[ch->switch_idx].chunks.length == 0) continue;
+                if (!show_all && (int)ch->switch_idx != sel_sw) continue;
                 Rectangle d = world_cell(g, rid, tw, th);
                 out[n++] = (LinkSeg){ (Vector2){ d.x + d.width / 2, d.y + d.height / 2 }, switch_anchor(g, r->switches + ch->switch_idx), rid, i, (int)c, cur, ch->switch_idx, TOGGLE_BIT, -1, 0, 0 };
             }
@@ -2625,10 +2665,10 @@ static void draw_world_links(GuiState *g) {
     if (!ged_show_switches() && ged_goto_kind() != 2) return;
     RoomFile *rooms = ged_rooms();
     struct DecompressedRoom *r = &rooms->rooms[ged_room()].data;
-    int tw, th, cx, cy, cur_idx, sel_sw = ged_current_switch();
+    int tw, th, cx, cy;
     world_geom(g, &tw, &th);
     ged_cursor(&cx, &cy);
-    if (ged_item_at(cx, cy, &cur_idx) == 1) sel_sw = cur_idx;
+    int sel_sw = effective_sel_sw(cx, cy);
     // incoming
     for (int rid = 0; rid < 64; rid++) {
         if (rid == ged_room() || !rooms->rooms[rid].valid) continue;
@@ -2768,10 +2808,10 @@ static void draw_overlay(GuiState *g) {
     // the one selected, e.g. an out-of-bounds switch chosen with s7), and every
     // chunk that targets the object or tile under the cursor. Hot links keep
     // their colour and thicken; only goto mode paints things yellow.
-    int cx, cy, cur_idx, cur_kind, sel_sw = ged_current_switch();
+    int cx, cy, cur_idx, cur_kind;
     ged_cursor(&cx, &cy);
     cur_kind = ged_item_at(cx, cy, &cur_idx);
-    if (cur_kind == 1) sel_sw = cur_idx;
+    int sel_sw = effective_sel_sw(cx, cy);
     for (int i = 0; i < r->num_switches; i++) {
         struct SwitchObject *sw = r->switches + i;
         if (sw->chunks.length == 0) continue;
