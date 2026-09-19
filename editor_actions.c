@@ -823,10 +823,10 @@ void shrink(int dx, int dy) {
 bool editor_save(void) {
     int failed_room = -1;
     char dangling[128] = {0};
-    if (writeRooms(&state->rooms, &failed_room, dangling, sizeof dangling)) {
+    if (writeRooms(&state->rooms, state->data_dir, &failed_room, dangling, sizeof dangling)) {
         state->saved_undo_len = state->undo_stack.length;
         struct stat st;
-        if (stat(ROOMS_FILE, &st) == 0) state->last_own_write_mtim = st.st_mtim;
+        if (stat(data_path(state->data_dir, ROOMS_FILE), &st) == 0) state->last_own_write_mtim = st.st_mtim;
         return true;
     }
     bool undone = false;
@@ -894,9 +894,9 @@ bool room_prune_blank(size_t room_idx) {
 
 // MOVERTAB.DAT: 256 entries x 3 bytes, indexed by global object number (see recomputeBases'
 // own comment for how a room's UNKNOWN_c gives the global index of its own object 0). A
-// levelset's own table lives beside its ROOMS.SPL (repo root, "./MOVERTAB.DAT"); with none
-// there yet, fall back to the game's original table so there is always something sane to
-// look at and edit.
+// levelset's table lives beside its ROOMS.SPL in the data dir; with none there the table
+// is all zeros and `movertab_loaded` stays false (the status line says so), rather than
+// borrowing another directory's file.
 static bool movertab_read_file(const char *path) {
     FILE *fp = fopen(path, "rb");
     if (fp == NULL) return false;
@@ -907,15 +907,13 @@ static bool movertab_read_file(const char *path) {
 
 void movertab_load(void) {
     state->movertab_load_attempted = true;
-    if (movertab_read_file("MOVERTAB.DAT")) { state->movertab_loaded = true; return; }
-    if (movertab_read_file("Spider/MOVERTAB.DAT.original")) { state->movertab_loaded = true; return; }
-    if (movertab_read_file("Spider/MOVERTAB.DAT")) { state->movertab_loaded = true; return; }
+    if (movertab_read_file(data_path(state->data_dir, MOVERTAB_FILE))) { state->movertab_loaded = true; return; }
     memset(state->movertab, 0, sizeof state->movertab);
     state->movertab_loaded = false;
 }
 
 bool movertab_save(void) {
-    FILE *fp = fopen("MOVERTAB.DAT", "wb");
+    FILE *fp = fopen(data_path(state->data_dir, MOVERTAB_FILE), "wb");
     if (fp == NULL) return false;
     size_t n = fwrite(state->movertab, 1, sizeof state->movertab, fp);
     fclose(fp);

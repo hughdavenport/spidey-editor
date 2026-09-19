@@ -3,8 +3,8 @@
 # with xdotool through help, movement, goto room/switch/object, room details,
 # the hex map, Ctrl-D display toggles, a mouse click, a Shift+drag paint
 # stroke and a hot reload, screenshotting each step into $T, then quits with
-# q. ROOMS.SPL is backed up first and restored afterwards (the paint stroke
-# must change it). Needs Xvfb, xdotool and ImageMagick's import.
+# q. Everything runs on a sandbox copy, so the paint stroke changes only the
+# sandbox's Spider/ROOMS.SPL. Needs Xvfb, xdotool and ImageMagick's import.
 #   ASAN_OPTIONS=detect_leaks=0 ./gui_smoke_test.sh     (leaks: run without)
 set -u
 T=${T:-/tmp/spidey-gui-smoke}
@@ -19,6 +19,10 @@ cp $R/*.c $R/*.h $R/a.out $R/gui.so $R/play.sh $R/ROOMS.SPL "$SB/"
 [ -x $R/spidey-editor ] && cp $R/spidey-editor "$SB/"
 BIN=${BIN:-./a.out}   # BIN=./spidey-editor tests the release build
 cp -r $R/Spider "$SB/Spider"
+# --data-dir Spider below means the GUI reads and writes Spider/ROOMS.SPL (and MOVERTAB.DAT):
+# give that sandbox data dir the repo's own rooms, not the game's shipped copy.
+cp $R/ROOMS.SPL "$SB/Spider/ROOMS.SPL"
+[ -f $R/MOVERTAB.DAT ] && cp $R/MOVERTAB.DAT "$SB/Spider/MOVERTAB.DAT"
 ln -sfn $R/raylib-6.0_linux_amd64 "$SB/raylib-6.0_linux_amd64"
 cd "$SB"
 rm -f Spider/*.orig

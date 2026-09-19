@@ -4,7 +4,14 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// The game files live in one data directory: ROOMS.SPL and, beside it, MOVERTAB.DAT,
+// BACKS.SPL and the graphics. It is the working directory unless `--data-dir DIR` says
+// otherwise, and it is always passed in: nothing below builds a path from a directory it
+// chose itself. data_path() joins a directory and a file name ("<dir>/<name>", a trailing
+// slash on dir tolerated) in one of a few rotating static buffers.
 #define ROOMS_FILE "ROOMS.SPL"
+#define MOVERTAB_FILE "MOVERTAB.DAT"
+const char *data_path(const char *dir, const char *name);
 
 #define WIDTH_TILES 32
 #define HEIGHT_TILES 22
@@ -252,9 +259,9 @@ typedef struct RoomFile {
 void freeRoomFile(RoomFile *file);
 bool readFile(RoomFile *file, FILE *fp);
 bool writeFile(RoomFile *file, FILE *fp, int *failed_room);   // failed_room (optional): the one room that overflowed, or -1
-bool readRooms(RoomFile *file);
+bool readRooms(RoomFile *file, const char *dir);   // <dir>/ROOMS.SPL
 bool readRoomFromFile(Room *room, FILE *fp, const char *filename);
-bool writeRooms(RoomFile *file, int *failed_room, char *dangling_msg, size_t dangling_msg_size);
+bool writeRooms(RoomFile *file, const char *dir, int *failed_room, char *dangling_msg, size_t dangling_msg_size);
 // failed_room (optional): the one room that overflowed its own limit, -1 for the whole file over its
 // total limit, or -2 for a TOGGLE_BIT chunk pointing at a switch that no longer exists (not a size
 // problem at all - dangling_msg, if given, is filled with which chunk and what it pointed to).

@@ -101,7 +101,18 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - `UNREACHABLE()` macro for impossible branches
 - No external dependencies beyond libc (for editor); raylib for the GUI
 
-## GUI (`./a.out gui [--data-dir DIR] [--scale N]`)
+## Data directory (`./a.out [--data-dir DIR] ...`)
+- Every subcommand reads ROOMS.SPL from one data directory: the working directory unless
+  `--data-dir DIR` (any position on the command line) says otherwise. Writes go there too unless a
+  trailing OUT.SPL names a file. MOVERTAB.DAT (editor Ctrl-M, `swap`), BACKS.SPL and the graphics
+  (render, GUI) come from the same directory. Nothing hardcodes a directory: `readRooms` /
+  `writeRooms` take the directory, `data_path()` (room.h) joins names to it, and `game_state`
+  carries it (`data_dir`) so editor.so / gui.so, which have their own copy of room.c, use the
+  same one across hot reloads. Ctrl-P passes it to play.sh as `SPIDEY_DATA_DIR`. With no
+  MOVERTAB.DAT in the data directory the editor's table is zeros (it no longer borrows Spider/'s).
+  `make check` covers reading and writing through a data directory leaving the cwd's file alone.
+
+## GUI (`./a.out gui [--scale N]`)
 - `gui_host.c` (in a.out) dlopens `gui.so`, built by `GUI_BUILD_CMD` in `gui.h` from
   `render.c room.c spl.c gui.c gui_editor.c editor_input.c editor_actions.c editor_draw.c
   editor_screen.c`. A new shared `.c` must be added there AND to `WATCHED[]` in gui.c.
@@ -125,7 +136,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Plain left press is held until release: a click moves the cursor, a drag moves the item
   and leaves the cursor (and Spider-Man) where it was.
 - World map right of the picture under the palette: every room rendered into one 8x8 atlas
-  texture (refreshed for the room being edited). Left click = go to that room, creating it if the
+  texture (refreshed for the room being edited). Left click = go to that room (cursor stays where
+  that room last had it; Ctrl-click also lands it where in the thumbnail you clicked), creating it if the
   file has no such room (`room_create()` in editor_actions.c: blank tiles and all settings 0).
   Only the world map creates rooms: the `r` prompt and exit-walking never do, since exits of 0
   mean "none" and walking to room 0 must not conjure one. Leaving a room that is still entirely
@@ -254,7 +266,7 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   exits, TOGGLE_BIT targets, the per-room index bases (`UNKNOWN_c` = objects before this room,
   `UNKNOWN_f*4+e` = switches before it; the game reads MOVERTAB.DAT and the switch-state table by
   them) and the mover table following. `import` recomputes the bases too. A levelset's own
-  MOVERTAB.DAT sits beside ROOMS.SPL in the repo root; play.sh copies it, else the game's original.
+  MOVERTAB.DAT sits beside ROOMS.SPL in the data directory; play.sh copies it, else the game's original.
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the
   picture (click selects, Shift+drag / middle-drag paints; one undo entry per stroke,
   written 0.4 s after the stroke). Left/right click go to the editor's mouse handling.

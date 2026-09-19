@@ -48,7 +48,8 @@ static void movertab_reset_entry(unsigned global, bool is_sprite);
 static void cycle_chunk_type(struct SwitchChunk *chunk, size_t level, int dir);
 
 /* Run play.sh detached. PLAY_ROOM tells it which room to start in (it swaps
- * that room into slot 1, the game's start room, in the copy the game runs). */
+ * that room into slot 1, the game's start room, in the copy the game runs);
+ * SPIDEY_DATA_DIR tells it where this editor's ROOMS.SPL and MOVERTAB.DAT are. */
 static void fork_play(void) {
     signal(SIGCHLD, SIG_IGN);
     pid_t child = fork();
@@ -57,6 +58,7 @@ static void fork_play(void) {
             char room[8];
             snprintf(room, sizeof room, "%zu", state->current_level);
             setenv("PLAY_ROOM", room, 1);
+            setenv("SPIDEY_DATA_DIR", state->data_dir, 1);
             freeRoomFile(&state->rooms);
             free(state);
         }

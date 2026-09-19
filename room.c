@@ -1720,10 +1720,22 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
     return true;
 }
 
-bool readRooms(RoomFile *file) {
-    FILE *fp = fopen(ROOMS_FILE, "rb");
+const char *data_path(const char *dir, const char *name) {
+    static char bufs[4][4096];
+    static unsigned next = 0;
+    char *buf = bufs[next++ % 4];
+    if (dir == NULL || *dir == '\0') dir = ".";
+    size_t n = strlen(dir);
+    while (n > 1 && dir[n - 1] == '/') n--;
+    snprintf(buf, sizeof bufs[0], "%.*s/%s", (int)n, dir, name);
+    return buf;
+}
+
+bool readRooms(RoomFile *file, const char *dir) {
+    const char *path = data_path(dir, ROOMS_FILE);
+    FILE *fp = fopen(path, "rb");
     if (fp == NULL) {
-        fprintf(stderr, "Could not open %s for reading.\n", ROOMS_FILE);
+        fprintf(stderr, "Could not open %s for reading.\n", path);
         return false;
     }
     bool ret = readFile(file, fp);
@@ -1731,7 +1743,7 @@ bool readRooms(RoomFile *file) {
     return ret;
 }
 
-bool writeRooms(RoomFile *file, int *failed_room, char *dangling_msg, size_t dangling_msg_size) {
+bool writeRooms(RoomFile *file, const char *dir, int *failed_room, char *dangling_msg, size_t dangling_msg_size) {
     if (failed_room) *failed_room = -1;
     // Every room's object/switch index base is a cumulative count over lower-numbered
     // rooms (recomputeBases' own comment), so it only ever depends on the file's current
@@ -1789,7 +1801,8 @@ next:
 
     // Write beside the file and rename over it only when everything fitted,
     // so a refused write leaves the last good ROOMS.SPL in place.
-    const char *tmp = ROOMS_FILE ".tmp";
+    const char *path = data_path(dir, ROOMS_FILE);
+    const char *tmp = data_path(dir, ROOMS_FILE ".tmp");
     FILE *fp = fopen(tmp, "wb");
     if (fp == NULL) {
         fprintf(stderr, "Could not open %s for writing.\n", tmp);
@@ -1798,8 +1811,8 @@ next:
     bool ret = writeFile(file, fp, failed_room);
     if (fclose(fp) != 0) ret = false;
     if (!ret) { remove(tmp); return false; }
-    if (rename(tmp, ROOMS_FILE) != 0) {
-        fprintf(stderr, "Could not replace %s: %s\n", ROOMS_FILE, strerror(errno));
+    if (rename(tmp, path) != 0) {
+        fprintf(stderr, "Could not replace %s: %s\n", path, strerror(errno));
         remove(tmp);
         return false;
     }

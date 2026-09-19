@@ -59,7 +59,7 @@ typedef struct {
 // Create the editor state around main()'s room file (taking over its data),
 // or re-adopt `prev` after a hot reload. `prev` is discarded (its rooms handed
 // back to `host`) when the editor's state struct has changed size.
-void *ged_open(RoomFile *host, void *prev);
+void *ged_open(RoomFile *host, void *prev, const char *data_dir);   // data_dir: where ROOMS.SPL / MOVERTAB.DAT are (room.h data_path)
 // Hand the room data back to `host` and free the editor state (window closed).
 void  ged_close(void *es, RoomFile *host);
 

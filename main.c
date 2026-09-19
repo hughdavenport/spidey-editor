@@ -984,8 +984,8 @@ bool main_importRoom(int *argc, char ***argv, char *program, RoomFile *file, boo
 }
 
 // swap A B [--movertab FILE]: exchange two rooms (play.sh uses it to start in a chosen room).
-// The mover table, FILE or ./MOVERTAB.DAT if present, is permuted to the new object order and
-// written as MOVERTAB.DAT beside the output .SPL.
+// The mover table, FILE or the data dir's MOVERTAB.DAT if present, is permuted to the new
+// object order and written as MOVERTAB.DAT beside the output .SPL.
 bool main_swap(int *argc, char ***argv, char *program, int *swap_a, int *swap_b, char **movertab) {
     if (*argc < 3) {
         fprintf(stderr, "Usage: %s swap A B [--movertab FILE] [OUT.SPL]\n", program);
@@ -1037,22 +1037,24 @@ static bool permuteMovertab(const unsigned before[64], int a, int b, const char 
     return ok;
 }
 
-int editor_main();
+int editor_main(const char *data_dir);
 
 static void print_subcommands(FILE *out) {
+    fprintf(out, "Options (any position):\n");
+    fprintf(out, "    --data-dir DIR                       - Directory holding ROOMS.SPL, MOVERTAB.DAT, BACKS.SPL and the graphics (default: the working directory)\n");
     fprintf(out, "Subcommands:\n");
     fprintf(out, "    rooms                                - List rooms\n");
     fprintf(out, "    display [ROOMID]                     - Defaults to all rooms\n");
     fprintf(out, "    import [FILE|-] [OUT.SPL]             - Import display output (rooms not in file blanked); writes OUT.SPL (default ROOMS.SPL)\n");
     fprintf(out, "    importRoom ROOMID [FILE|-] [OUT.SPL]  - Import one room at ROOMID; writes OUT.SPL (default ROOMS.SPL)\n");
     fprintf(out, "    recompress                           - No changes to underlying data, just recompress\n");
-    fprintf(out, "    swap A B [--movertab FILE]           - Exchange rooms A and B (links, bases, toggle bits follow); permutes FILE or ./MOVERTAB.DAT into OUT's MOVERTAB.DAT\n");
+    fprintf(out, "    swap A B [--movertab FILE]           - Exchange rooms A and B (links, bases, toggle bits follow); permutes FILE or the data dir's MOVERTAB.DAT into OUT's MOVERTAB.DAT\n");
     fprintf(out, "    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again\n");
     fprintf(out, "    delete ROOM_ID thing...              - Delete switch/chunk/object from room\n");
     fprintf(out, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
     fprintf(out, "    find_sprite SPRITENAME               - Find a sprite\n");
-    fprintf(out, "    render ROOMID|all|montage OUT|DIR    - Render room(s) to PNG (--debug --scale N --data-dir DIR)\n");
-    fprintf(out, "    gui [--data-dir DIR] [--scale N]     - raylib GUI editor (terminal-editor keys)\n");
+    fprintf(out, "    render ROOMID|all|montage OUT|DIR    - Render room(s) to PNG (--debug --scale N --movertab FILE)\n");
+    fprintf(out, "    gui [--scale N]                      - raylib GUI editor (terminal-editor keys)\n");
     fprintf(out, "    editor                               - Start the text-mode editor\n");
     fprintf(out, "      (SPIDEY_NO_HOTRELOAD=1 turns off source watching in the debug build; `make release` has none)\n");
     fprintf(out, "    help                                 - Display this message\n");
@@ -1062,7 +1064,20 @@ int main(int argc, char **argv) {
 #ifdef SPIDEY_RELEASE
     setenv("SPIDEY_NO_HOTRELOAD", "1", 1);   /* everything is linked in; nothing to rebuild */
 #endif
-    char *fileName = ROOMS_FILE;
+    // --data-dir DIR may sit anywhere on the command line and applies to every subcommand:
+    // it is where ROOMS.SPL is read from (and written to, unless a trailing OUT.SPL says
+    // otherwise), where swap looks for MOVERTAB.DAT, and where render / gui find the graphics.
+    const char *data_dir = ".";
+    for (int i = 1; i + 1 < argc; i++) {
+        if (strcmp(argv[i], "--data-dir") == 0) {
+            data_dir = argv[i + 1];
+            memmove(argv + i, argv + i + 2, (size_t)(argc - i - 2) * sizeof *argv);
+            argc -= 2;
+            argv[argc] = NULL;
+            i--;
+        }
+    }
+    char *fileName = (char *)data_path(data_dir, ROOMS_FILE);
     RoomFile file = {0};
     PatchInstructionArray patches = {0};
     bool recompress = false;
@@ -1283,11 +1298,11 @@ int main(int argc, char **argv) {
             ARRAY_FREE(patches);
             freeRoomFile(&file);
             if (fp) { fclose(fp); fp = NULL; }
-            return editor_main();
+            return editor_main(data_dir);
         } else if (strcasecmp(argv[0], "render") == 0) {
             argv ++; argc --;
             // Collect flags (any position) and up to two positionals (TARGET, OUT).
-            RenderOpts opts = { .data_dir = ".", .scale = 3, .debug = false };
+            RenderOpts opts = { .data_dir = data_dir, .scale = 3, .debug = false };
             uint8_t movertab_buf[256 * 3];
             const char *pos[2] = {NULL, NULL};
             int npos = 0;
@@ -1297,8 +1312,6 @@ int main(int argc, char **argv) {
                     opts.debug = true; argv ++; argc --;
                 } else if (strcmp(argv[0], "--scale") == 0 && argc >= 2) {
                     opts.scale = (int)strtol(argv[1], NULL, 10); argv += 2; argc -= 2;
-                } else if (strcmp(argv[0], "--data-dir") == 0 && argc >= 2) {
-                    opts.data_dir = argv[1]; argv += 2; argc -= 2;
                 } else if (strcmp(argv[0], "--movertab") == 0 && argc >= 2) {
                     FILE *mfp = fopen(argv[1], "rb");
                     if (mfp == NULL || fread(movertab_buf, 1, sizeof movertab_buf, mfp) != sizeof movertab_buf) {
@@ -1318,7 +1331,7 @@ int main(int argc, char **argv) {
                 }
             }
             if (bad || npos < 2) {
-                fprintf(stderr, "Usage: render ROOMID|all|montage OUT.png|DIR [--debug] [--scale N] [--data-dir DIR] [--movertab FILE]\n");
+                fprintf(stderr, "Usage: render ROOMID|all|montage OUT.png|DIR [--debug] [--scale N] [--movertab FILE]\n");
                 defer_return(1);
             }
             bool render_all = (strcasecmp(pos[0], "all") == 0);
@@ -1345,11 +1358,9 @@ int main(int argc, char **argv) {
             defer_return(0);
         } else if (strcasecmp(argv[0], "gui") == 0) {
             argv ++; argc --;
-            const char *data_dir = ".";
             int scale = 0;
             while (argc >= 2) {
-                if (strcmp(argv[0], "--data-dir") == 0)   { data_dir = argv[1]; }
-                else if (strcmp(argv[0], "--scale") == 0) { scale = atoi(argv[1]); }
+                if (strcmp(argv[0], "--scale") == 0) { scale = atoi(argv[1]); }
                 else break;
                 argv += 2; argc -= 2;
             }
@@ -1848,15 +1859,15 @@ int main(int argc, char **argv) {
             defer_return(1);
         }
         if (!swapRooms(&file, swap_a, swap_b)) defer_return(1);
-        const char *src = swap_movertab ? swap_movertab : "MOVERTAB.DAT";
+        const char *src = swap_movertab ? swap_movertab : data_path(data_dir, MOVERTAB_FILE);
         if (swap_movertab || access(src, R_OK) == 0) {
             char dst[4096];
-            const char *slash = strrchr(fileName, '/');
-            if (slash) snprintf(dst, sizeof dst, "%.*s/MOVERTAB.DAT", (int)(slash - fileName), fileName);
-            else snprintf(dst, sizeof dst, "MOVERTAB.DAT");
+            const char *slash = strrchr(fileName, '/');   // beside OUT.SPL (fileName is <data dir>/ROOMS.SPL by default)
+            if (slash) snprintf(dst, sizeof dst, "%.*s/" MOVERTAB_FILE, (int)(slash - fileName), fileName);
+            else snprintf(dst, sizeof dst, MOVERTAB_FILE);
             if (!permuteMovertab(before, swap_a, swap_b, src, dst)) defer_return(1);
         } else {
-            fprintf(stderr, "swap: no MOVERTAB.DAT here and none given, mover table not permuted\n");
+            fprintf(stderr, "swap: no %s and none given, mover table not permuted\n", src);
         }
     }
     if (patches.length > 0 || recompress || import_done || swapped) {

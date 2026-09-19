@@ -57,10 +57,11 @@ bool debugany(void) {
 /* --- lifecycle ------------------------------------------------------------ */
 
 // Mirrors setup() in editor.c minus the terminal handling.
-static game_state *state_new(RoomFile *host) {
+static game_state *state_new(RoomFile *host, const char *data_dir) {
     game_state *s = calloc(1, sizeof *s);
     assert(s != NULL && "Not enough memory");
     s->size = sizeof *s;
+    snprintf(s->data_dir, sizeof s->data_dir, "%s", data_dir);
     memset(s->screen_prev, 0xFF, sizeof s->screen_prev);
     s->rooms = *host;                       // take over the room data
     state = s;
@@ -95,7 +96,7 @@ static void state_free_keep_rooms(game_state *s) {
     state = NULL;
 }
 
-void *ged_open(RoomFile *host, void *prev) {
+void *ged_open(RoomFile *host, void *prev, const char *data_dir) {
     screen_headless = true;
     game_state *s = prev;
     if (s != NULL && s->size != sizeof *s) {
@@ -104,7 +105,7 @@ void *ged_open(RoomFile *host, void *prev) {
         state_free_keep_rooms(s);
         s = NULL;
     }
-    if (s == NULL) s = state_new(host);
+    if (s == NULL) s = state_new(host, data_dir);
     state = s;
     get_screen_dimensions();
     quit_requested = false;
@@ -295,8 +296,9 @@ bool ged_map_click(int room, bool right, int tx, int ty) {
     state->current_switch = 0;
     state->switch_on = false;
     state->current_chunk = 0;
-    // A click on the thumbnail (not keyboard Enter, and not a switch-link jump) carries where
-    // in it: land the cursor there rather than wherever it was left last visit.
+    // A Ctrl-click on the thumbnail carries where in it the click fell: land the cursor there.
+    // A plain click, keyboard Enter and a switch-link jump pass -1 and leave the cursor where
+    // that room last had it.
     if (tx >= 0 && tx < WIDTH_TILES && ty >= 0 && ty < HEIGHT_TILES) {
         state->cursors[room].x = tx;
         state->cursors[room].y = ty;

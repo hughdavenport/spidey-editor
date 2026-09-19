@@ -199,6 +199,10 @@ typedef struct {
      * mistake our own save for an external edit and free+reread state out
      * from under whatever the UI is mid-way through doing with it. */
     struct timespec last_own_write_mtim;
+    /* Where ROOMS.SPL and MOVERTAB.DAT are read and written: main()'s --data-dir, or "."
+     * (room.h data_path). Lives here so it survives hot reloads and reaches editor.so /
+     * gui.so, which have their own copy of room.c and no view of main()'s variables. */
+    char data_dir[1024];
     RoomFile rooms;
     bool resized;
     bool help;

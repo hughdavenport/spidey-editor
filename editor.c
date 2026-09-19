@@ -116,13 +116,14 @@ void sigwinch_handler(int arg) {
     }
 }
 
-void setup() {
+void setup(const char *data_dir) {
     assert(state == NULL && "Already setup");
     printf(SAVE_CURSOR HIDE_CURSOR SAVE_SCREEN ENABLE_ALT_BUFFER);
 
     state = calloc(1, sizeof(game_state));
     assert(state != NULL && "Not enough memory");
     state->size = sizeof(game_state);
+    snprintf(state->data_dir, sizeof state->data_dir, "%s", data_dir);
     memset(state->screen_prev, 0xFF, sizeof(state->screen_prev));
 
     debugalltoggle();
@@ -140,7 +141,7 @@ void setup() {
 
     get_screen_dimensions();
 
-    assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+    assert(readRooms(&state->rooms, state->data_dir) && "Check that you have ROOMS.SPL");
     movertab_load();
 
     for (size_t i = 0; i < C_ARRAY_LEN(state->cursors); i ++) {
@@ -159,12 +160,12 @@ void setup() {
     state->debug.switch_links = true;
 }
 
-typedef game_state *(*main_fn)(char *library, game_state *call_state);
-game_state *loop_main(char *library, game_state *call_state) {
+typedef game_state *(*main_fn)(char *library, game_state *call_state, const char *data_dir);
+game_state *loop_main(char *library, game_state *call_state, const char *data_dir) {
     struct stat library_stat;
     assert(stat(library, &library_stat) == 0);
     struct stat start_rooms_stat;
-    assert(stat("ROOMS.SPL", &start_rooms_stat) == 0);
+    assert(stat(data_path(data_dir, ROOMS_FILE), &start_rooms_stat) == 0);
 
     state = call_state;
     if (state != NULL && state->size != sizeof(game_state)) {
@@ -172,7 +173,7 @@ game_state *loop_main(char *library, game_state *call_state) {
         state = NULL;
     }
     if (state == NULL) {
-        setup();
+        setup(data_dir);
     } else {
         snprintf(state->status_message, sizeof(state->status_message), "Loaded new library");
         redraw();
@@ -217,7 +218,7 @@ game_state *loop_main(char *library, game_state *call_state) {
         }
 
         struct stat rooms_stat;
-        if (stat("ROOMS.SPL", &rooms_stat) == 0
+        if (stat(data_path(state->data_dir, ROOMS_FILE), &rooms_stat) == 0
                 && TIME_NEWER(rooms_stat.st_mtim, start_rooms_stat.st_mtim)) {
             /* Our own last editor_save() already updated state->rooms in memory
              * to match exactly what it just wrote; free-and-reread only when
@@ -231,7 +232,7 @@ game_state *loop_main(char *library, game_state *call_state) {
                 snprintf(state->status_message, sizeof(state->status_message), "Reloading ROOMS.SPL");
                 redraw();
                 freeRoomFile(&state->rooms);
-                assert(readRooms(&state->rooms) && "Check that you have ROOMS.SPL");
+                assert(readRooms(&state->rooms, state->data_dir) && "Check that you have ROOMS.SPL");
                 dirty = true;
             }
         }
@@ -255,15 +256,15 @@ game_state *loop_main(char *library, game_state *call_state) {
 // If this function is edited, then you must rebuild the application
 #ifdef SPIDEY_RELEASE
 /* Release build: the editor is linked in, no editor.so, no rebuilding. */
-int editor_main() {
+int editor_main(const char *data_dir) {
     game_state *saved_state = NULL;
     do {
-        saved_state = loop_main("/proc/self/exe", saved_state);
+        saved_state = loop_main("/proc/self/exe", saved_state, data_dir);
     } while (saved_state != NULL);
     return 0;
 }
 #else
-int editor_main() {
+int editor_main(const char *data_dir) {
     char *basename = strdup(__FILE__);
     char *dot = strrchr(basename, '.');
     if (dot != NULL) *dot = '\0';
@@ -292,10 +293,10 @@ int editor_main() {
                 return 1;
             }
         }
-        void *(*function)(char *library, void *state);
+        void *(*function)(char *library, void *state, const char *data_dir);
         *(void **) (&function) = dlsym(module, "loop_main");
         assert(function != NULL && "Could not find loop_main");
-        saved_state = function(library, saved_state);
+        saved_state = function(library, saved_state, data_dir);
         dlclose(module);
         if (saved_state == NULL) break;
     }

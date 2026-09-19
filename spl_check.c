@@ -334,7 +334,7 @@ static void check_room_values(const char *rooms_path) {
     if (chdir(dir) != 0) { CHECK(false, "chdir %s", dir); return; }
 
     RoomFile before = {0};
-    CHECK(readRooms(&before), "%s: readRooms (before) failed", rooms_path);
+    CHECK(readRooms(&before, "."), "%s: readRooms (before) failed", rooms_path);
 
     char *dumps[C_ARRAY_LEN(before.rooms)] = {0};
     for (size_t r = 0; r < C_ARRAY_LEN(before.rooms); r++) {
@@ -343,10 +343,10 @@ static void check_room_values(const char *rooms_path) {
     for (size_t r = 0; r < C_ARRAY_LEN(before.rooms); r++) {
         if (before.rooms[r].valid) ARRAY_FREE(before.rooms[r].compressed);   // force recompression from .data
     }
-    CHECK(writeRooms(&before, NULL, NULL, 0), "%s: writeRooms failed", rooms_path);
+    CHECK(writeRooms(&before, ".", NULL, NULL, 0), "%s: writeRooms failed", rooms_path);
 
     RoomFile after = {0};
-    CHECK(readRooms(&after), "%s: readRooms (after) failed", rooms_path);
+    CHECK(readRooms(&after, "."), "%s: readRooms (after) failed", rooms_path);
     int rooms = 0;
     for (size_t r = 0; r < C_ARRAY_LEN(before.rooms); r++) {
         if (!before.rooms[r].valid) continue;
@@ -379,7 +379,7 @@ static void check_rooms_limit(const char *rooms_path) {
     uint8_t *before = read_whole(copy, &before_len);
     if (chdir(dir) != 0) { CHECK(false, "chdir %s", dir); free(before); return; }
     RoomFile file = {0};
-    CHECK(readRooms(&file), "readRooms on the copy failed");
+    CHECK(readRooms(&file, "."), "readRooms on the copy failed");
     srand(4242);
     for (size_t r = 0; r < 64; r++) {
         Room *room = &file.rooms[r];
@@ -387,19 +387,86 @@ static void check_rooms_limit(const char *rooms_path) {
         for (size_t i = 0; i < sizeof room->data.tiles; i++) room->data.tiles[i] = (uint8_t)(rand() % 256);
         ARRAY_FREE(room->compressed);
     }
-    CHECK(!writeRooms(&file, NULL, NULL, 0), "an oversized ROOMS.SPL was written");
+    CHECK(!writeRooms(&file, ".", NULL, NULL, 0), "an oversized ROOMS.SPL was written");
     size_t after_len = 0;
     uint8_t *after = read_whole(copy, &after_len);
     CHECK(before && after && before_len == after_len && memcmp(before, after, before_len) == 0,
           "ROOMS.SPL changed although the write was refused");
     // and a file that fits still writes
     for (size_t r = 0; r < 64; r++) { memset(file.rooms[r].data.tiles, 0, sizeof file.rooms[r].data.tiles); ARRAY_FREE(file.rooms[r].compressed); }
-    CHECK(writeRooms(&file, NULL, NULL, 0), "a small ROOMS.SPL was refused");
+    CHECK(writeRooms(&file, ".", NULL, NULL, 0), "a small ROOMS.SPL was refused");
     free(before); free(after);
     freeRoomFile(&file);
     if (chdir(cwd) != 0) CHECK(false, "chdir back");
     if (failures == 0) { unlink(copy); snprintf(copy, sizeof copy, "%s/%s.tmp", dir, ROOMS_FILE); unlink(copy); rmdir(dir); }
     printf("rooms file: oversized write refused, file untouched\n");
+}
+
+// readRooms() / writeRooms() take the data directory explicitly; nothing about them may
+// depend on the working directory (`./a.out gui --data-dir original` used to read the
+// cwd's ROOMS.SPL and only take its graphics from original/). Two scratch directories: A
+// becomes the cwd and holds a sentinel ROOMS.SPL, B holds a real copy of `rooms_path`.
+// Reading and writing through B must change B's file and leave A's sentinel alone, and
+// data_path() must join a directory and a file name whether or not the directory ends in
+// a slash.
+static void check_data_dir(const char *rooms_path) {
+    const char *tmpdir = getenv("TMPDIR");
+    char a[1024], b[1024], cwd[1024];
+    snprintf(a, sizeof a, "%s/spl_check_cwd.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
+    snprintf(b, sizeof b, "%s/spl_check_data.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
+    if (mkdtemp(a) == NULL || mkdtemp(b) == NULL || getcwd(cwd, sizeof cwd) == NULL) { CHECK(false, "scratch dirs for the data-dir check"); return; }
+    CHECK(strcmp(data_path(".", ROOMS_FILE), "./ROOMS.SPL") == 0, "data_path(\".\") gave %s", data_path(".", ROOMS_FILE));
+    CHECK(strcmp(data_path("original/", ROOMS_FILE), "original/ROOMS.SPL") == 0, "data_path with a trailing slash gave %s", data_path("original/", ROOMS_FILE));
+    CHECK(strcmp(data_path("original", ROOMS_FILE), "original/ROOMS.SPL") == 0, "data_path gave %s", data_path("original", ROOMS_FILE));
+
+    static const char sentinel[] = "this is the working directory's ROOMS.SPL and must not be touched";
+    char a_rooms[1200], b_rooms[1200];
+    snprintf(a_rooms, sizeof a_rooms, "%s/%s", a, ROOMS_FILE);
+    snprintf(b_rooms, sizeof b_rooms, "%s/%s", b, ROOMS_FILE);
+    FILE *f = fopen(a_rooms, "wb");
+    if (f == NULL || fwrite(sentinel, 1, sizeof sentinel, f) != sizeof sentinel || fclose(f) != 0) { CHECK(false, "cannot write the sentinel"); return; }
+    if (!copy_file(rooms_path, b_rooms)) { CHECK(false, "cannot copy %s", rooms_path); return; }
+    size_t orig_len = 0;
+    uint8_t *orig = read_whole(b_rooms, &orig_len);
+    if (chdir(a) != 0) { CHECK(false, "chdir %s", a); free(orig); return; }
+
+    RoomFile file = {0};
+    CHECK(readRooms(&file, b), "readRooms through the data dir failed");
+    int valid = 0;
+    for (size_t r = 0; r < 64; r++) {
+        if (!file.rooms[r].valid) continue;
+        valid++;
+        memset(file.rooms[r].data.tiles, 0, sizeof file.rooms[r].data.tiles);
+        ARRAY_FREE(file.rooms[r].compressed);
+    }
+    CHECK(valid > 0, "the copy has no rooms");
+    CHECK(writeRooms(&file, b, NULL, NULL, 0), "writeRooms through the data dir failed");
+
+    size_t a_len = 0, b_len = 0;
+    uint8_t *a_after = read_whole(a_rooms, &a_len);
+    uint8_t *b_after = read_whole(b_rooms, &b_len);
+    CHECK(a_after && a_len == sizeof sentinel && memcmp(a_after, sentinel, a_len) == 0,
+          "the working directory's ROOMS.SPL was touched by a data-dir write");
+    CHECK(b_after && orig && !(b_len == orig_len && memcmp(b_after, orig, b_len) == 0),
+          "the data dir's ROOMS.SPL did not change after a write");
+    RoomFile again = {0};
+    CHECK(readRooms(&again, b), "readRooms after the data-dir write failed");
+    int valid_again = 0;
+    for (size_t r = 0; r < 64; r++) if (again.rooms[r].valid) valid_again++;
+    CHECK(valid_again == valid, "room count changed across the data-dir round trip (%d -> %d)", valid, valid_again);
+    RoomFile wrong = {0};
+    CHECK(!readRooms(&wrong, a), "readRooms accepted the sentinel as a rooms file");
+    freeRoomFile(&wrong);
+
+    free(orig); free(a_after); free(b_after);
+    freeRoomFile(&file);
+    freeRoomFile(&again);
+    if (chdir(cwd) != 0) CHECK(false, "chdir back");
+    if (failures == 0) {
+        unlink(a_rooms); rmdir(a);
+        unlink(b_rooms); snprintf(b_rooms, sizeof b_rooms, "%s/%s.tmp", b, ROOMS_FILE); unlink(b_rooms); rmdir(b);
+    }
+    printf("data dir: ROOMS.SPL read and written where --data-dir points, cwd untouched\n");
 }
 
 int main(int argc, char **argv) {
@@ -409,6 +476,7 @@ int main(int argc, char **argv) {
     check_backs_store(argv[1]);
     if (argc > 2) check_room_values(argv[2]);
     if (argc > 2) check_rooms_limit(argv[2]);
+    if (argc > 2) check_data_dir(argv[2]);
     if (failures) { fprintf(stderr, "%d check(s) failed\n", failures); return 1; }
     printf("all checks passed\n");
     return 0;

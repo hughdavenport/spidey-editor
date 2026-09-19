@@ -1024,8 +1024,10 @@ static bool feed_mouse(GuiState *g) {
             g->focus = FOCUS_WORLD;
             g->world_sel = release_room;
         } else {
-            int tx, ty;
-            world_click_tile(g, g->wpress_room, m, &tx, &ty);
+            // plain click: go there, cursor left where that room last had it; Ctrl-click:
+            // also land the cursor where in the thumbnail the click fell
+            int tx = -1, ty = -1;
+            if (mod & GK_MOD_CTRL) world_click_tile(g, g->wpress_room, m, &tx, &ty);
             ged_map_click(g->wpress_room, false, tx, ty);
             g->focus = FOCUS_WORLD;
             g->world_sel = g->wpress_room;
@@ -1292,7 +1294,8 @@ static void draw_help(GuiState *g) {
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
         "        (BACKS.SPL, shared by every room with that background number); middle-click picks",
         "wheel over room: background; Shift+wheel / horizontal wheel, or wheel over the tile picker: tileset",
-        "world map: click = go there (an empty slot becomes a new room); right-click = move the thing under the cursor there",
+        "world map: click = go there (an empty slot becomes a new room); Ctrl-click = go there and put the cursor",
+        "        where you clicked; right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
         "focus: Tab cycles room / picker / editor / colours / pick+fill / attributes / buttons / world map (or click one);",
         "       arrows, hjkl move it; Enter or Space applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
@@ -2267,7 +2270,7 @@ static Rectangle world_cell(GuiState *g, int room, int tw, int th) {
 }
 
 // Where in room `room`'s thumbnail point `m` falls, in that room's own tile coordinates
-// (clamped) - used to land the cursor where a plain click on the world map landed.
+// (clamped) - used to land the cursor where a Ctrl-click on the world map landed.
 static void world_click_tile(GuiState *g, int room, Vector2 m, int *tx, int *ty) {
     int tw, th;
     world_geom(g, &tw, &th);
@@ -2916,9 +2919,9 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         InitWindow(window_w(g), window_h(g), "Spidey Editor — GUI");
         SetTargetFPS(60);
         SetExitKey(KEY_NULL);   // ESC is "cancel" in the editor; quit with q or the window button
-        g->es = ged_open(file, NULL);
+        g->es = ged_open(file, NULL, data_dir);
     } else {
-        g->es = ged_open(file, g->es);   // re-adopt (or reset) the editor state after a reload
+        g->es = ged_open(file, g->es, data_dir);   // re-adopt (or reset) the editor state after a reload
     }
     render_show_player(g->rctx, false);  // he is drawn at the cursor instead
     render_set_movertab(g->rctx, ged_movertab());   // mirror sprites per their facing/upside-down bits
