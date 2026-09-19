@@ -560,6 +560,38 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     printf("]\n");
 }
 
+// Export one room's full editable state (tiles, objects, switches, metadata) as dumpRoom's
+// `display`-format text - the same format `./a.out display N` prints and room_import_text (or
+// `./a.out importRoom`) reads back, so a room can be lifted out and dropped into another file.
+bool room_export_text(Room *room, RoomFile *file, const char *path) {
+    FILE *fp = fopen(path, "w");
+    if (fp == NULL) return false;
+    fflush(stdout);
+    int saved_fd = dup(STDOUT_FILENO);
+    if (saved_fd < 0) { fclose(fp); return false; }
+    dup2(fileno(fp), STDOUT_FILENO);
+    dumpRoom(room, file, false);
+    fflush(stdout);
+    dup2(saved_fd, STDOUT_FILENO);
+    close(saved_fd);
+    fclose(fp);
+    return true;
+}
+
+// Import a `display`-format text file (room_export_text's own output, or a hand-edited one)
+// into this one room, leaving every other room's own data untouched. Recomputes the whole
+// file's object/switch index bases and TOGGLE_BIT targets afterward, since this room's object
+// or switch count may have changed and later rooms' bases are cumulative.
+bool room_import_text(Room *room, RoomFile *file, const char *path) {
+    FILE *fp = fopen(path, "r");
+    if (fp == NULL) return false;
+    bool ok = importRooms(fp, file, (int)room->index);
+    fclose(fp);
+    if (!ok) return false;
+    recomputeBases(file);
+    return recomputeToggleBits(file);
+}
+
 bool readRoom(Room *room, Header *head, size_t idx, FILE *fp) {
     if (head == NULL) return false;
     if (idx >= C_ARRAY_LEN(head->definitions)) return false;
@@ -951,15 +983,25 @@ bool readFile(RoomFile *file, FILE *fp) {
 // out-of-bounds one (SB-SE style off-map targets) is never touched at all, and one sitting on
 // a blank (invisible) tile just needs walking over, from any direction, to fire (Hugh: "when
 // tiles are blank 0x00... side is not important, any direction works and the tile just has to
-// be gone over" - and separately, confirmed by testing, entry=true there controls whether the
-// switch works at all rather than proximity-vs-room-entry). Both cases hide/disable "side".
+// be gone over"). Both cases hide/disable "side".
 bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble) {
     if (preamble->x >= WIDTH_TILES || preamble->y >= HEIGHT_TILES) return true;
     return room->tiles[TILE_IDX(preamble->x, preamble->y)] == BLANK_TILE;
 }
 
+// Whether "entry" is forced true regardless of its stored value: confirmed by testing, an
+// in-bounds switch sitting on a blank tile reuses that bit for "the switch is live" rather than
+// "fires on room entry" - but an out-of-bounds switch is NOT the same case even though it's
+// "blank" too (there's no tile array slot for it at all): entry keeps its ordinary meaning
+// there (Hugh, 2026-09-19: "entry _does_ matter for out of bounds switches, even if they are
+// 'blank' (they all are)"), so this deliberately excludes switch_side_hidden's OOB case.
+bool switch_entry_forced(struct DecompressedRoom *room, struct SwitchChunk *preamble) {
+    if (preamble->x >= WIDTH_TILES || preamble->y >= HEIGHT_TILES) return false;
+    return room->tiles[TILE_IDX(preamble->x, preamble->y)] == BLANK_TILE;
+}
+
 bool switch_entry_effective(struct DecompressedRoom *room, struct SwitchChunk *preamble) {
-    return preamble->room_entry || switch_side_hidden(room, preamble);
+    return preamble->room_entry || switch_entry_forced(room, preamble);
 }
 
 #define MAX_ROOM_FILE_SIZE 0x3100
@@ -1469,6 +1511,10 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
             obj->type = SPRITE;
             obj->x = sx; obj->y = sy;
             obj->sprite.damage = sdmg;
+            // A sprite doesn't need a tile under it - one there just blocks the sprite (same
+            // policy as the LEVELSET2 generator's room() helper; Hugh: "the import/export keeps
+            // tiles underneath the sprites... strip [them]").
+            if (sx >= 0 && sx < WIDTH_TILES && sy >= 0 && sy < HEIGHT_TILES) room->data.tiles[TILE_IDX(sx, sy)] = 0;
             _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
             if      (strcmp(stype, "SHARK")        == 0) obj->sprite.type = SHARK;
             else if (strcmp(stype, "MUMMY")        == 0) obj->sprite.type = MUMMY;
@@ -1483,7 +1529,7 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
                 obj->sprite.damage = 3;
             } else if (strcmp(stype, "MARY_JANE") == 0) {
                 obj->sprite.type = SHARK;
-                obj->sprite.damage = 3;
+                obj->sprite.damage = 4;
             } else {
                 fprintf(stderr, "import: unknown sprite type '%s'\n", stype);
                 return false;

@@ -263,14 +263,20 @@ bool recomputeToggleBits(RoomFile *file);
 void recomputeBases(RoomFile *file);
 bool swapRooms(RoomFile *file, int a, int b);
 void dumpRoom(Room *room, RoomFile *file, bool color);
+// Whole-room import/export as dumpRoom's `display`-format text: room_export_text writes it,
+// room_import_text reads it back into the SAME room slot (room->index), leaving every other
+// room untouched.
+bool room_export_text(Room *room, RoomFile *file, const char *path);
+bool room_import_text(Room *room, RoomFile *file, const char *path);
 
 // Whether a switch's "side" is meaningless - out of bounds, or sitting on a blank (invisible)
 // tile that just needs walking over from any direction (Hugh, 2026-09-19) - and so should be
 // hidden from display and disabled for editing.
 bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble);
-// A switch with no backing tile (switch_side_hidden) only works at all when its "entry" bit is
-// set - the game reuses that bit to mean "the switch is live" rather than "fires on room entry"
-// there (confirmed by testing) - so it's forced true on write regardless of the stored value.
+// Whether "entry" is forced true regardless of its stored value: an in-bounds switch sitting on
+// a blank tile only works at all when this bit is set (confirmed by testing) - but an
+// out-of-bounds switch is NOT the same case; entry keeps its ordinary meaning there.
+bool switch_entry_forced(struct DecompressedRoom *room, struct SwitchChunk *preamble);
 bool switch_entry_effective(struct DecompressedRoom *room, struct SwitchChunk *preamble);
 
 #endif // ROOM_H

@@ -521,3 +521,18 @@ bool ged_flush(void) {
     editor_save();
     return true;
 }
+
+bool ged_room_export_text(const char *path) {
+    return room_export_text(&state->rooms.rooms[state->current_level], &state->rooms, path);
+}
+
+bool ged_room_import_text(const char *path) {
+    if (!plain_state()) return false;
+    push_undo((uint8_t)state->current_level, false);
+    bool ok = room_import_text(&state->rooms.rooms[state->current_level], &state->rooms, path);
+    if (!ok) return false;
+    ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+    snprintf(state->status_message, sizeof(state->status_message), "Writing room");
+    editor_save();
+    return true;
+}

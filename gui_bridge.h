@@ -140,4 +140,10 @@ void  ged_block_set_tile(int idx, int bx, int by, uint8_t tile);
 void  ged_block_resize(int dx, int dy, bool grow);
 bool  ged_flush(void);             // write pending paints; true if it wrote
 
+// Whole current room, as `display`-format text (room_export_text/room_import_text, room.h).
+// Import leaves every other room's own data untouched, though its object/switch count changing
+// does shift every later room's index bases (recomputed, but not individually undo-tracked).
+bool  ged_room_export_text(const char *path);
+bool  ged_room_import_text(const char *path);
+
 #endif /* GUI_BRIDGE_H */

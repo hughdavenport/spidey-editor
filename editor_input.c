@@ -1312,11 +1312,13 @@ static void move_cursor_plain(int dx, int dy) {
 
 static bool handle_edit_switchdetails(Key key) {
     // "side" isn't shown or editable for a switch that's out of bounds, or sitting on a blank
-    // tile (see editor_draw.c's switch_side_hidden for why). In that case direction keys fall
-    // back to plain map cursor movement instead of doing nothing.
+    // tile (see room.c's switch_side_hidden for why). In that case direction keys fall back to
+    // plain map cursor movement instead of doing nothing. "entry" is a separate, narrower case
+    // (switch_entry_forced): only an in-bounds blank tile forces/hides it, not out of bounds.
     struct DecompressedRoom *side_room = &state->rooms.rooms[state->current_level].data;
     struct SwitchChunk *side_preamble = side_room->switches[state->current_switch - 1].chunks.data;
     bool side_locked = switch_side_hidden(side_room, side_preamble);
+    bool entry_locked = switch_entry_forced(side_room, side_preamble);
     switch (key.code) {
         case KEY_UP:
         {
@@ -1479,9 +1481,10 @@ static bool handle_edit_switchdetails(Key key) {
 
                 case 'e':
                 {
-                    // Forced true (and hidden) for a switch with no backing tile - see
-                    // switch_entry_effective (room.c).
-                    if (side_locked) break;
+                    // Forced true (and hidden) only for a switch on an in-bounds blank tile -
+                    // see switch_entry_forced (room.c). An out-of-bounds switch's entry keeps
+                    // its ordinary meaning and stays editable.
+                    if (entry_locked) break;
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].room_entry = !room->switches[state->current_switch - 1].chunks.data[0].room_entry;

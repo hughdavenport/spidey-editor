@@ -43,7 +43,7 @@
 enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_TOOLS, FOCUS_ATTRS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
 #define BLOCK_BUTTONS 6         // block panel: w+ w- / h+ h- / import export (gfx is the grid's row-4 slot)
-#define BUTTON_ROWS 5           // two per row: reset tiles / sprites backs / font screens / import export / block
+#define BUTTON_ROWS 6           // two per row: reset tiles / sprites backs / font screens / import export / block / room
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
 };
@@ -206,6 +206,8 @@ static Rectangle pick_button(GuiState *g);
 static Rectangle fill_button(GuiState *g);
 static int  pixed_button_count(GuiState *g);
 static void pixed_button_press(GuiState *g, int i);
+static void room_export_button(GuiState *g);
+static void room_import_button(GuiState *g);
 static void pix_fill(GuiState *g, int idx, int x, int y);
 static bool pixed_locked(GuiState *g);
 static void focus_move(GuiState *g, int dx, int dy);
@@ -297,7 +299,7 @@ static int buttons_y0(GuiState *g) {
     int sprites = (int)(16 * (TILESET_PX * g->scale / 8.0f) * SPIDS_FRAME_H / SPIDS_FRAME_W), font = 16 * 8 * g->scale;
     return palette_y(g) + (sprites > font ? sprites : font) + PAD;
 }
-static int buttons_bottom(GuiState *g) { return buttons_y0(g) + 5 * (ch(g) + 8); }   // the attribute rows are above, not below
+static int buttons_bottom(GuiState *g) { return buttons_y0(g) + BUTTON_ROWS * (ch(g) + 8); }   // the attribute rows are above, not below
 // the image being edited: tiles are picked within the current tileset
 static int pixed_index(GuiState *g) {
     return g->pix_src == GFX_TILES ? g->sel_tile + g->pal_offset * 16 : g->sel_img[g->pix_src];
@@ -561,7 +563,8 @@ static void focus_apply(GuiState *g) {
         else { g->eyedrop = !g->eyedrop; g->fill_armed = false; }
         g->pix_op = true;
     } else if (g->focus == FOCUS_BUTTONS) {
-        if (g->btn_row * 2 + g->btn_sel % 2 < pixed_button_count(g)) pixed_button_press(g, g->btn_row * 2 + g->btn_sel % 2);
+        if (g->btn_row == 5) { if (g->btn_sel % 2 == 0) room_export_button(g); else room_import_button(g); }
+        else if (g->btn_row * 2 + g->btn_sel % 2 < pixed_button_count(g)) pixed_button_press(g, g->btn_row * 2 + g->btn_sel % 2);
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
         if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
@@ -946,7 +949,7 @@ static bool feed_mouse(GuiState *g) {
                         g->focus = FOCUS_ATTRS; g->attr_sel = i;
                         return true;
                     }
-                if (CheckCollisionPointRec(m, grid_button(g, 4, 0))) { g->block_hidden = bi; return true; }   // gfx: the pixel editor; "block" there brings this back
+                if (CheckCollisionPointRec(m, grid_button(g, 5, 0))) { g->block_hidden = bi; return true; }   // gfx: the pixel editor; "block" there brings this back
                 if (m.x >= palette_x(g) && m.x < pixed_x(g) && m.y >= buttons_y0(g) && m.y < buttons_bottom(g)) return true;   // the rest of the grid is dimmed while the block panel is up
             }
             if (in_grid) return false;
@@ -992,6 +995,10 @@ static bool feed_mouse(GuiState *g) {
                     pixed_button_press(g, i);
                     return true;
                 }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (CheckCollisionPointRec(m, grid_button(g, 5, 0))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 0; room_export_button(g); return true; }
+            if (CheckCollisionPointRec(m, grid_button(g, 5, 1))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 1; room_import_button(g); return true; }
+        }
     }
 
     // a click on a switch link line (not on a thumbnail) selects that chunk
@@ -1702,6 +1709,28 @@ static const char *block_png_path(GuiState *g, int idx) {
     return p;
 }
 
+// The current room's full editable state (tiles, objects, switches, metadata) as
+// dumpRoom's `display`-format text: <data dir>/ROOM-<id>.txt (see ged_room_export_text /
+// ged_room_import_text, room_export_text / room_import_text in room.h).
+static const char *room_txt_path(GuiState *g) {
+    static char p[1400];
+    snprintf(p, sizeof p, "%s/ROOM-%02x.txt", g->data_dir ? g->data_dir : ".", ged_room());
+    return p;
+}
+
+static void room_export_button(GuiState *g) {
+    const char *p = room_txt_path(g);
+    if (ged_room_export_text(p)) gui_note(g, TextFormat("exported %s", p));
+    else gui_error(g, TextFormat("could not write %s", p));
+}
+
+static void room_import_button(GuiState *g) {
+    const char *p = room_txt_path(g);
+    if (!FileExists(p)) { gui_error(g, TextFormat("no %s to import", p)); return; }
+    if (ged_room_import_text(p)) { gui_note(g, TextFormat("imported %s", p)); g->room_dirty = true; }
+    else gui_error(g, TextFormat("could not read %s", p));
+}
+
 // The block's tiles rendered as one picture (w*8 x h*8), from the room's tileset.
 static void block_export_png(GuiState *g, int idx, int w, int h) {
     uint8_t *buf = calloc((size_t)w * 8 * h * 8, 4), tile[8 * 8 * 4];
@@ -2161,9 +2190,10 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
     (void)block_available;
 }
 
-// The source grid under the picker. While a block panel is up its view
-// buttons are dimmed (a block is tiles) and the row-4 slot reads "gfx"; with
-// the panel hidden that same slot reads "block", so one spot toggles the two.
+// The source grid under the picker. While a block panel is up its view buttons are dimmed (a
+// block is tiles), the attribute buttons take rows 3-4 (see draw_block_editor), and the toggle
+// moves to row 5 reading "gfx"; with the panel hidden that toggle sits at row 4 reading "block"
+// (the two never show at once, so one function draws both) and room import/export take row 5.
 static void draw_source_grid(GuiState *g, bool block_up) {
     static const char *names[] = { "reset", "tiles", "sprites", "backs", "font", "screens", "import", "export" };
     int fs = g->font_px;
@@ -2177,13 +2207,24 @@ static void draw_source_grid(GuiState *g, bool block_up) {
         gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, block_up ? GRAY : RAYWHITE);
     }
     if (block_up || g->block_hidden >= 0) {
-        Rectangle rb = grid_button(g, 4, 0);
+        Rectangle rb = grid_button(g, block_up ? 5 : 4, 0);
         const char *name = block_up ? "gfx" : "block";
         bool kbd = !block_up && g->focus == FOCUS_BUTTONS && g->btn_row == 4;
         DrawRectangleRec(rb, (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, name, fs);
         gtext(&g->font, g->font_loaded, name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+    }
+    if (!block_up) {
+        static const char *rnames[2] = { "exp room", "imp room" };
+        for (int i = 0; i < 2; i++) {
+            Rectangle rb = grid_button(g, 5, i);
+            bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 5 && g->btn_sel % 2 == i;
+            DrawRectangleRec(rb, (Color){50, 50, 60, 255});
+            DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : GRAY);
+            int tw = text_w(&g->font, g->font_loaded, rnames[i], fs);
+            gtext(&g->font, g->font_loaded, rnames[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+        }
     }
 }
 
@@ -2213,7 +2254,7 @@ static Rectangle attr_button(GuiState *g, int i, int row_offset) {
     return (Rectangle){ palette_x(g) + (i % 2) * (bw + PAD), swatch_y(g) + (row_offset + i / 2) * (ch(g) + 8), bw, ch(g) + 4 };
 }
 // Which grid rows have buttons right now.
-static bool grid_row_valid(GuiState *g, int row) { return row < 4 || (row == 4 && g->block_hidden >= 0); }
+static bool grid_row_valid(GuiState *g, int row) { return row < 4 || row == 5 || (row == 4 && g->block_hidden >= 0); }
 
 // Thumbnail size: 8 columns across the space right of the picture, shrunk if
 // 8 rows would not fit the window.
@@ -2753,9 +2794,10 @@ static void draw_overlay(GuiState *g) {
             }
             draw_arrow(o, tip, emph_sw || hot_sw ? 4 : 2, 4, emph_sw ? YELLOW : C_SW);
         }
-        // Hidden for a switch with no backing tile: "entry" there just means "the switch
-        // works at all" (always forced true), not a room-entry sensor - see switch_entry_effective.
-        if (!switch_side_hidden(r, sw->chunks.data) && sw->chunks.data[0].room_entry) {
+        // Hidden only for a switch on an in-bounds blank tile: "entry" there just means "the
+        // switch works at all" (always forced true), not a room-entry sensor - see
+        // switch_entry_forced. An out-of-bounds switch's entry keeps its ordinary meaning.
+        if (!switch_entry_forced(r, sw->chunks.data) && sw->chunks.data[0].room_entry) {
             Vector2 corner = tile_pt(g, sw->chunks.data[0].x, sw->chunks.data[0].y);
             gtext(&g->font, g->font_loaded, "E", (int)corner.x + 1, (int)corner.y, fs, emph_sw ? YELLOW : C_SW);
         }
