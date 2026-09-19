@@ -563,7 +563,7 @@ static void focus_apply(GuiState *g) {
         else { g->eyedrop = !g->eyedrop; g->fill_armed = false; }
         g->pix_op = true;
     } else if (g->focus == FOCUS_BUTTONS) {
-        if (g->btn_row == 5) { if (g->btn_sel % 2 == 0) room_export_button(g); else room_import_button(g); }
+        if (g->btn_row == 5) { if (g->btn_sel % 2 == 0) room_import_button(g); else room_export_button(g); }
         else if (g->btn_row * 2 + g->btn_sel % 2 < pixed_button_count(g)) pixed_button_press(g, g->btn_row * 2 + g->btn_sel % 2);
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
@@ -996,8 +996,8 @@ static bool feed_mouse(GuiState *g) {
                     return true;
                 }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            if (CheckCollisionPointRec(m, grid_button(g, 5, 0))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 0; room_export_button(g); return true; }
-            if (CheckCollisionPointRec(m, grid_button(g, 5, 1))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 1; room_import_button(g); return true; }
+            if (CheckCollisionPointRec(m, grid_button(g, 5, 0))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 0; room_import_button(g); return true; }
+            if (CheckCollisionPointRec(m, grid_button(g, 5, 1))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 1; room_export_button(g); return true; }
         }
     }
 
@@ -2216,7 +2216,7 @@ static void draw_source_grid(GuiState *g, bool block_up) {
         gtext(&g->font, g->font_loaded, name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
     }
     if (!block_up) {
-        static const char *rnames[2] = { "exp room", "imp room" };
+        static const char *rnames[2] = { "imp room", "exp room" };
         for (int i = 0; i < 2; i++) {
             Rectangle rb = grid_button(g, 5, i);
             bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 5 && g->btn_sel % 2 == i;
