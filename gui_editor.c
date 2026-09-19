@@ -258,7 +258,7 @@ int ged_sprite_hit(int px, int py) {
     return -1;
 }
 
-bool ged_map_click(int room, bool right) {
+bool ged_map_click(int room, bool right, int tx, int ty) {
     if (room < 0 || room >= 64) return false;
     if (!state->rooms.rooms[room].valid) {
         if (right) return false;                    // nothing to move into a room that does not exist
@@ -293,10 +293,20 @@ bool ged_map_click(int room, bool right) {
     state->current_switch = 0;
     state->switch_on = false;
     state->current_chunk = 0;
+    // A click on the thumbnail (not keyboard Enter, and not a switch-link jump) carries where
+    // in it: land the cursor there rather than wherever it was left last visit.
+    if (tx >= 0 && tx < WIDTH_TILES && ty >= 0 && ty < HEIGHT_TILES) {
+        state->cursors[room].x = tx;
+        state->cursors[room].y = ty;
+    }
     return false;
 }
 
-void ged_oob_rows(int *r0, int *r1) { *r0 = panel_oob_row0; *r1 = panel_oob_row1; }
+bool ged_room_move(int src, int dst) {
+    if (src < 0 || src >= 64 || dst < 0 || dst >= 64) return false;
+    return room_move((size_t)src, (size_t)dst);
+}
+
 int ged_oob_switch_at_row(int row) {
     for (size_t i = 0; i < panel_oob_switch_n; i++)
         if (panel_oob_switch_row[i] == row) return panel_oob_switch_id[i];

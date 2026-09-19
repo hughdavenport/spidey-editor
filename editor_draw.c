@@ -80,13 +80,13 @@ help_keys help[][100] = {
 
     [EDIT_MOVERTAB_OBJECT]={
         {"d", "sprite: toggle dead/alive"},
-        {"f", "sprite (alive): cycle flip none/horizontal/vertical/both; block: cycle horizontal stopped/right/left + speed"},
+        {"f/F", "sprite (alive): cycle flip none/horizontal/vertical/both (F backwards); block: cycle horizontal stopped/right/left + speed"},
         {"m/M", "sprite (alive): cycle mode stopped/patrol/chase"},
         {"s", "sprite (chasing): toggle stopped / actively moving"},
         {"w", "sprite (patrol/chasing): toggle stop at wall / turn around; block (moving horizontally): toggle stop at wall / bounce"},
         {"u", "block: cycle vertical stopped/down/up + speed"},
         {"e", "sprite (patrol/chasing): toggle fall at edge / turn around; block (moving vertically): toggle stop at wall / bounce"},
-        {"g", "sprite: cycle damage 1-4"},
+        {"g/G", "sprite: cycle damage 1-4 (G backwards)"},
         {"hjkl, arrows", "nudge the x/y tile offset (bytes 0/1)"},
         {"r", "toggle raw hex entry of byte 2 (no glitch protection) / back to attributes"},
         {"0-9a-fA-F", "raw mode: set byte 2 (2 hex digits)"},
@@ -207,7 +207,7 @@ help_keys help[][100] = {
         {"e", "flip on-entry bit (only for non-blank tiles)"},
         {"o", "flip one-time-only bit"},
         {"O", "preview this switch active/idle on the map"},
-        {"s", "rotate switch side"},
+        {"s/S", "rotate switch side (S backwards)"},
         {"Left/h", "side: left"},
         {"Down/j", "side: bottom"},
         {"Up/k", "side: top"},
@@ -248,15 +248,15 @@ help_keys help[][100] = {
     },
 
     [EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS]={
-        {"t", "change chunk type"},
+        {"t/T", "change chunk type (T backwards)"},
         {"y", "copy chunk to clipboard"},
         {"x/DEL/BS", "cut (yank + delete)"},
         {"+", "increase chunk id"},
         {"-", "decrease chunk id"},
-        {"s", "cycle through the target room's actual switches"},
+        {"s/S", "cycle through the target room's actual switches (S backwards)"},
         {"r", "change room number"},
-        {"n", "cycle on value: noop/turn on/turn off/toggle"},
-        {"f", "cycle off value: noop/turn on/turn off/toggle"},
+        {"n/N", "cycle on value: noop/turn on/turn off/toggle (N backwards)"},
+        {"f/F", "cycle off value: noop/turn on/turn off/toggle (F backwards)"},
         {"ESC/q/Ctrl-s", "cancel"},
         {"Ctrl-p", "play (play.sh)"},
         {"Ctrl-?", "help"},
@@ -275,7 +275,7 @@ help_keys help[][100] = {
     },
 
     [EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS]={
-        {"t", "change chunk type"},
+        {"t/T", "change chunk type (T backwards)"},
         {"y", "copy chunk to clipboard"},
         {"x/DEL/BS", "cut (yank + delete)"},
         {"+", "increase chunk id"},
@@ -297,7 +297,7 @@ help_keys help[][100] = {
     },
 
     [EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS]={
-        {"t", "change chunk type"},
+        {"t/T", "change chunk type (T backwards)"},
         {"y", "copy chunk to clipboard"},
         {"x/DEL/BS", "cut (yank + delete)"},
         {"+", "increase chunk id"},
@@ -317,12 +317,12 @@ help_keys help[][100] = {
     },
 
     [EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS]={
-        {"t", "change chunk type"},
+        {"t/T", "change chunk type (T backwards)"},
         {"y", "copy chunk to clipboard"},
         {"x/DEL/BS", "cut (yank + delete)"},
         {"+", "increase chunk id"},
         {"-", "decrease chunk id"},
-        {"i", "cycle index (idx) within the room's actual objects"},
+        {"i/I", "cycle index (idx) within the room's actual objects (I backwards)"},
         {"o", "toggle whether this chunk fires on switch off or on"},
         {"idx a block: s/d/w", "arm speed/direction/walls focus, then hjkl/arrows or |/- adjust it"},
         {"idx a sprite: d/m/M", "toggle dead/alive, cycle mode stopped/patrol/chase (flip is fixed by MOVERTAB.DAT)"},
@@ -624,10 +624,8 @@ static void draw_movertab_entry(unsigned global, bool active_edit, int *bottom, 
     if (active_edit && !state->movertab_loaded) scr_printf(" (no MOVERTAB.DAT found)");
 }
 
-/* Where redraw() put the out-of-bounds switch list (GUI pins it and makes the
- * entries clickable): text rows [oob_row0, oob_row1), and for each listed
- * switch the row of its header line. */
-int panel_oob_row0 = -1, panel_oob_row1 = -1;
+/* Where redraw() put each out-of-bounds switch (the GUI makes its S# badge clickable):
+ * the row of its header line, for each listed switch. */
 int panel_oob_switch_row[16];
 int panel_oob_switch_id[16];
 size_t panel_oob_switch_n = 0;
@@ -639,7 +637,6 @@ void redraw() {
     // before this feature existed), so try once here too - the first redraw of any session,
     // old or new, is guaranteed to hit this.
     if (!state->movertab_load_attempted) movertab_load();
-    panel_oob_row0 = panel_oob_row1 = -1;
     panel_oob_switch_n = 0;
 
     /* Guard before any GOTO: terminal must meet the absolute floor.
@@ -1762,7 +1759,10 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 if (switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
                 if (switcz == switch_underneath) scr_printf("\033[m");
-                scr_printf(": (x,y)=%d,%d", preamble->x, preamble->y);
+                scr_printf(": (x,y)=");
+                PRINTF_DATA(preamble->x);
+                scr_printf(",");
+                PRINTF_DATA(preamble->y);
                 if (!entry_forced) {
                     scr_printf(" (\033[1;4me\033[mn\033[mtry)=%s", BOOL_S(preamble->room_entry));
                 }
@@ -1776,7 +1776,10 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
                 if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[m");
-                scr_printf(": (x,y)=%d,%d", preamble->x, preamble->y);
+                scr_printf(": (x,y)=");
+                PRINTF_DATA(preamble->x);
+                scr_printf(",");
+                PRINTF_DATA(preamble->y);
                 if (!entry_forced) {
                     scr_printf(" (entry)=%s", BOOL_S(preamble->room_entry));
                 }
@@ -2076,7 +2079,10 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 GOTO(0, bottom); bottom++;
                 scr_printf("switch ");
                 PRINTF_DATA((uint16_t)sw_i);
-                scr_printf(": (x,y)=%d,%d", pr->x, pr->y);
+                scr_printf(": (x,y)=");
+                PRINTF_DATA(pr->x);
+                scr_printf(",");
+                PRINTF_DATA(pr->y);
                 if (!extra_entry_forced) scr_printf(" (entry)=%s", BOOL_S(pr->room_entry));
                 scr_printf(" (once)=%s", BOOL_S(pr->one_time_use));
                 if (!extra_side_hidden) scr_printf(" (side)=%s", SWITCH_SIDE(pr->side));
@@ -2098,7 +2104,10 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             GOTO(0, bottom); bottom++;
             scr_printf("switch ");
             PRINTF_DATA((uint16_t)(chunk_switch_underneath - room.switches));
-            scr_printf(": (x,y)=%d,%d", pr->x, pr->y);
+            scr_printf(": (x,y)=");
+            PRINTF_DATA(pr->x);
+            scr_printf(",");
+            PRINTF_DATA(pr->y);
             if (!pr_entry_forced) scr_printf(" (entry)=%s", BOOL_S(pr->room_entry));
             scr_printf(" (once)=%s", BOOL_S(pr->one_time_use));
             if (!pr_side_hidden) scr_printf(" (side)=%s", SWITCH_SIDE(pr->side));
@@ -2116,7 +2125,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 break;
             }
         }
-        if (found) panel_oob_row0 = bottom + 2;   /* the GUI pins the list from its heading, not the two spacer lines */
         if (found) {
             GOTO(0, bottom);
             scr_printf("\n\nOut of bounds switches:\n");
@@ -2292,7 +2300,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 #undef BOOL_S
             }
         }
-        if (found) panel_oob_row1 = bottom;
     }
 
     /* GOTO(0, bottom); bottom ++; */

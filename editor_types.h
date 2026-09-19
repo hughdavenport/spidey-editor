@@ -180,6 +180,7 @@ typedef struct {
 typedef struct {
     uint8_t room_idx;
     bool grouped;  /* true = pop one more entry from same stack (cross-room moves) */
+    bool valid;    /* room_idx's own Room.valid at snapshot time (room_move() can flip this) */
     struct DecompressedRoom snapshot;
     uint8_t movertab[256 * 3];  /* MOVERTAB.DAT is a separate file, not part of the room - snapshotted here too so undo covers it (Hugh: "undo doesn't undo movertab entries") */
 } UndoEntry;
@@ -295,14 +296,18 @@ void editor_feed_room_number(int room);   /* type a room id into a room-choosing
 /* Screen buffer output switch (editor_screen.c): true = GUI renders the cells */
 extern bool screen_headless;
 /* Out-of-bounds switch list placement recorded by redraw() (editor_draw.c) */
-extern int panel_oob_row0, panel_oob_row1;
 extern int panel_oob_switch_row[16], panel_oob_switch_id[16];
 extern size_t panel_oob_switch_n;
 
 /* GUI helpers (editor_actions.c) */
 bool transfer_item_to_room(size_t room_idx);
+bool room_move(size_t src, size_t dst);   // world map drag: src takes dst's id, discarding dst's own room
 bool room_create(size_t room_idx);   // make an absent room exist, entirely blank (tiles and settings all 0); false if it already does
 bool room_prune_blank(size_t room_idx);   // remove a room again if it is still entirely blank (not the current one); true if it was
+// A switch's index shifts when it's removed from a room (deleted, or moved to another room) -
+// fix up any TOGGLE_BIT chunk elsewhere that named a switch after it in that room, so it still
+// points at the same switch (see editor_actions.c for why this exists).
+void fixup_toggle_bit_after_switch_removed(uint8_t room_idx, size_t removed_switch_idx);
 void movertab_load(void);            // read ./MOVERTAB.DAT, else Spider/MOVERTAB.DAT(.original), else zero; sets movertab_loaded
 bool movertab_save(void);            // write state->movertab to ./MOVERTAB.DAT
 int movertab_offset_x(const uint8_t *entry);                     // decode a MOVERTAB entry's byte 1 (x offset, whole tiles)

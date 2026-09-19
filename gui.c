@@ -118,12 +118,14 @@ typedef struct {
     int lpress_col, lpress_row;
     int mod_latch[3];       // frames a Shift/Alt/Ctrl press still counts as held (see feed_keys)
     int scroll;             // text rows scrolled off the top of the panel under the picture
-    bool scroll_pinned;     // the user scrolled it: leave it; otherwise it follows the bottom
-    int oob_scroll;         // rows scrolled off the top of the out-of-bounds switch list
-    bool scrolled;          // this frame's mouse input was a panel scroll
+                            // (the out-of-bounds switch list is part of this same panel/scroll)
+                            // - purely manual: nothing auto-scrolls it (Hugh: "remove the
+                            // autoscroll of the info panel"), just clamped to stay in range.
     Texture2D atlas;        // world map: every room rendered, 8x8 grid of ROOM_PX_W x ROOM_PX_H
     bool atlas_loaded;
     int hover_room;         // world-map thumbnail under the mouse, or -1
+    bool wpress;            // left press on a world-map thumbnail waiting to become a click or a drag-move
+    int wpress_room;
     int hov_room, hov_sw, hov_chunk;   // the switch link the mouse is within reach of (hov_sw -1 = none): drawn a little fatter
     bool rpress;            // right press in link mode waiting to become a click or a run
     int rpress_tx, rpress_ty;
@@ -186,8 +188,10 @@ static int  panel_top(GuiState *g);
 static int  pinned_top(GuiState *g);
 static int  pch(GuiState *g);
 static int  pcw(GuiState *g);
-static int  oob_rows(int *r0);
 static int  world_room_at(GuiState *g, Vector2 m);
+static void world_geom(GuiState *g, int *tw, int *th);
+static Rectangle world_cell(GuiState *g, int room, int tw, int th);
+static void world_click_tile(GuiState *g, int room, Vector2 m, int *tx, int *ty);
 static void draw_world_links(GuiState *g);
 static bool link_click(GuiState *g, Vector2 m);
 static void link_hover(GuiState *g, Vector2 m);
@@ -331,9 +335,9 @@ static bool mouse_tile(GuiState *g, int *tx, int *ty) {
 }
 
 // Text cell under the mouse. Header and map band are plain cells; below the
-// picture the rows are the scrolled panel (out-of-bounds list skipped) and
-// then the pinned out-of-bounds list. The space right of the picture is the
-// palette / world map, not cells.
+// picture the rows are the scrolled panel (the out-of-bounds switch list is
+// part of this same flow now, not a separate pinned region). The space right
+// of the picture is the palette / world map, not cells.
 static bool mouse_cell(GuiState *g, int *col, int *row) {
     Vector2 m = GetMousePosition();
     if (m.x < 0 || m.y < 0) return false;
@@ -346,15 +350,9 @@ static bool mouse_cell(GuiState *g, int *col, int *row) {
     }
     if (px >= pic_w(g)) return false;
     *col = px / pcw(g);
-    int r0, n = oob_rows(&r0);
-    if (n && py >= pinned_top(g) && py < pinned_top(g) + n * pch(g)) {
-        *row = r0 + (py - pinned_top(g)) / pch(g);
-        return true;
-    }
     if (py >= pinned_top(g)) return false;
     int want = (py - panel_top(g)) / pch(g) + g->scroll, v = 0;
     for (int y = GED_MAP_Y + HEIGHT_TILES; y < GED_ROWS - 1; y++) {
-        if (n && y >= r0 && y < r0 + n) continue;
         if (v++ == want) { *row = y; return true; }
     }
     return false;
@@ -551,7 +549,7 @@ static void focus_move(GuiState *g, int dx, int dy) {
 static void focus_apply(GuiState *g) {
     ged_new_input_batch();
     if (g->focus == FOCUS_WORLD) {
-        ged_map_click(g->world_sel, false);           // by keyboard: go there, and stay on the map to keep browsing
+        ged_map_click(g->world_sel, false, -1, -1);   // by keyboard: go there, and stay on the map to keep browsing
     } else if (g->focus == FOCUS_PICKER && g->screens_view) {
         g->focus = FOCUS_EDITOR;                      // the list's choice is showing: over to the picture
     } else if (g->focus == FOCUS_BUTTONS && g->screens_view) {
@@ -880,18 +878,12 @@ static bool feed_mouse(GuiState *g) {
         ged_adjust_room(db, dt);
         return true;
     }
-    // wheel over the text under the picture scrolls it
+    // wheel over the text under the picture scrolls it (the out-of-bounds switch list
+    // included - it's part of the same scroll now, not a separate pinned region)
     float wheel = wv.y;
     if (wheel != 0 && m.x < pic_w(g) && m.y >= panel_top(g) && m.y < pinned_top(g)) {
         g->scroll -= (int)wheel * 3;
         if (g->scroll < 0) g->scroll = 0;
-        g->scroll_pinned = true; g->scrolled = true;
-        return true;
-    }
-    // wheel over the pinned out-of-bounds switch list scrolls it instead, independently
-    if (wheel != 0 && m.x < pic_w(g) && m.y >= pinned_top(g) && m.y < GetScreenHeight() - pch(g)) {
-        g->oob_scroll -= (int)wheel * 3;
-        if (g->oob_scroll < 0) g->oob_scroll = 0;
         return true;
     }
 
@@ -1004,13 +996,41 @@ static bool feed_mouse(GuiState *g) {
     // a click on a switch link line (not on a thumbnail) selects that chunk
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !(mod & (GK_MOD_SHIFT | GK_MOD_CTRL)) && world_room_at(g, m) < 0 && link_click(g, m)) return true;
 
-    // world map: hover names, left = go there, right = move the thing / retarget the chunk
+    // world map: hover names, right = move the thing / retarget the chunk (fires on press, as
+    // before); left is held back until release so a plain click can be told from a drag onto
+    // another thumbnail (same reasoning as the room picture's lpress, above).
     g->hover_room = world_room_at(g, m);
-    if (g->hover_room >= 0 && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
+    if (g->hover_room >= 0 && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
         ged_new_input_batch();
-        ged_map_click(g->hover_room, IsMouseButtonPressed(MOUSE_BUTTON_RIGHT));
-        g->focus = FOCUS_WORLD;                           // the map keeps the focus (click or Enter); r<n> and other editor keys give it to the room
+        ged_map_click(g->hover_room, true, -1, -1);
+        g->focus = FOCUS_WORLD;
         g->world_sel = g->hover_room;
+        return true;
+    }
+    if (g->hover_room >= 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        g->wpress = true; g->wpress_room = g->hover_room;
+        return true;
+    }
+    if (g->wpress && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        g->wpress = false;
+        int release_room = world_room_at(g, m);
+        ged_new_input_batch();
+        if (release_room < 0) {
+            // dropped off any thumbnail: cancel, same as a drag-and-drop released over nothing
+        } else if (release_room != g->wpress_room) {
+            // the moved-from/-to room's thumbnail (and, if either was the room on screen, the
+            // picture itself - room_move() may have cancelled out of it via editor_cancel_to_plain)
+            // both need redrawing from the new data, not just re-lit from the old texture.
+            if (ged_room_move(g->wpress_room, release_room)) { g->world_stale = true; g->room_dirty = true; }
+            g->focus = FOCUS_WORLD;
+            g->world_sel = release_room;
+        } else {
+            int tx, ty;
+            world_click_tile(g, g->wpress_room, m, &tx, &ty);
+            ged_map_click(g->wpress_room, false, tx, ty);
+            g->focus = FOCUS_WORLD;
+            g->world_sel = g->wpress_room;
+        }
         return true;
     }
 
@@ -1145,25 +1165,17 @@ static void ensure_panel_font(GuiState *g) {
     }
 }
 
-// The out-of-bounds switch list is pinned above the window's last row (the
-// editor's macro overlay); the rest of the panel scrolls between the picture
-// and it. The pinned list itself scrolls too (g->oob_scroll) once it has more
-// rows than OOB_MAX_ROWS - some rooms have most of their switches off-grid,
-// and letting the pinned band grow to fit all of them ate the whole window.
-#define OOB_MAX_ROWS 8
-static int oob_total_rows(int *r0) { int r1; ged_oob_rows(r0, &r1); return r1 > *r0 ? r1 - *r0 : 0; }
-static int oob_rows(int *r0) { int total = oob_total_rows(r0); return total < OOB_MAX_ROWS ? total : OOB_MAX_ROWS; }
-static int pinned_top(GuiState *g) { int r0; return GetScreenHeight() - pch(g) - oob_rows(&r0) * pch(g); }
+// The panel under the picture scrolls as one piece now, including the out-of-
+// bounds switch list (Hugh: "can the out of bounds switches get shown in the
+// main section, and all scrollable?") - only the editor's last row (macro
+// overlay) stays pinned to the window bottom.
+static int pinned_top(GuiState *g) { return GetScreenHeight() - pch(g); }
 static int panel_rows_visible(GuiState *g) { int r = (pinned_top(g) - panel_top(g)) / pch(g); return r < 1 ? 1 : r; }
 
-// Rows the scrolling part has (everything under the map except the pinned list).
-// Skips the OOB section's full extent in the underlying text (not just the
-// capped height shown at once), or its unshown rows would be double-counted
-// as ordinary scrollable panel content.
+// Rows the scrolling panel has (everything under the map, out-of-bounds switches included).
 static int panel_content_rows(const GCell *cells, int stride) {
-    int r0, n = oob_total_rows(&r0), last = GED_MAP_Y + HEIGHT_TILES - 1, count = 0;
+    int last = GED_MAP_Y + HEIGHT_TILES - 1, count = 0;
     for (int y = GED_MAP_Y + HEIGHT_TILES; y < GED_ROWS - 1; y++) {
-        if (n && y >= r0 && y < r0 + n) continue;
         count++;
         for (int x = 0; x < GED_COLS; x++) {
             const GCell *c = &cells[y * stride + x];
@@ -1182,9 +1194,10 @@ static int panel_max_scroll(GuiState *g) {
 
 // Everything the editor drew except the help box (right of the hex map; it
 // can run below the map band too — draw_help shows it as an overlay) and,
-// unless F2, the hex map itself. Rows under the map scroll (`scroll`) except
-// the out-of-bounds switch list, pinned at the bottom with clickable S# badges;
-// the editor's last row (macro overlay) is pinned below that.
+// unless F2, the hex map itself. Rows under the map all scroll together
+// (`scroll`), including the out-of-bounds switch list with its clickable
+// S# badges; only the editor's last row (macro overlay) is pinned to the
+// window bottom.
 static void draw_text_screen(GuiState *g) {
     int stride;
     const GCell *cells = ged_cells(&stride);
@@ -1202,16 +1215,21 @@ static void draw_text_screen(GuiState *g) {
     int max_scroll = panel_max_scroll(g);
     if (g->scroll > max_scroll) g->scroll = max_scroll;
     ensure_panel_font(g);
-    int r0, oob_total = oob_total_rows(&r0), n = oob_rows(&r0), v = 0;
+    int v = 0;
     BeginScissorMode(0, panel_top(g), pic_w(g), pinned_top(g) - panel_top(g));
     for (int y = first_panel; y < GED_ROWS - 1; y++) {
-        if (oob_total && y >= r0 && y < r0 + oob_total) continue;
         int py = panel_top(g) + (v++ - g->scroll) * pch(g);
         if (py + pch(g) <= panel_top(g) || py >= pinned_top(g)) continue;
+        int sw = ged_oob_switch_at_row(y);
+        int shift = sw >= 0 ? 3 : 0;        // room for the out-of-bounds switch's S# badge
         for (int x = 0; x < GED_COLS; x++) {
             if (x >= GED_MAP_X + MAP_COLS && help) continue;
-            if (ged_is_oob_marker(x, y)) continue;   // its S# badge is in the pinned list instead
-            draw_cell(&cells[y * stride + x], x * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
+            if (ged_is_oob_marker(x, y)) continue;   // its S# badge is drawn separately below
+            draw_cell(&cells[y * stride + x], (x + shift) * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
+        }
+        if (sw >= 0) {
+            DrawRectangle(0, py, 3 * pcw(g) - 2, pch(g), (Color){60, 20, 60, 255});
+            gtext(&g->panel_font, g->panel_font_loaded, TextFormat("S%X", sw), 2, py, g->panel_font_px, MAGENTA);
         }
     }
     EndScissorMode();
@@ -1221,29 +1239,6 @@ static void draw_text_screen(GuiState *g) {
         int th = hgt * panel_rows_visible(g) / total, ty = top + hgt * g->scroll / total;
         DrawRectangle(x, top, SCROLLBAR_W, hgt, (Color){40, 40, 40, 255});
         DrawRectangle(x + 1, ty, SCROLLBAR_W - 2, th < 12 ? 12 : th, (Color){170, 170, 170, 255});
-    }
-    if (n) {                                    // pinned out-of-bounds switch list, itself scrollable past OOB_MAX_ROWS
-        int top = pinned_top(g), oob_max_scroll = oob_total - n;
-        if (oob_max_scroll < 0) oob_max_scroll = 0;
-        if (g->oob_scroll > oob_max_scroll) g->oob_scroll = oob_max_scroll;
-        if (g->oob_scroll < 0) g->oob_scroll = 0;
-        DrawLine(0, top - 1, pic_w(g), top - 1, (Color){90, 90, 90, 255});
-        for (int i = 0; i < n; i++) {
-            int y = r0 + g->oob_scroll + i, py = top + i * pch(g), sw = ged_oob_switch_at_row(y);
-            int shift = sw >= 0 ? 3 : 0;        // room for the badge
-            for (int x = 0; x < GED_COLS; x++)
-                draw_cell(&cells[y * stride + x], (x + shift) * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
-            if (sw >= 0) {
-                DrawRectangle(0, py, 3 * pcw(g) - 2, pch(g), (Color){60, 20, 60, 255});
-                gtext(&g->panel_font, g->panel_font_loaded, TextFormat("S%X", sw), 2, py, g->panel_font_px, MAGENTA);
-            }
-        }
-        if (oob_max_scroll > 0) {                // its own scrollbar, same edge, below the main one
-            int hgt = GetScreenHeight() - pch(g) - top, x = pic_w(g) - SCROLLBAR_W;
-            int th = hgt * n / oob_total, ty = top + hgt * g->oob_scroll / oob_total;
-            DrawRectangle(x, top, SCROLLBAR_W, hgt, (Color){40, 40, 40, 255});
-            DrawRectangle(x + 1, ty, SCROLLBAR_W - 2, th < 12 ? 12 : th, (Color){170, 170, 170, 255});
-        }
     }
     for (int y = 0; y < first_panel; y++) {     // header + (F2 / room list) map band
         for (int x = 0; x < GED_COLS; x++) {
@@ -2272,6 +2267,18 @@ static Rectangle world_cell(GuiState *g, int room, int tw, int th) {
     return (Rectangle){ palette_x(g) + (room % 8) * (tw + MAP_GAP), world_y(g) + (room / 8) * (th + MAP_GAP), tw, th };
 }
 
+// Where in room `room`'s thumbnail point `m` falls, in that room's own tile coordinates
+// (clamped) - used to land the cursor where a plain click on the world map landed.
+static void world_click_tile(GuiState *g, int room, Vector2 m, int *tx, int *ty) {
+    int tw, th;
+    world_geom(g, &tw, &th);
+    Rectangle d = world_cell(g, room, tw, th);
+    *tx = (int)((m.x - d.x) / d.width * WIDTH_TILES);
+    *ty = (int)((m.y - d.y) / d.height * HEIGHT_TILES);
+    if (*tx < 0) *tx = 0; else if (*tx >= WIDTH_TILES) *tx = WIDTH_TILES - 1;
+    if (*ty < 0) *ty = 0; else if (*ty >= HEIGHT_TILES) *ty = HEIGHT_TILES - 1;
+}
+
 static int world_room_at(GuiState *g, Vector2 m) {
     int tw, th;
     world_geom(g, &tw, &th);
@@ -2324,6 +2331,7 @@ static void draw_world_map(GuiState *g) {
         }
         if (r == g->hover_room) DrawRectangleLinesEx(d, 2, WHITE);
         if (g->focus == FOCUS_WORLD && r == g->world_sel) DrawRectangleLinesEx((Rectangle){d.x - 2, d.y - 2, d.width + 4, d.height + 4}, 2, GOLD);
+        if (g->wpress && r == g->wpress_room) DrawRectangleLinesEx(d, 2, MAGENTA);   // the room being dragged
     }
     if (g->hover_room >= 0 && rooms->rooms[g->hover_room].valid) {   // name of the hovered room
         char name[25] = {0};
@@ -2544,13 +2552,13 @@ static bool link_click(GuiState *g, Vector2 m) {
     if (l->room == cur) {
         bool on_it = ged_current_switch() == l->sw && ged_current_chunk() == l->chunk;
         if (on_it && l->to_room >= 0 && l->to_room != cur) {            // follow an outgoing arrow
-            ged_map_click(l->to_room, false);
+            ged_map_click(l->to_room, false, -1, -1);
             ged_select_chunk(l->to_sw, 0);
             cursor_to_switch(l->to_room, l->to_sw);
         } else if (on_it && l->kind == TOGGLE_OBJECT && l->obj >= 0) {   // chunk selected: over to the object it toggles
             ged_goto_object(l->obj);
         } else if (on_it && l->kind == TOGGLE_BLOCK && l->to_room >= 0) {   // an exit-memory arrow: go to that room
-            ged_map_click(l->to_room, false);
+            ged_map_click(l->to_room, false, -1, -1);
         } else if (on_it && l->kind == TOGGLE_BLOCK) {                  // ... or onto the tile run
             ged_cancel();
             ged_set_cursor(l->bx, l->by);
@@ -2559,13 +2567,13 @@ static bool link_click(GuiState *g, Vector2 m) {
             cursor_to_switch(cur, l->to_sw);
         } else ged_select_chunk(l->sw, l->chunk);                       // (from the thing, the next click comes back to the chunk)
     } else if (l->kind == TOGGLE_BLOCK) {                               // an exit rewritten to lead here: nothing here to select, go to that chunk
-        ged_map_click(l->room, false);
+        ged_map_click(l->room, false, -1, -1);
         ged_select_chunk(l->sw, l->chunk);
         cursor_to_switch(l->room, l->sw);
     } else {
         bool on_it = ged_current_switch() == l->to_sw && ged_current_chunk() == 0;
         if (on_it) {                                                    // follow an incoming arrow back to its switch
-            ged_map_click(l->room, false);
+            ged_map_click(l->room, false, -1, -1);
             ged_select_chunk(l->sw, l->chunk);
             cursor_to_switch(l->room, l->sw);
         } else ged_select_chunk(l->to_sw, 0);
@@ -2905,7 +2913,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             if (want != g->scale) { g->scale = want; load_fonts(g); }
         }
 
-        if (feed_keys(g)) { g->room_dirty = true; g->scroll_pinned = false; }   // new input: the panel's text changes, follow its bottom again
+        if (feed_keys(g)) g->room_dirty = true;
         if (IsFileDropped()) {                             // a PNG dropped on the window replaces the current image
             FilePathList dropped = LoadDroppedFiles();
             int bi, bx, by, bw, bh;
@@ -2917,11 +2925,10 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             g->room_dirty = true;
         }
         if (g->world_stale) { world_build(g, ged_rooms(), buf); g->world_stale = false; }
-        g->pix_op = false; g->scrolled = false;
+        g->pix_op = false;
         if (feed_mouse(g)) {
             g->room_dirty = true;
             if (!g->pix_op) g->key_seq = ++g->seq;      // a room edit by mouse: `u` goes to the editor
-            if (!g->scrolled) g->scroll_pinned = false;
         }
 
         bool gfx_dirty = g->backs_dirty;
@@ -2944,7 +2951,6 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         }
 
         ged_redraw();                                      // the editor lays out its text screen
-        if (!g->scroll_pinned) g->scroll = panel_max_scroll(g);   // an overflowing panel shows its end (the newest / deepest detail) unless scrolled by hand
 
         RoomFile *rooms = ged_rooms();
         int room = ged_room();

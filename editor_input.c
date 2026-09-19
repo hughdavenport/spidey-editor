@@ -35,7 +35,7 @@ static void clear_switch_block_tiles(struct DecompressedRoom *room, struct Switc
 static void block_speed_ratchet(uint8_t *entry, int shift, uint8_t dir_bit, bool pressed_dir);
 static void block_direction_set(uint8_t *entry, uint8_t dir_bit, bool set);
 static void sprite_toggle_dead(uint8_t *v);
-static void sprite_cycle_flip(uint8_t *v);
+static void sprite_cycle_flip(uint8_t *v, int dir);
 static void sprite_toggle_stopped(uint8_t *v);
 static void sprite_toggle_wall(uint8_t *v);
 static void sprite_toggle_edge(uint8_t *v);
@@ -45,6 +45,7 @@ static const char *sprite_display_name(SpriteType type, uint8_t damage);
 static uint8_t movertab_offset_set_std(int v);
 static uint8_t movertab_offset_set_sprite_y(uint8_t b, int v);
 static void movertab_reset_entry(unsigned global, bool is_sprite);
+static void cycle_chunk_type(struct SwitchChunk *chunk, size_t level, int dir);
 
 /* Run play.sh detached. PLAY_ROOM tells it which room to start in (it swaps
  * that room into slot 1, the game's start room, in the copy the game runs). */
@@ -346,6 +347,7 @@ static void delete_item_at_cursor(void) {
         clear_switch_block_tiles(room, switch_underneath);
         room->tiles[TILE_IDX(x, y)] = 0;
         state->hot_preview_switch = 0;   // indices shift below - don't leave a hover preview pointing at the wrong switch
+        fixup_toggle_bit_after_switch_removed((uint8_t)state->current_level, (size_t)sw_i);
         while (sw_i < room->num_switches - 1) {
             room->switches[sw_i] = room->switches[sw_i+1];
             sw_i++;
@@ -1492,12 +1494,13 @@ static bool handle_edit_switchdetails(Key key) {
                     editor_save();
                 }; break;
 
-                case 's':
+                case 's': case 'S':
                 {
                     if (side_locked) { snprintf(state->status_message, sizeof(state->status_message), "This switch has no side (out of bounds or blank tile)"); break; }
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
-                    room->switches[state->current_switch - 1].chunks.data[0].side = (room->switches[state->current_switch - 1].chunks.data[0].side + 1) % NUM_SIDES;
+                    struct SwitchChunk *preamble = room->switches[state->current_switch - 1].chunks.data;
+                    preamble->side = (preamble->side + (key.ch == 's' ? 1 : NUM_SIDES - 1)) % NUM_SIDES;
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
@@ -1622,11 +1625,12 @@ static bool handle_edit_switchdetails(Key key) {
 
 // X/Y move an existing switch's own position (chunks.data[0], the PREAMBLE):
 // digits accumulate exactly like handle_edit_roomdetails_num, but write into
-// the switch's x or y (masked to 5 bits - the on-disk field is that wide, which
-// is also why (0,31)/similar off-grid coordinates are how a switch is placed
-// out of bounds - visible rooms only use rows/cols 0-21|0-31 x, 0-21 y, so
-// anything with y or x above 21 already reads as "off grid" to the rest of the
-// editor and the game, with no separate flag needed).
+// the switch's x or y (masked to 5 bits - the on-disk field is that wide). X
+// keeps the full 0-31 range; visible rooms only use cols 0-31, rows 0-21, so
+// x above 21 (like y) already reads as "off grid" to the rest of the editor
+// and the game, with no separate flag needed - but y is further capped to
+// HEIGHT_TILES (22): one OOB row is enough to place a switch out of bounds,
+// and a deeper row broke the world map's switch link lines (see below).
 static bool handle_edit_switchdetails_xy(Key key) {
     switch (key.code) {
         case KEY_CHAR:
@@ -1645,6 +1649,11 @@ static bool handle_edit_switchdetails_xy(Key key) {
                         value += 10 * (state->partial_byte & 0xFF);
                     }
                     value &= 0x1f;
+                    // A single OOB row (y == HEIGHT_TILES) is all the out-of-bounds switch
+                    // machinery needs - X (still the full 5 bits) tells OOB switches on that row
+                    // apart. A second, deeper OOB row was the cause of the world map's link
+                    // lines pointing at the wrong switches, so Y is capped here.
+                    if (state->room_detail == 'Y' && value > HEIGHT_TILES) value = HEIGHT_TILES;
 
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     struct SwitchChunk *preamble = room->switches[state->current_switch - 1].chunks.data;
@@ -1986,6 +1995,7 @@ static void delete_current_switch(void) {
     struct SwitchChunk *preamble = room->switches[sw_i].chunks.data;
     if (preamble->x < WIDTH_TILES && preamble->y < HEIGHT_TILES)
         room->tiles[TILE_IDX(preamble->x, preamble->y)] = 0;
+    fixup_toggle_bit_after_switch_removed((uint8_t)state->current_level, sw_i);
     while (sw_i < (size_t)(room->num_switches - 1)) {
         room->switches[sw_i] = room->switches[sw_i+1];
         sw_i++;
@@ -2006,6 +2016,53 @@ static void delete_current_switch(void) {
     editor_save();
 }
 
+// Cycles a switch chunk's type/sub-mode and re-initializes it for wherever it lands, mirroring
+// 't's four logical steps (a TOGGLE_BLOCK chunk has two: fresh/in-bounds, then "memory" mode off
+// the tile grid) both ways - dir +1/-1, same pattern as sprite_cycle_mode (Hugh: "let uppercase
+// cycle backwards"). Caller still does its own push_undo/ARRAY_FREE/editor_save around this.
+static void cycle_chunk_type(struct SwitchChunk *chunk, size_t level, int dir) {
+    bool has_objects = state->rooms.rooms[level].data.num_objects > 0;
+    int nsteps = has_objects ? 4 : 3;
+    int step;
+    if (chunk->type == TOGGLE_BLOCK)
+        step = (chunk->y * WIDTH_TILES + chunk->x) < WIDTH_TILES * HEIGHT_TILES ? 0 : 1;
+    else if (chunk->type == TOGGLE_BIT) step = 2;
+    else step = 3;   // TOGGLE_OBJECT (or PREAMBLE, impossible here)
+    if (step >= nsteps) step = 0;   // e.g. an existing TOGGLE_OBJECT chunk after its objects were deleted
+    step = ((step + dir) % nsteps + nsteps) % nsteps;
+
+    memset(chunk, 0, sizeof(*chunk));
+    switch (step) {
+        case 0:
+            chunk->type = TOGGLE_BLOCK;
+            // A fresh chunk (memset to 0 above) needs an explicit size - 0 isn't a valid
+            // width/height (Hugh: "that width=0 should be 8").
+            chunk->size = 8;
+            state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
+            break;
+        case 1:
+            chunk->type = TOGGLE_BLOCK;
+            chunk->x = 0;
+            chunk->y = HEIGHT_TILES;
+            chunk->size = 1;
+            state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
+            break;
+        case 2:
+            chunk->type = TOGGLE_BIT;
+            chunk->room_idx = (uint16_t)level;   // same room by default
+            state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
+            chunk->bitmask = 0x1;
+            chunk->on = 1;    // turn on
+            chunk->off = 2;   // turn off
+            break;
+        case 3:
+            chunk->type = TOGGLE_OBJECT;
+            chunk->test = 0x20;   // test=2: fires on every press, not just every second one
+            state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
+            break;
+    }
+}
+
 static bool handle_edit_switchdetails_chunk_switch(Key key) {
     size_t *cursorlevel = &state->current_level;
     switch (key.code) {
@@ -2019,25 +2076,25 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     break;
                 // 'n'/'f' match "on"/"off"'s second letter, since both words start with 'o'
                 // (Hugh: "n and f (currently o, but change to f)").
-                case 'f': {
+                case 'f': case 'F': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BIT);
                     push_undo((uint8_t)state->current_level, false);
-                    chunk->off = (chunk->off + 1) % 4;
+                    chunk->off = (uint8_t)((chunk->off + (key.ch == 'f' ? 1 : 3)) % 4);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
-                case 'n': {
+                case 'n': case 'N': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BIT);
                     push_undo((uint8_t)state->current_level, false);
-                    chunk->on = (chunk->on + 1) % 4;
+                    chunk->on = (uint8_t)((chunk->on + (key.ch == 'n' ? 1 : 3)) % 4);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
-                case 's': {
+                case 's': case 'S': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     assert(chunk->type == TOGGLE_BIT);
@@ -2047,62 +2104,16 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                     size_t n = state->rooms.rooms[chunk->room_idx].data.num_switches;
                     if (n > 0) {
                         push_undo((uint8_t)state->current_level, false);
-                        chunk->switch_idx = (chunk->switch_idx + 1) % n;
+                        chunk->switch_idx = (uint16_t)((chunk->switch_idx + (key.ch == 's' ? 1 : n - 1)) % n);
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         editor_save();
                     }
                 }; break;
-                case 't': {
+                case 't': case 'T': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
-                    enum SwitchChunkType typ = chunk->type;
                     push_undo((uint8_t)state->current_level, false);
-                    switch (typ) {
-                        case TOGGLE_BLOCK:
-                        {
-                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
-                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
-                            if (point < overflow) {
-                                memset(chunk, 0, sizeof(*chunk));
-                                chunk->type = TOGGLE_BLOCK;
-                                chunk->x = 0;
-                                chunk->y = HEIGHT_TILES;
-                                chunk->size = 1;
-                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
-                                break;
-                            }
-                        }; fallthrough;
-                        default:
-                            memset(chunk, 0, sizeof(*chunk));
-                            chunk->type = (typ + 1) % NUM_CHUNK_TYPES;
-                            if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            // Skip TOGGLE_OBJECT when the room has nothing for it to target.
-                            if (chunk->type == TOGGLE_OBJECT && state->rooms.rooms[*cursorlevel].data.num_objects == 0) {
-                                chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                                if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            }
-                            switch (chunk->type) {
-                                case TOGGLE_BIT:
-                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
-                                    chunk->bitmask = 0x1;
-                                    chunk->on = 1;    // turn on
-                                    chunk->off = 2;   // turn off
-                                    break;
-                                case TOGGLE_OBJECT:
-                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
-                                    break;
-                                case TOGGLE_BLOCK:
-                                    // A fresh chunk (memset to 0 above) needs an explicit size -
-                                    // 0 isn't a valid width/height (Hugh: "that width=0 should
-                                    // be 8").
-                                    chunk->size = 8;
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
-                                    break;
-                                default: UNREACHABLE();
-                            }
-                    }
+                    cycle_chunk_type(chunk, *cursorlevel, key.ch == 't' ? 1 : -1);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
@@ -2427,57 +2438,11 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
-                case 't': {
+                case 't': case 'T': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
-                    enum SwitchChunkType typ = chunk->type;
                     push_undo((uint8_t)state->current_level, false);
-                    switch (typ) {
-                        case TOGGLE_BLOCK:
-                        {
-                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
-                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
-                            if (point < overflow) {
-                                memset(chunk, 0, sizeof(*chunk));
-                                chunk->type = TOGGLE_BLOCK;
-                                chunk->x = 0;
-                                chunk->y = HEIGHT_TILES;
-                                chunk->size = 1;
-                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
-                                break;
-                            }
-                        }; fallthrough;
-                        default:
-                            memset(chunk, 0, sizeof(*chunk));
-                            chunk->type = (typ + 1) % NUM_CHUNK_TYPES;
-                            if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            // Skip TOGGLE_OBJECT when the room has nothing for it to target.
-                            if (chunk->type == TOGGLE_OBJECT && state->rooms.rooms[*cursorlevel].data.num_objects == 0) {
-                                chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                                if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            }
-                            switch (chunk->type) {
-                                case TOGGLE_BIT:
-                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
-                                    chunk->bitmask = 0x1;
-                                    chunk->on = 1;    // turn on
-                                    chunk->off = 2;   // turn off
-                                    break;
-                                case TOGGLE_OBJECT:
-                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
-                                    break;
-                                case TOGGLE_BLOCK:
-                                    // A fresh chunk (memset to 0 above) needs an explicit size -
-                                    // 0 isn't a valid width/height (Hugh: "that width=0 should
-                                    // be 8").
-                                    chunk->size = 8;
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
-                                    break;
-                                default: UNREACHABLE();
-                            }
-                    }
+                    cycle_chunk_type(chunk, *cursorlevel, key.ch == 't' ? 1 : -1);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
@@ -2688,57 +2653,11 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
-                case 't': {
+                case 't': case 'T': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
-                    enum SwitchChunkType typ = chunk->type;
                     push_undo((uint8_t)state->current_level, false);
-                    switch (typ) {
-                        case TOGGLE_BLOCK:
-                        {
-                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
-                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
-                            if (point < overflow) {
-                                memset(chunk, 0, sizeof(*chunk));
-                                chunk->type = TOGGLE_BLOCK;
-                                chunk->x = 0;
-                                chunk->y = HEIGHT_TILES;
-                                chunk->size = 1;
-                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
-                                break;
-                            }
-                        }; fallthrough;
-                        default:
-                            memset(chunk, 0, sizeof(*chunk));
-                            chunk->type = (typ + 1) % NUM_CHUNK_TYPES;
-                            if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            // Skip TOGGLE_OBJECT when the room has nothing for it to target.
-                            if (chunk->type == TOGGLE_OBJECT && state->rooms.rooms[*cursorlevel].data.num_objects == 0) {
-                                chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                                if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            }
-                            switch (chunk->type) {
-                                case TOGGLE_BIT:
-                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
-                                    chunk->bitmask = 0x1;
-                                    chunk->on = 1;    // turn on
-                                    chunk->off = 2;   // turn off
-                                    break;
-                                case TOGGLE_OBJECT:
-                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
-                                    break;
-                                case TOGGLE_BLOCK:
-                                    // A fresh chunk (memset to 0 above) needs an explicit size -
-                                    // 0 isn't a valid width/height (Hugh: "that width=0 should
-                                    // be 8").
-                                    chunk->size = 8;
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
-                                    break;
-                                default: UNREACHABLE();
-                            }
-                    }
+                    cycle_chunk_type(chunk, *cursorlevel, key.ch == 't' ? 1 : -1);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
@@ -2922,61 +2841,15 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     state->chunk_value_focus = 0;
                     state->partial_byte = 0;
                     break;
-                case 't': {
+                case 't': case 'T': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
-                    enum SwitchChunkType typ = chunk->type;
                     push_undo((uint8_t)state->current_level, false);
-                    switch (typ) {
-                        case TOGGLE_BLOCK:
-                        {
-                            size_t overflow = WIDTH_TILES * HEIGHT_TILES;
-                            size_t point = chunk->y * WIDTH_TILES + chunk->x;
-                            if (point < overflow) {
-                                memset(chunk, 0, sizeof(*chunk));
-                                chunk->type = TOGGLE_BLOCK;
-                                chunk->x = 0;
-                                chunk->y = HEIGHT_TILES;
-                                chunk->size = 1;
-                                state->current_state = EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS;
-                                break;
-                            }
-                        }; fallthrough;
-                        default:
-                            memset(chunk, 0, sizeof(*chunk));
-                            chunk->type = (typ + 1) % NUM_CHUNK_TYPES;
-                            if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            // Skip TOGGLE_OBJECT when the room has nothing for it to target.
-                            if (chunk->type == TOGGLE_OBJECT && state->rooms.rooms[*cursorlevel].data.num_objects == 0) {
-                                chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                                if (chunk->type == PREAMBLE) chunk->type = (chunk->type + 1) % NUM_CHUNK_TYPES;
-                            }
-                            switch (chunk->type) {
-                                case TOGGLE_BIT:
-                                    chunk->room_idx = (uint16_t)state->current_level;   // same room by default
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
-                                    chunk->bitmask = 0x1;
-                                    chunk->on = 1;    // turn on
-                                    chunk->off = 2;   // turn off
-                                    break;
-                                case TOGGLE_OBJECT:
-                                    chunk->test = 0x20;   // test=2: fires on every press, not just every second one
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_OBJECT_DETAILS;
-                                    break;
-                                case TOGGLE_BLOCK:
-                                    // A fresh chunk (memset to 0 above) needs an explicit size -
-                                    // 0 isn't a valid width/height (Hugh: "that width=0 should
-                                    // be 8").
-                                    chunk->size = 8;
-                                    state->current_state = EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS;
-                                    break;
-                                default: break;
-                            }
-                    }
+                    cycle_chunk_type(chunk, *cursorlevel, key.ch == 't' ? 1 : -1);
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
-                case 'i': {
+                case 'i': case 'I': {
                     struct SwitchObject *sw = state->rooms.rooms[*cursorlevel].data.switches + state->current_switch - 1;
                     struct SwitchChunk *chunk = sw->chunks.data + state->current_chunk;
                     // Cycle within the room's actual object count, not a blind 0-15 - an index
@@ -2985,7 +2858,7 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                     size_t n = state->rooms.rooms[*cursorlevel].data.num_objects;
                     if (n > 0) {
                         push_undo((uint8_t)state->current_level, false);
-                        chunk->index = (chunk->index + 1) % n;
+                        chunk->index = (uint8_t)((chunk->index + (key.ch == 'i' ? 1 : n - 1)) % n);
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         editor_save();
                     }
@@ -4365,11 +4238,13 @@ static void sprite_normalize(uint8_t *v) {
     // there.
     *v = (*v & MOVERTAB_ATTR_MASK) | 0x80;
 }
-static void sprite_cycle_flip(uint8_t *v) {
+static void sprite_cycle_flip(uint8_t *v, int dir) {
     sprite_normalize(v);
     // One cycle through both flip bits together (facing 0x02, upside-down 0x04) instead of two
-    // separate toggle keys: none -> horizontal -> vertical -> both -> none.
-    uint8_t flip = (uint8_t)(((*v & 0x06) + 0x02) & 0x06);
+    // separate toggle keys: none -> horizontal -> vertical -> both -> none (dir -1: backwards).
+    int step = ((*v & 0x06) / 2 + dir) % 4;
+    if (step < 0) step += 4;
+    uint8_t flip = (uint8_t)(step * 2);
     *v = (*v & ~(uint8_t)0x06) | flip;
 }
 static void sprite_toggle_stopped(uint8_t *v) { sprite_normalize(v); *v ^= 0x08; }
@@ -4621,13 +4496,13 @@ static bool handle_edit_movertab_object(Key key) {
                         SAVE_MOVERTAB();
                     }
                     break;
-                case 'f':
+                case 'f': case 'F':
                     if (!is_sprite) {
                         snprintf(state->status_message, sizeof(state->status_message), "Blocks: s/d/w for speed/direction/walls, then arrows or |/-");
                     } else if (entry[2] == 0x00) {
                         snprintf(state->status_message, sizeof(state->status_message), "Dead - press d to make it alive first");
                     } else {
-                        sprite_cycle_flip(&entry[2]);
+                        sprite_cycle_flip(&entry[2], key.ch == 'f' ? 1 : -1);
                         // The flip bits change which side of the room the offset can safely
                         // reach (see movertab_clamp_offset) - an offset that was fine before this
                         // flip might not be any more, so re-check it now rather than only on the
@@ -4713,7 +4588,7 @@ static bool handle_edit_movertab_object(Key key) {
                         SAVE_MOVERTAB();
                     }
                     break;
-                case 'g':
+                case 'g': case 'G':
                     if (!is_sprite) {
                         snprintf(state->status_message, sizeof(state->status_message), "Blocks don't have damage");
                     } else if (obj->sprite.type == SHARK && obj->sprite.damage >= 3) {
@@ -4725,12 +4600,14 @@ static bool handle_edit_movertab_object(Key key) {
                     } else {
                         push_undo((uint8_t)state->current_level, false);
                         // Shark alone stays within 1-2: 3/4 are the Mysterio/Mary Jane identities,
-                        // selected via Ctrl-O's type cycle, not something 'g' should wander into
-                        // by accident (Hugh: "for shark (and only shark) only cycle 1 and 2").
+                        // selected via Ctrl-O's type cycle, not something 'g'/'G' should wander
+                        // into by accident (Hugh: "for shark (and only shark) only cycle 1 and 2").
                         if (obj->sprite.type == SHARK) {
                             obj->sprite.damage = (obj->sprite.damage == 1) ? 2 : 1;
-                        } else {
+                        } else if (key.ch == 'g') {
                             obj->sprite.damage = (uint8_t)((obj->sprite.damage % 4) + 1);
+                        } else {
+                            obj->sprite.damage = (uint8_t)(obj->sprite.damage == 1 ? 4 : obj->sprite.damage - 1);
                         }
                         ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                         editor_save();

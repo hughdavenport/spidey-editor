@@ -78,7 +78,7 @@ void push_undo(uint8_t room_idx, bool grouped) {
         room_snapshot_free(&state->redo_stack.data[i].snapshot);
     state->redo_stack.length = 0;
 
-    UndoEntry entry = { .room_idx = room_idx, .grouped = grouped };
+    UndoEntry entry = { .room_idx = room_idx, .grouped = grouped, .valid = state->rooms.rooms[room_idx].valid };
     room_snapshot_copy(&entry.snapshot, &state->rooms.rooms[room_idx].data);
     memcpy(entry.movertab, state->movertab, sizeof(entry.movertab));
     ARRAY_ADD(state->undo_stack, entry);
@@ -100,7 +100,7 @@ uint8_t do_undo(void) {
         bool keep_going = e->grouped;
 
         /* Save current room state to redo stack */
-        UndoEntry redo = { .room_idx = e->room_idx, .grouped = false };
+        UndoEntry redo = { .room_idx = e->room_idx, .grouped = false, .valid = state->rooms.rooms[e->room_idx].valid };
         room_snapshot_copy(&redo.snapshot, &state->rooms.rooms[e->room_idx].data);
         memcpy(redo.movertab, state->movertab, sizeof(redo.movertab));
         ARRAY_ADD(state->redo_stack, redo);
@@ -108,6 +108,7 @@ uint8_t do_undo(void) {
         /* Restore snapshot (transfers ownership of pointers) */
         room_snapshot_free(&state->rooms.rooms[e->room_idx].data);
         state->rooms.rooms[e->room_idx].data = e->snapshot;
+        state->rooms.rooms[e->room_idx].valid = e->valid;
         ARRAY_FREE(state->rooms.rooms[e->room_idx].compressed);
         e->snapshot.objects = NULL;
         e->snapshot.switches = NULL;
@@ -142,13 +143,14 @@ uint8_t do_redo(void) {
         UndoEntry *e = &state->redo_stack.data[state->redo_stack.length - 1];
         bool keep_going = e->grouped;
 
-        UndoEntry undo = { .room_idx = e->room_idx, .grouped = false };
+        UndoEntry undo = { .room_idx = e->room_idx, .grouped = false, .valid = state->rooms.rooms[e->room_idx].valid };
         room_snapshot_copy(&undo.snapshot, &state->rooms.rooms[e->room_idx].data);
         memcpy(undo.movertab, state->movertab, sizeof(undo.movertab));
         ARRAY_ADD(state->undo_stack, undo);
 
         room_snapshot_free(&state->rooms.rooms[e->room_idx].data);
         state->rooms.rooms[e->room_idx].data = e->snapshot;
+        state->rooms.rooms[e->room_idx].valid = e->valid;
         ARRAY_FREE(state->rooms.rooms[e->room_idx].compressed);
         e->snapshot.objects = NULL;
         e->snapshot.switches = NULL;
@@ -226,6 +228,37 @@ static void transfer_object(struct RoomObject *object, size_t nbr_idx, int new_x
     editor_save();
 }
 
+// A switch's index within its room can be named by a TOGGLE_BIT chunk living in a completely
+// different room (chunk->room_idx/switch_idx). Removing a switch from a room - deleting it, or
+// moving it to another room - shifts every later switch in this room down by one index; walk
+// every room's chunks and shift any TOGGLE_BIT reference that pointed past the removed switch,
+// so it still names the same switch it always did. A chunk that named the removed switch
+// itself has nothing to shift to and is left as-is - the switch it toggled is simply gone
+// (Hugh, 2026-09-19: "the orange lines from chunks to switches off screen don't seem to match
+// where the purple lines from switch toggles point to" - the purple ones are exactly these
+// cross-room references, and this gap in delete/transfer is why they'd drift).
+void fixup_toggle_bit_after_switch_removed(uint8_t room_idx, size_t removed_switch_idx) {
+    for (size_t r = 0; r < C_ARRAY_LEN(state->rooms.rooms); r++) {
+        struct DecompressedRoom *room = &state->rooms.rooms[r].data;
+        bool touched = false;
+        for (size_t s = 0; s < room->num_switches; s++) {
+            struct SwitchObject *sw = room->switches + s;
+            for (size_t c = 1; c < sw->chunks.length; c++) {
+                struct SwitchChunk *ch = sw->chunks.data + c;
+                if (ch->type == TOGGLE_BIT && ch->room_idx == room_idx && ch->switch_idx > removed_switch_idx) {
+                    // The caller already snapshotted room_idx itself (its own undo entry, before
+                    // any of this) - only a *different* room touched here needs its own grouped
+                    // entry so undo restores it too.
+                    if (!touched && r != room_idx) push_undo((uint8_t)r, true);
+                    ch->switch_idx--;
+                    touched = true;
+                }
+            }
+        }
+        if (touched) ARRAY_FREE(state->rooms.rooms[r].compressed);
+    }
+}
+
 static void transfer_switch(struct SwitchObject *switcch, size_t nbr_idx, int new_x, int new_y) {
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     struct DecompressedRoom *nbr  = &state->rooms.rooms[nbr_idx].data;
@@ -245,6 +278,7 @@ static void transfer_switch(struct SwitchObject *switcch, size_t nbr_idx, int ne
     nbr->num_switches++;
     ARRAY_FREE(state->rooms.rooms[nbr_idx].compressed);
     size_t sw_i = switcch - room->switches;
+    fixup_toggle_bit_after_switch_removed((uint8_t)state->current_level, sw_i);
     free(switcch->chunks.data);
     memmove(switcch, switcch + 1, (room->num_switches - sw_i - 1) * sizeof(struct SwitchObject));
     room->num_switches--;
@@ -887,6 +921,47 @@ bool movertab_save(void) {
     fclose(fp);
     state->movertab_loaded = (n == sizeof state->movertab);
     return state->movertab_loaded;
+}
+
+// Drag a room's thumbnail onto another spot on the world map: `src` takes over `dst`'s id,
+// discarding whatever was at `dst` (a move, not swapRooms()'s exchange - `src` ends up
+// removed rather than holding dst's old data). Exits, TOGGLE_BIT targets and the index bases
+// all follow via swapRooms(); every valid room is snapshotted as one undo group first since
+// those fixups (and the base recompute) can touch any room in the file, not just src/dst -
+// dst is included even when empty (invalid), since push_undo/do_undo now snapshot a room's
+// validity too and undo must be able to turn dst back into an empty slot.
+bool room_move(size_t src, size_t dst) {
+    if (src == dst || src == 0 || dst == 0) return false;
+    if (src >= C_ARRAY_LEN(state->rooms.rooms) || dst >= C_ARRAY_LEN(state->rooms.rooms)) return false;
+    if (!state->rooms.rooms[src].valid) return false;
+
+    if (src == state->current_level || dst == state->current_level) editor_cancel_to_plain();
+
+    bool first = true;
+    for (size_t i = 0; i < C_ARRAY_LEN(state->rooms.rooms); i++) {
+        if (!state->rooms.rooms[i].valid && i != src && i != dst) continue;
+        push_undo((uint8_t)i, !first);
+        first = false;
+    }
+    if (!swapRooms(&state->rooms, (int)src, (int)dst)) return false;
+
+    Room *r = &state->rooms.rooms[src];
+    if (r->valid) {   // dst had a room of its own - swapRooms left it sitting at src; discard it
+        room_snapshot_free(&r->data);
+        ARRAY_FREE(r->rest); ARRAY_FREE(r->compressed); ARRAY_FREE(r->decompressed);
+        memset(r, 0, sizeof *r);
+        r->index = (uint8_t)src;
+    }
+    recomputeBases(&state->rooms);
+    recomputeToggleBits(&state->rooms);
+    for (size_t i = 0; i < C_ARRAY_LEN(state->rooms.rooms); i++)
+        if (state->rooms.rooms[i].valid) ARRAY_FREE(state->rooms.rooms[i].compressed);
+
+    if (state->current_switch > state->rooms.rooms[state->current_level].data.num_switches)
+        state->current_switch = 0;
+    snprintf(state->status_message, sizeof(state->status_message), "Moved room %02zx to %02zx", src, dst);
+    editor_save();
+    return true;
 }
 
 bool transfer_item_to_room(size_t room_idx) {

@@ -95,10 +95,17 @@ bool  ged_map_is_text(void);       // the editor has replaced the hex map with t
 // keyboard focus back to the room for the next question.
 // Right click: move the switch/object under the cursor into that room, or, while
 // a switch-link chunk is selected, point the chunk at that room.
-bool  ged_map_click(int room, bool right);
-// Out-of-bounds switch list: its text rows and the switch listed on a row (-1
-// if none); clicking a row goes through the editor's own click handling.
-void  ged_oob_rows(int *r0, int *r1);
+// tx, ty: the tile position within the destination room a thumbnail click landed on (-1, -1
+// if there isn't one, e.g. keyboard Enter or a switch-link jump) - the cursor goes there
+// instead of wherever it was left on a previous visit.
+bool  ged_map_click(int room, bool right, int tx, int ty);
+// Drag-drop a thumbnail onto another: `src` takes over `dst`'s id, discarding whatever room
+// was at `dst` (room.c's swapRooms() plus dropping src's post-swap leftovers - see room_move()).
+// false if src has no room, dst == src, or either is room 0.
+bool  ged_room_move(int src, int dst);
+// Out-of-bounds switch list (part of the ordinary scrolled panel, not pinned): the switch
+// listed on a given text row (-1 if none); clicking a row goes through the editor's own click
+// handling.
 int   ged_oob_switch_at_row(int row);
 bool  ged_is_oob_marker(int col, int row);   // text cell holding an out-of-bounds switch's map marker
 // Step the current room's background (+-1, wraps 0..63) and tileset (+-4, 0..28).
