@@ -78,6 +78,7 @@ static game_state *state_new(RoomFile *host) {
     s->debug.hex = true;
     s->debug.tiles = true;
     s->debug.spidey = true;
+    s->debug.switch_links = true;
     movertab_load();
     return s;
 }
@@ -197,6 +198,7 @@ bool ged_show_objects(void) { return state->debug.objects; }
 bool ged_show_switches(void) { return state->debug.switches; }
 bool ged_show_tiles(void)    { return state->debug.tiles; }
 bool ged_show_spidey(void)   { return state->debug.spidey; }
+bool ged_show_switch_links(void) { return state->debug.switch_links; }
 RoomFile *ged_rooms(void) { return &state->rooms; }
 void ged_set_cursor(int x, int y) {
     if (x < 0 || x >= WIDTH_TILES || y < 0 || y >= HEIGHT_TILES) return;

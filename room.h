@@ -262,6 +262,10 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id);
 bool recomputeToggleBits(RoomFile *file);
 void recomputeBases(RoomFile *file);
 bool swapRooms(RoomFile *file, int a, int b);
+int exit_memory_offset(const struct SwitchChunk *chunk);   // -1, or which exit (2 N/3 E/4 S/5 W) it rewrites
+// Permute a 768-byte MOVERTAB.DAT-shaped buffer after swapRooms(file, a, b); `table` and `out`
+// must not alias. `before[64]` = objects per room id from just before the swap.
+void permuteMovertabBuffer(const unsigned before[64], int a, int b, const uint8_t table[768], uint8_t out[768]);
 void dumpRoom(Room *room, RoomFile *file, bool color);
 // Whole-room import/export as dumpRoom's `display`-format text: room_export_text writes it,
 // room_import_text reads it back into the SAME room slot (room->index), leaving every other

@@ -147,6 +147,7 @@ help_keys help[][100] = {
         {"a", "all debug info"},
         {"c", "Spider-Man at the cursor (GUI, default on)"},
         {"d", "room data"},
+        {"l", "switch links (GUI, default on)"},
         {"n", "neighbours"},
         {"o", "objects"},
         {"p", "position"},

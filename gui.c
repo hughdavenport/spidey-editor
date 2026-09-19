@@ -197,7 +197,6 @@ static bool link_click(GuiState *g, Vector2 m);
 static void link_hover(GuiState *g, Vector2 m);
 static bool link_hovered(GuiState *g, int room, int sw, int chunk);
 static Vector2 switch_anchor(GuiState *g, struct SwitchObject *sw);
-static int  exit_memory_offset(const struct SwitchChunk *ch);
 static Vector2 arrival_edge(GuiState *g, int ex);
 static void label(GuiState *g, const char *s, float x, float y, Color col, bool emph);
 static void draw_source_grid(GuiState *g, bool block_up);
@@ -2582,15 +2581,7 @@ static bool link_click(GuiState *g, Vector2 m) {
     return true;
 }
 
-// A TOGGLE_BLOCK chunk whose target lies past the tile grid writes a room
-// setting instead ("memory" in the editor); offsets 2..5 are the four exits,
-// and the chunk's off / on values are then room numbers. Returns that offset
-// (2 north, 3 east, 4 south, 5 west) or -1 for an ordinary block toggle.
-static int exit_memory_offset(const struct SwitchChunk *ch) {
-    if (ch->type != TOGGLE_BLOCK) return -1;
-    int point = ch->y * WIDTH_TILES + ch->x - WIDTH_TILES * HEIGHT_TILES;
-    return point >= 2 && point <= 5 ? point : -1;
-}
+// exit_memory_offset() itself lives in room.c/room.h (shared with swapRooms()'s own fixup).
 static const char *EXIT_NAMES[] = { "", "", "north", "east", "south", "west" };
 
 // Where a player arrives in this room when it becomes another room's exit
@@ -2648,6 +2639,7 @@ static void draw_world_links(GuiState *g) {
                 struct SwitchChunk *ch = sw->chunks.data + c;
                 int ex = exit_memory_offset(ch);
                 if (ex >= 0 && (ch->off == ged_room() || ch->on == ged_room())) {   // a switch there makes one of its exits lead here
+                    if (!ged_show_switch_links()) continue;   // no switch of ours is "active" for a foreign exit-memory chunk
                     Rectangle d = world_cell(g, rid, tw, th);
                     Vector2 from = { d.x + d.width / 2, d.y + d.height / 2 };
                     bool hov = link_hovered(g, rid, i, (int)c);
@@ -2663,6 +2655,7 @@ static void draw_world_links(GuiState *g) {
                 struct SwitchObject *target = r->switches + ch->switch_idx;
                 if (target->chunks.length == 0) continue;
                 bool hot = (int)ch->switch_idx == sel_sw;
+                if (!ged_show_switch_links() && !hot) continue;
                 Rectangle d = world_cell(g, rid, tw, th);
                 Vector2 from = { d.x + d.width / 2, d.y + d.height / 2 };
                 bool hov = link_hovered(g, rid, i, (int)c);
@@ -2683,6 +2676,7 @@ static void draw_world_links(GuiState *g) {
             struct SwitchChunk *ch = sw->chunks.data + c;
             int ex = exit_memory_offset(ch);
             if (ex >= 0) {                       // an exit rewritten by the switch: arrows to the off and on rooms
+                if (!ged_show_switch_links() && !hot) continue;
                 int targets[2] = { ch->off, ch->on };
                 for (int k = 0; k < (ch->off == ch->on ? 1 : 2); k++) {
                     if (targets[k] >= 64) continue;
@@ -2699,6 +2693,7 @@ static void draw_world_links(GuiState *g) {
                 continue;
             }
             if (ch->type != TOGGLE_BIT || ch->room_idx == ged_room() || ch->room_idx >= 64) continue;
+            if (!ged_show_switch_links() && !hot) continue;
             Rectangle d = world_cell(g, ch->room_idx, tw, th);
             Vector2 e = { d.x + d.width / 2, d.y + d.height / 2 };
             bool hov = link_hovered(g, ged_room(), i, (int)c);
@@ -2818,6 +2813,7 @@ static void draw_overlay(GuiState *g) {
                 int w = ch->dir == HORIZONTAL ? ch->size : 1;
                 int h = ch->dir == VERTICAL ? ch->size : 1;
                 if (cx >= ch->x && cx < ch->x + w && cy >= ch->y && cy < ch->y + h) hot = true;
+                if (!ged_show_switch_links() && !hot) continue;   // Ctrl-D l off: only the active switch's links
                 Vector2 t = tile_pt(g, ch->x, ch->y);
                 float lw = hot ? 3 : link_hovered(g, ged_room(), i, (int)c) ? 2.5f : 1;
                 DrawRectangleLinesEx((Rectangle){t.x, t.y, w * s, h * s}, hot ? 3 : 1, C_TBLK);
@@ -2826,6 +2822,7 @@ static void draw_overlay(GuiState *g) {
             } else if (ch->type == TOGGLE_OBJECT && ch->index < r->num_objects) {
                 struct RoomObject *t = r->objects + ch->index;
                 if (cur_kind == 2 && cur_idx == ch->index) hot = true;
+                if (!ged_show_switch_links() && !hot) continue;
                 float cw = t->type == BLOCK ? t->block.width / 2.0f : 0.5f;
                 float chh = t->type == BLOCK ? t->block.height / 2.0f : 0.5f;
                 Vector2 e = tile_pt(g, t->x + cw, t->y + chh);
@@ -2834,8 +2831,9 @@ static void draw_overlay(GuiState *g) {
                 // a switch in this room; links into other rooms are drawn to the world map (draw_world_links)
                 struct SwitchObject *ts = r->switches + ch->switch_idx;
                 if (ts->chunks.length == 0) continue;
-                Vector2 e = tile_pt(g, ts->chunks.data[0].x + 0.5f, ts->chunks.data[0].y + 0.5f);
                 if (cur_kind == 1 && cur_idx == (int)ch->switch_idx) hot = true;
+                if (!ged_show_switch_links() && !hot) continue;
+                Vector2 e = tile_pt(g, ts->chunks.data[0].x + 0.5f, ts->chunks.data[0].y + 0.5f);
                 DrawLineEx(o, e, hot ? 3 : link_hovered(g, ged_room(), i, (int)c) ? 2.5f : 1, C_BIT);
             }
         }

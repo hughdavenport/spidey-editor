@@ -1012,7 +1012,8 @@ bool main_swap(int *argc, char ***argv, char *program, int *swap_a, int *swap_b,
 }
 
 // MOVERTAB.DAT holds 3 bytes per object, in global object order (see recomputeBases). After
-// swapping rooms a and b the order changes; permute the table so every object keeps its entry.
+// swapping rooms a and b the order changes; permute the table so every object keeps its entry
+// (permuteMovertabBuffer, room.c - shared with the GUI's own drag-to-move room_move()).
 // `before` = objects per room before the swap.
 static bool permuteMovertab(const unsigned before[64], int a, int b, const char *src, const char *dst) {
     uint8_t table[768] = {0}, out[768] = {0};
@@ -1024,20 +1025,7 @@ static bool permuteMovertab(const unsigned before[64], int a, int b, const char 
     size_t n = fread(table, 1, sizeof table, fp);
     fclose(fp);
     if (n != sizeof table) fprintf(stderr, "Warning: %s is %zu bytes, expected %zu\n", src, n, sizeof table);
-    unsigned old_base[64], new_base[64], after[64];
-    memcpy(after, before, sizeof after);
-    after[a] = before[b]; after[b] = before[a];
-    for (unsigned i = 0, o = 0, w = 0; i < 64; i++) {
-        old_base[i] = o; new_base[i] = w;
-        o += before[i]; w += after[i];
-    }
-    for (unsigned i = 0; i < 64; i++) {
-        unsigned from = (i == (unsigned)a) ? (unsigned)b : (i == (unsigned)b) ? (unsigned)a : i;
-        for (unsigned k = 0; k < after[i]; k++) {
-            unsigned oi = old_base[from] + k, ni = new_base[i] + k;
-            if (3 * oi + 3 <= sizeof table && 3 * ni + 3 <= sizeof out) memcpy(out + 3 * ni, table + 3 * oi, 3);
-        }
-    }
+    permuteMovertabBuffer(before, a, b, table, out);
     fp = fopen(dst, "wb");
     if (fp == NULL) {
         fprintf(stderr, "Could not open %s for writing: %s\n", dst, strerror(errno));

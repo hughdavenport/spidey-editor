@@ -1279,6 +1279,29 @@ tb_found:       ;
     return true;
 }
 
+// MOVERTAB.DAT holds 3 bytes per object, in global object order (see recomputeBases). After
+// swapRooms(a, b) the order changes; permute a copy of the table (`table` in, `out` out - may
+// not alias) so every object keeps its own entry. `before[64]` = objects per room id (0 for an
+// invalid room) as it was BEFORE the swap - the caller must capture this first, since swapRooms
+// itself only leaves the AFTER counts to read back out.
+void permuteMovertabBuffer(const unsigned before[64], int a, int b, const uint8_t table[768], uint8_t out[768]) {
+    memset(out, 0, 768);
+    unsigned old_base[64], new_base[64], after[64];
+    memcpy(after, before, sizeof(unsigned) * 64);
+    after[a] = before[b]; after[b] = before[a];
+    for (unsigned i = 0, o = 0, w = 0; i < 64; i++) {
+        old_base[i] = o; new_base[i] = w;
+        o += before[i]; w += after[i];
+    }
+    for (unsigned i = 0; i < 64; i++) {
+        unsigned from = (i == (unsigned)a) ? (unsigned)b : (i == (unsigned)b) ? (unsigned)a : i;
+        for (unsigned k = 0; k < after[i]; k++) {
+            unsigned oi = old_base[from] + k, ni = new_base[i] + k;
+            if (3 * oi + 3 <= 768 && 3 * ni + 3 <= 768) memcpy(out + 3 * ni, table + 3 * oi, 3);
+        }
+    }
+}
+
 // The game addresses MOVERTAB.DAT and the switch-state table by cumulative counts over
 // the lower-numbered rooms: a room's UNKNOWN_c is the number of objects in every valid room
 // before it, and its switch base (UNKNOWN_f * 4 + the low two bits of _num_switches) the
@@ -1297,8 +1320,21 @@ void recomputeBases(RoomFile *file) {
     }
 }
 
+// A TOGGLE_BLOCK chunk whose (x,y) falls in the 4-byte window just past the tile grid
+// doesn't paint a tile at all: the game overwrites one of the room's own exit bytes with
+// the chunk's `on`/`off` value instead (verified 2026-09-15; the GUI draws these as orange
+// arrows to the on/off rooms' thumbnails). Returns which exit - 2 north, 3 east, 4 south,
+// 5 west, matching room_north/east/south/west's own field order (point - 2) - or -1 for an
+// ordinary tile block.
+int exit_memory_offset(const struct SwitchChunk *chunk) {
+    if (chunk->type != TOGGLE_BLOCK) return -1;
+    int point = chunk->y * WIDTH_TILES + chunk->x - WIDTH_TILES * HEIGHT_TILES;
+    return point >= 2 && point <= 5 ? point : -1;
+}
+
 // Swap rooms a and b (so that b can become the start room, say) keeping every link: exits
-// into either room follow it, TOGGLE_BIT chunks aimed at either room follow it, and the index
+// into either room follow it, TOGGLE_BIT chunks aimed at either room follow it, exit-memory
+// chunks (see exit_memory_offset) that rewrite to either room follow it too, and the index
 // bases and toggle bits are recomputed for the new order. Room 0 stands for "no exit" in the
 // exit bytes, so it cannot take part.
 bool swapRooms(RoomFile *file, int a, int b) {
@@ -1324,9 +1360,15 @@ bool swapRooms(RoomFile *file, int a, int b) {
             struct SwitchObject *s = r->data.switches + sw;
             for (size_t c = 1; c < s->chunks.length; c++) {
                 struct SwitchChunk *chunk = s->chunks.data + c;
-                if (chunk->type != TOGGLE_BIT) continue;
-                if (chunk->room_idx == a) chunk->room_idx = (uint16_t)b;
-                else if (chunk->room_idx == b) chunk->room_idx = (uint16_t)a;
+                if (chunk->type == TOGGLE_BIT) {
+                    if (chunk->room_idx == a) chunk->room_idx = (uint16_t)b;
+                    else if (chunk->room_idx == b) chunk->room_idx = (uint16_t)a;
+                } else if (exit_memory_offset(chunk) >= 0) {
+                    if (chunk->on == a) chunk->on = (uint8_t)b;
+                    else if (chunk->on == b) chunk->on = (uint8_t)a;
+                    if (chunk->off == a) chunk->off = (uint8_t)b;
+                    else if (chunk->off == b) chunk->off = (uint8_t)a;
+                }
             }
         }
         ARRAY_FREE(r->compressed);

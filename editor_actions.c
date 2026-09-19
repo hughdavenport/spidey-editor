@@ -925,11 +925,17 @@ bool movertab_save(void) {
 
 // Drag a room's thumbnail onto another spot on the world map: `src` takes over `dst`'s id,
 // discarding whatever was at `dst` (a move, not swapRooms()'s exchange - `src` ends up
-// removed rather than holding dst's old data). Exits, TOGGLE_BIT targets and the index bases
-// all follow via swapRooms(); every valid room is snapshotted as one undo group first since
-// those fixups (and the base recompute) can touch any room in the file, not just src/dst -
-// dst is included even when empty (invalid), since push_undo/do_undo now snapshot a room's
-// validity too and undo must be able to turn dst back into an empty slot.
+// removed rather than holding dst's old data). Exits, TOGGLE_BIT targets, exit-memory chunks
+// and the index bases all follow via swapRooms(); every valid room is snapshotted as one undo
+// group first since those fixups (and the base recompute) can touch any room in the file, not
+// just src/dst - dst is included even when empty (invalid), since push_undo/do_undo now
+// snapshot a room's validity too and undo must be able to turn dst back into an empty slot.
+// MOVERTAB.DAT (state->movertab) is permuted the same way the CLI `swap` command's own
+// --movertab handling does (both call permuteMovertabBuffer, room.c) - every object's entry
+// follows it to its new global index, whether the object moved with src or was already sitting
+// at dst. dst's own objects (if any) are then discarded along with the rest of its data, so
+// their now-orphaned entries are removed and everything after them shifted down to close the
+// gap, the same as deleting those objects would.
 bool room_move(size_t src, size_t dst) {
     if (src == dst || src == 0 || dst == 0) return false;
     if (src >= C_ARRAY_LEN(state->rooms.rooms) || dst >= C_ARRAY_LEN(state->rooms.rooms)) return false;
@@ -938,15 +944,27 @@ bool room_move(size_t src, size_t dst) {
     if (src == state->current_level || dst == state->current_level) editor_cancel_to_plain();
 
     bool first = true;
+    unsigned before[64] = {0};
     for (size_t i = 0; i < C_ARRAY_LEN(state->rooms.rooms); i++) {
+        if (state->rooms.rooms[i].valid) before[i] = state->rooms.rooms[i].data.num_objects;
         if (!state->rooms.rooms[i].valid && i != src && i != dst) continue;
         push_undo((uint8_t)i, !first);
         first = false;
     }
     if (!swapRooms(&state->rooms, (int)src, (int)dst)) return false;
 
+    uint8_t permuted[256 * 3];
+    permuteMovertabBuffer(before, (int)src, (int)dst, state->movertab, permuted);
+    memcpy(state->movertab, permuted, sizeof permuted);
+
     Room *r = &state->rooms.rooms[src];
     if (r->valid) {   // dst had a room of its own - swapRooms left it sitting at src; discard it
+        recomputeBases(&state->rooms);   // need src's base while it still holds these objects
+        unsigned base = r->data.UNKNOWN_c, n = r->data.num_objects;
+        if (n > 0 && base + n <= 256) {
+            memmove(state->movertab + 3 * base, state->movertab + 3 * (base + n), 3 * (256 - base - n));
+            memset(state->movertab + 3 * (256 - n), 0, 3 * n);
+        }
         room_snapshot_free(&r->data);
         ARRAY_FREE(r->rest); ARRAY_FREE(r->compressed); ARRAY_FREE(r->decompressed);
         memset(r, 0, sizeof *r);
@@ -961,6 +979,7 @@ bool room_move(size_t src, size_t dst) {
         state->current_switch = 0;
     snprintf(state->status_message, sizeof(state->status_message), "Moved room %02zx to %02zx", src, dst);
     editor_save();
+    if (state->movertab_loaded) movertab_save();
     return true;
 }
 
