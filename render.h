@@ -48,10 +48,12 @@ void render_close(RenderCtx *ctx);
 
 // Fill `out` (ROOM_PX_W*ROOM_PX_H*3 RGB bytes) with the room's pixels:
 // background + foreground + sprites, no debug overlay (the GUI draws its own).
-// hot_switch/hot_chunk (0-indexed switch, chunk array index; -1/-1 for none)
-// and hot_on: while that TOGGLE_BLOCK chunk is open for editing, draw its
-// "on" tile there instead of the idle "off" one when hot_on is true (see
-// ged_hot_block_preview) - every other chunk still draws its idle tile.
+// hot_switch/hot_chunk (0-indexed switch, chunk array index; -1/-1 for none;
+// hot_chunk == -1 with hot_switch set previews every TOGGLE_BLOCK chunk of
+// that switch at once, for when the switch itself is open rather than one
+// specific chunk) and hot_on: while open for editing, draw the "on" tile
+// there instead of the idle "off" one when hot_on is true (see
+// editor_hot_block_preview) - every other chunk still draws its idle tile.
 bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out,
                       int hot_switch, int hot_chunk, bool hot_on);
 

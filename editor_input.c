@@ -31,6 +31,7 @@ static bool handle_tile_edit(Key key);
 static void yank_at_cursor(void);
 static void yank_current_switch(void);
 static void delete_current_switch(void);
+static void clear_switch_block_tiles(struct DecompressedRoom *room, struct SwitchObject *sw);
 static void block_speed_ratchet(uint8_t *entry, int shift, uint8_t dir_bit, bool pressed_dir);
 static void block_direction_set(uint8_t *entry, uint8_t dir_bit, bool set);
 static void sprite_toggle_dead(uint8_t *v);
@@ -39,6 +40,8 @@ static void sprite_toggle_stopped(uint8_t *v);
 static void sprite_toggle_wall(uint8_t *v);
 static void sprite_toggle_edge(uint8_t *v);
 static void sprite_cycle_mode(uint8_t *v, int dir);
+static bool sprite_cycle_forward(struct RoomObject *obj);
+static const char *sprite_display_name(SpriteType type, uint8_t damage);
 static uint8_t movertab_offset_set_std(int v);
 static uint8_t movertab_offset_set_sprite_y(uint8_t b, int v);
 static void movertab_reset_entry(unsigned global, bool is_sprite);
@@ -336,6 +339,13 @@ static void delete_item_at_cursor(void) {
         memset(room->objects + obj_i, 0, sizeof(struct RoomObject));
         room->num_objects --;
     } else if (switch_underneath) {
+        // Same tile cleanup as delete_current_switch: the marker itself, plus every tile any
+        // of its TOGGLE_BLOCK chunks covers, so nothing is left behind on the map (Hugh: "just
+        // an empty tile left" - this is the plain-Backspace-in-TILE_EDIT path, a different
+        // function to the one used while the switch is open for editing).
+        clear_switch_block_tiles(room, switch_underneath);
+        room->tiles[TILE_IDX(x, y)] = 0;
+        state->hot_preview_switch = 0;   // indices shift below - don't leave a hover preview pointing at the wrong switch
         while (sw_i < room->num_switches - 1) {
             room->switches[sw_i] = room->switches[sw_i+1];
             sw_i++;
@@ -817,6 +827,7 @@ static bool handle_toggle_display(Key key) {
         case KEY_CHAR:
             switch (key.ch) {
                 case 'a': debugalltoggle(); break;
+                case 'c': state->debug.spidey = !state->debug.spidey; break;
                 case 'd': state->debug.data = !state->debug.data; break;
                 case 'n': state->debug.neighbours = !state->debug.neighbours; break;
                 case 'o': state->debug.objects = !state->debug.objects; break;
@@ -1245,10 +1256,71 @@ static bool handle_edit_roomdetails_room(Key key) {
     return true;
 }
 
+// Plain one-tile cursor movement with room-edge crossing, matching handle_normal's hjkl/arrow
+// case (but without that case's side effects of leaving switch/chunk selection) - used where a
+// direction key is pressed but has nothing else to do (see side_locked in
+// handle_edit_switchdetails), so it falls back to ordinary map navigation instead of a no-op.
+static void move_cursor_plain(int dx, int dy) {
+    size_t *cursorlevel = &state->current_level;
+    if (dx < 0) {
+        state->cursors[*cursorlevel].x--;
+        if (state->cursors[*cursorlevel].x < 0) {
+            state->cursors[*cursorlevel].x++;
+            size_t level = state->rooms.rooms[*cursorlevel].data.room_west;
+            state->cursors[level].y = state->cursors[*cursorlevel].y;
+            state->cursors[level].x = WIDTH_TILES - 1;
+            size_t old_level = *cursorlevel;
+            *cursorlevel = level;
+            room_prune_blank(old_level);
+        }
+    } else if (dx > 0) {
+        state->cursors[*cursorlevel].x++;
+        if (state->cursors[*cursorlevel].x >= WIDTH_TILES) {
+            state->cursors[*cursorlevel].x--;
+            size_t level = state->rooms.rooms[*cursorlevel].data.room_east;
+            state->cursors[level].x = 0;
+            state->cursors[level].y = state->cursors[*cursorlevel].y;
+            size_t old_level = *cursorlevel;
+            *cursorlevel = level;
+            room_prune_blank(old_level);
+        }
+    }
+    if (dy < 0) {
+        state->cursors[*cursorlevel].y--;
+        if (state->cursors[*cursorlevel].y < 0) {
+            state->cursors[*cursorlevel].y++;
+            size_t level = state->rooms.rooms[*cursorlevel].data.room_north;
+            state->cursors[level].y = HEIGHT_TILES - 1;
+            state->cursors[level].x = state->cursors[*cursorlevel].x;
+            size_t old_level = *cursorlevel;
+            *cursorlevel = level;
+            room_prune_blank(old_level);
+        }
+    } else if (dy > 0) {
+        state->cursors[*cursorlevel].y++;
+        if (state->cursors[*cursorlevel].y >= HEIGHT_TILES) {
+            state->cursors[*cursorlevel].y--;
+            size_t level = state->rooms.rooms[*cursorlevel].data.room_south;
+            state->cursors[level].y = 0;
+            state->cursors[level].x = state->cursors[*cursorlevel].x;
+            size_t old_level = *cursorlevel;
+            *cursorlevel = level;
+            room_prune_blank(old_level);
+        }
+    }
+}
+
 static bool handle_edit_switchdetails(Key key) {
+    // "side" isn't shown or editable for a switch that's out of bounds, or sitting on a blank
+    // tile (see editor_draw.c's switch_side_hidden for why). In that case direction keys fall
+    // back to plain map cursor movement instead of doing nothing.
+    struct DecompressedRoom *side_room = &state->rooms.rooms[state->current_level].data;
+    struct SwitchChunk *side_preamble = side_room->switches[state->current_switch - 1].chunks.data;
+    bool side_locked = switch_side_hidden(side_room, side_preamble);
     switch (key.code) {
         case KEY_UP:
         {
+            if (side_locked) { move_cursor_plain(0, -1); break; }
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
@@ -1257,6 +1329,7 @@ static bool handle_edit_switchdetails(Key key) {
         } break;
         case KEY_DOWN:
         {
+            if (side_locked) { move_cursor_plain(0, 1); break; }
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
@@ -1265,6 +1338,7 @@ static bool handle_edit_switchdetails(Key key) {
         } break;
         case KEY_RIGHT:
         {
+            if (side_locked) { move_cursor_plain(1, 0); break; }
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
@@ -1273,6 +1347,7 @@ static bool handle_edit_switchdetails(Key key) {
         } break;
         case KEY_LEFT:
         {
+            if (side_locked) { move_cursor_plain(-1, 0); break; }
             struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
             push_undo((uint8_t)state->current_level, false);
             room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
@@ -1323,6 +1398,7 @@ static bool handle_edit_switchdetails(Key key) {
 
                 case 'h':
                 {
+                    if (side_locked) { move_cursor_plain(-1, 0); break; }
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = LEFT;
@@ -1332,6 +1408,7 @@ static bool handle_edit_switchdetails(Key key) {
 
                 case 'j':
                 {
+                    if (side_locked) { move_cursor_plain(0, 1); break; }
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = BOTTOM;
@@ -1341,6 +1418,7 @@ static bool handle_edit_switchdetails(Key key) {
 
                 case 'k':
                 {
+                    if (side_locked) { move_cursor_plain(0, -1); break; }
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = TOP;
@@ -1350,6 +1428,7 @@ static bool handle_edit_switchdetails(Key key) {
 
                 case 'l':
                 {
+                    if (side_locked) { move_cursor_plain(1, 0); break; }
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = RIGHT;
@@ -1365,6 +1444,15 @@ static bool handle_edit_switchdetails(Key key) {
                     ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                     editor_save();
                 }; break;
+
+                case 'O':
+                    // Preview the whole switch as active/idle on the map, same as 'o' one
+                    // level down while editing a specific chunk (see editor_hot_block_preview)
+                    // - every TOGGLE_BLOCK chunk this switch owns previews together, matching
+                    // the real game's single state bit per switch (Hugh: "when you are on a
+                    // switch, a key to toggle it and see the effects in the room map").
+                    state->switch_on = !state->switch_on;
+                    break;
 
                 case 'y':
                     if (!state->current_switch) break;
@@ -1400,6 +1488,7 @@ static bool handle_edit_switchdetails(Key key) {
 
                 case 's':
                 {
+                    if (side_locked) { snprintf(state->status_message, sizeof(state->status_message), "This switch has no side (out of bounds or blank tile)"); break; }
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].side = (room->switches[state->current_switch - 1].chunks.data[0].side + 1) % NUM_SIDES;
@@ -1817,10 +1906,80 @@ static void yank_current_switch(void) {
            sw->chunks.length * sizeof(struct SwitchChunk));
 }
 
+// Blank the base tilemap under a switch's own TOGGLE_BLOCK chunks (not memory/exit-rewrite
+// chunks at y >= HEIGHT_TILES, which don't cover real tiles at all) - so deleting a switch,
+// or pasting one, doesn't leave whatever tile happened to be underneath as a stray leftover
+// (Hugh: "so that there is just an empty tile left").
+static void clear_switch_block_tiles(struct DecompressedRoom *room, struct SwitchObject *sw) {
+    for (size_t c = 1; c < sw->chunks.length; c++) {
+        struct SwitchChunk *chunk = sw->chunks.data + c;
+        if (chunk->type != TOGGLE_BLOCK || chunk->y >= HEIGHT_TILES) continue;
+        if (chunk->dir == HORIZONTAL) {
+            for (int x = chunk->x; x < chunk->x + (int)chunk->size && x < WIDTH_TILES; x++)
+                room->tiles[TILE_IDX(x, chunk->y)] = 0;
+        } else {
+            for (int y = chunk->y; y < chunk->y + (int)chunk->size && y < HEIGHT_TILES; y++)
+                room->tiles[TILE_IDX(chunk->x, y)] = 0;
+        }
+    }
+}
+
+// Whether (x,y) is on switch `sw`'s own marker, or on a tile any of its TOGGLE_BLOCK chunks
+// covers - "switch under spidey, or chunk of any kind under spidey" (Hugh), used to let 'O'
+// preview a switch just by standing near it, without opening it for editing.
+static bool switch_covers_tile(struct SwitchObject *sw, int x, int y) {
+    struct SwitchChunk *pre = sw->chunks.data;
+    if (x == pre->x && y == pre->y) return true;
+    for (size_t c = 1; c < sw->chunks.length; c++) {
+        struct SwitchChunk *chunk = sw->chunks.data + c;
+        if (chunk->type != TOGGLE_BLOCK || chunk->y >= HEIGHT_TILES) continue;
+        bool hit = (chunk->dir == HORIZONTAL)
+            ? (y == chunk->y && x >= chunk->x && x < chunk->x + (int)chunk->size)
+            : (x == chunk->x && y >= chunk->y && y < chunk->y + (int)chunk->size);
+        if (hit) return true;
+    }
+    return false;
+}
+// 0-based index of the switch under (x,y) in `room`, or -1.
+static int find_switch_under_cursor(struct DecompressedRoom *room, int x, int y) {
+    for (int s = 0; s < room->num_switches; s++) {
+        if (switch_covers_tile(room->switches + s, x, y)) return s;
+    }
+    return -1;
+}
+// 'O' outside of switch editing: toggle-preview whatever switch is under the cursor right
+// now, sticking to it (via hot_preview_switch) even as the cursor moves away afterward, so
+// you can walk over to see the effect elsewhere in the room (Hugh: "toggle it and see the
+// effects in the room map"). No-op with a status message if nothing is there.
+static void toggle_hover_switch_preview(void) {
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    int x = state->cursors[state->current_level].x, y = state->cursors[state->current_level].y;
+    int s = find_switch_under_cursor(room, x, y);
+    if (s < 0) {
+        snprintf(state->status_message, sizeof(state->status_message), "No switch here to preview");
+        return;
+    }
+    if (state->hot_preview_switch == (size_t)s + 1) {
+        state->switch_on = !state->switch_on;
+    } else {
+        state->hot_preview_switch = (size_t)s + 1;
+        state->switch_on = true;
+    }
+}
+
 static void delete_current_switch(void) {
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     size_t sw_i = state->current_switch - 1;
     push_undo((uint8_t)state->current_level, false);
+    state->hot_preview_switch = 0;   // indices shift below - don't leave a hover preview pointing at the wrong switch
+    clear_switch_block_tiles(room, room->switches + sw_i);
+    // The switch's own marker tile isn't a TOGGLE_BLOCK chunk, so clear_switch_block_tiles
+    // above doesn't touch it - unlike paste, which deliberately restores whatever was there
+    // before the switch existed (state->clipboard.tile), a plain delete has nothing worth
+    // keeping there, so it goes blank too (Hugh: "just an empty tile left").
+    struct SwitchChunk *preamble = room->switches[sw_i].chunks.data;
+    if (preamble->x < WIDTH_TILES && preamble->y < HEIGHT_TILES)
+        room->tiles[TILE_IDX(preamble->x, preamble->y)] = 0;
     while (sw_i < (size_t)(room->num_switches - 1)) {
         room->switches[sw_i] = room->switches[sw_i+1];
         sw_i++;
@@ -1921,6 +2080,8 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
                                     chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
+                                    chunk->on = 1;    // turn on
+                                    chunk->off = 2;   // turn off
                                     break;
                                 case TOGGLE_OBJECT:
                                     chunk->test = 0x20;   // test=2: fires on every press, not just every second one
@@ -2294,6 +2455,8 @@ static bool handle_edit_switchdetails_chunk_memory(Key key) {
                                     chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
+                                    chunk->on = 1;    // turn on
+                                    chunk->off = 2;   // turn off
                                     break;
                                 case TOGGLE_OBJECT:
                                     chunk->test = 0x20;   // test=2: fires on every press, not just every second one
@@ -2553,6 +2716,8 @@ static bool handle_edit_switchdetails_chunk_block(Key key) {
                                     chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
+                                    chunk->on = 1;    // turn on
+                                    chunk->off = 2;   // turn off
                                     break;
                                 case TOGGLE_OBJECT:
                                     chunk->test = 0x20;   // test=2: fires on every press, not just every second one
@@ -2785,6 +2950,8 @@ static bool handle_edit_switchdetails_chunk_object(Key key) {
                                     chunk->room_idx = (uint16_t)state->current_level;   // same room by default
                                     state->current_state = EDIT_SWITCHDETAILS_CHUNK_SWITCH_DETAILS;
                                     chunk->bitmask = 0x1;
+                                    chunk->on = 1;    // turn on
+                                    chunk->off = 2;   // turn off
                                     break;
                                 case TOGGLE_OBJECT:
                                     chunk->test = 0x20;   // test=2: fires on every press, not just every second one
@@ -3162,6 +3329,9 @@ static bool handle_normal(Key key) {
                     state->switch_on = false;
                     state->current_chunk = 0;
                     state->partial_byte = 0;
+                    break;
+                case 'O':
+                    toggle_hover_switch_preview();
                     break;
                 case 'g':
                     state->goto_coord_x = -1;
@@ -3709,6 +3879,7 @@ static bool handle_tile_edit(Key key) {
                     room->switches[idx].chunks.data[0].y = y;
                     room->tiles[TILE_IDX(x, y)] = state->clipboard.tile;
                 }
+                clear_switch_block_tiles(room, room->switches + idx);
                 room->num_switches++;
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
                 editor_save();
@@ -3839,6 +4010,13 @@ static bool handle_tile_edit(Key key) {
                 struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 size_t x = state->cursors[state->current_level].x;
                 size_t y = state->cursors[state->current_level].y;
+                // A switch under the cursor (its own marker, or any tile one of its
+                // TOGGLE_BLOCK chunks covers) takes priority over object create/cycle here -
+                // "switch under spidey, or chunk of any kind under spidey" (Hugh).
+                if (find_switch_under_cursor(room, (int)x, (int)y) >= 0) {
+                    toggle_hover_switch_preview();
+                    return true;
+                }
                 struct RoomObject *found_obj = NULL;
                 for (size_t obj_j = 0; obj_j < room->num_objects; obj_j++) {
                     struct RoomObject *obj = room->objects + obj_j;
@@ -3870,10 +4048,6 @@ static bool handle_tile_edit(Key key) {
                     room->num_objects++;
                     movertab_reset_entry((unsigned)room->UNKNOWN_c + (unsigned)idx, false);
                 } else {
-                    static const char *sprite_names[] = {
-                        "Shark", "Mummy", "Blue man", "Wolf",
-                        "R2D2", "Dinosaur", "Rat", "Shotgun lady",
-                    };
                     if (found_obj->type == BLOCK) {
                         for (size_t k = 0; k < room->num_objects; k++) {
                             struct RoomObject *other = room->objects + k;
@@ -3895,8 +4069,8 @@ static bool handle_tile_edit(Key key) {
                         found_obj->sprite.damage = 1;
                         movertab_reset_entry(found_global, true);
                         snprintf(state->status_message, sizeof(state->status_message),
-                                 "Sprite: %s", sprite_names[SHARK]);
-                    } else if ((int)found_obj->sprite.type + 1 >= NUM_SPRITE_TYPES) {
+                                 "Sprite: %s", sprite_display_name(SHARK, 1));
+                    } else if (sprite_cycle_forward(found_obj)) {
                         found_obj->type = BLOCK;
                         found_obj->block.width = 1;
                         found_obj->block.height = 1;
@@ -3906,9 +4080,8 @@ static bool handle_tile_edit(Key key) {
                         movertab_reset_entry(found_global, false);
                         snprintf(state->status_message, sizeof(state->status_message), "Block");
                     } else {
-                        found_obj->sprite.type = (SpriteType)(found_obj->sprite.type + 1);
                         snprintf(state->status_message, sizeof(state->status_message),
-                                 "Sprite: %s", sprite_names[found_obj->sprite.type]);
+                                 "Sprite: %s", sprite_display_name(found_obj->sprite.type, found_obj->sprite.damage));
                     }
                 }
                 ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
@@ -4148,6 +4321,36 @@ static void sprite_toggle_dead(uint8_t *v) {
     // revive let a live-tested-glitchy combination survive a round trip through dead (Hugh:
     // "it goes glitchy on other bits set").
     *v = (*v == 0x00) ? 0x80 : 0x00;
+}
+// Ctrl-O's sprite-type cycle. Shark carries two extra named stops via its damage byte
+// (room.h: dmg 3 = Mysterio, dmg 4 = Mary Jane, else a plain shark) - Hugh wanted these
+// directly selectable rather than an incidental damage value on an ordinary shark.
+// Returns true if the cycle ran off the end (Shotgun Lady) - the caller turns the object
+// back into a BLOCK in that case, exactly as it already did for the non-shark types.
+static bool sprite_cycle_forward(struct RoomObject *obj) {
+    if (obj->sprite.type == SHARK && obj->sprite.damage < 3) {
+        obj->sprite.damage = 3;   // Mysterio
+        return false;
+    }
+    if (obj->sprite.type == SHARK && obj->sprite.damage == 3) {
+        obj->sprite.damage = 4;   // Mary Jane
+        return false;
+    }
+    if ((int)obj->sprite.type + 1 >= NUM_SPRITE_TYPES) return true;
+    obj->sprite.type = (SpriteType)(obj->sprite.type + 1);
+    obj->sprite.damage = 1;
+    return false;
+}
+static const char *sprite_display_name(SpriteType type, uint8_t damage) {
+    static const char *names[] = {
+        "Shark", "Mummy", "Blue man", "Wolf",
+        "R2D2", "Dinosaur", "Rat", "Shotgun lady",
+    };
+    if (type == SHARK) {
+        if (damage == 3) return "Mysterio";
+        if (damage == 4) return "Mary Jane";
+    }
+    return names[type];
 }
 static void sprite_normalize(uint8_t *v) {
     // Drop bit 0x01 and anything outside this picker's model, force the 0x80 base: a value raw
@@ -4502,6 +4705,30 @@ static bool handle_edit_movertab_object(Key key) {
                     } else {
                         sprite_toggle_edge(&entry[2]);
                         SAVE_MOVERTAB();
+                    }
+                    break;
+                case 'g':
+                    if (!is_sprite) {
+                        snprintf(state->status_message, sizeof(state->status_message), "Blocks don't have damage");
+                    } else if (obj->sprite.type == SHARK && obj->sprite.damage >= 3) {
+                        // Mysterio/Mary Jane: 'g' is a no-op here, not a way back to a plain
+                        // shark by accident - that identity only changes via Ctrl-O's cycle.
+                        snprintf(state->status_message, sizeof(state->status_message),
+                                 "%s - change via Ctrl-O's sprite cycle instead",
+                                 obj->sprite.damage == 3 ? "Mysterio" : "Mary Jane");
+                    } else {
+                        push_undo((uint8_t)state->current_level, false);
+                        // Shark alone stays within 1-2: 3/4 are the Mysterio/Mary Jane identities,
+                        // selected via Ctrl-O's type cycle, not something 'g' should wander into
+                        // by accident (Hugh: "for shark (and only shark) only cycle 1 and 2").
+                        if (obj->sprite.type == SHARK) {
+                            obj->sprite.damage = (obj->sprite.damage == 1) ? 2 : 1;
+                        } else {
+                            obj->sprite.damage = (uint8_t)((obj->sprite.damage % 4) + 1);
+                        }
+                        ARRAY_FREE(state->rooms.rooms[state->current_level].compressed);
+                        editor_save();
+                        snprintf(state->status_message, sizeof(state->status_message), "Damage: %d", obj->sprite.damage);
                     }
                     break;
                 case 'q':

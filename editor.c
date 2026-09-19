@@ -155,6 +155,7 @@ void setup() {
     state->help = true;
     state->debug.hex = true;
     state->debug.tiles = true;
+    state->debug.spidey = true;
 }
 
 typedef game_state *(*main_fn)(char *library, game_state *call_state);

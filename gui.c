@@ -1372,7 +1372,9 @@ static void draw_cursor(GuiState *g) {
     Vector2 p = tile_pt(g, cx, cy);
     float s = 8.0f * g->scale;
     // Spider-Man standing with his feet on the cursor's row: how tall he is here
-    if (g->spidey_loaded) {
+    // (Hugh: "when on shows spidey at cursor and when off doesnt show spidey, just
+    // the cursor square" - Ctrl-D c, default on).
+    if (g->spidey_loaded && ged_show_spidey()) {
         Vector2 sp = tile_pt(g, cx - 2, cy + 1);
         sp.x += 3 * g->scale;
         sp.y -= SPIDS_FRAME_H * g->scale;
@@ -2693,16 +2695,22 @@ static void draw_overlay(GuiState *g) {
         label(g, TextFormat("S%X", i), o.x + 6, o.y - fs / 2, C_SW, emph_sw);
         // A wee arrow toward the side the switch button faces, and a small "E" in
         // the tile's corner for a room-entry sensor (Hugh: "add a wee arrow to the
-        // sides of switches, and E in the corner if entry").
-        Vector2 tip = o;
-        switch (sw->chunks.data[0].side) {
-            case TOP:    tip.y -= s * 1.0f; break;
-            case RIGHT:  tip.x += s * 1.0f; break;
-            case BOTTOM: tip.y += s * 1.0f; break;
-            case LEFT:   tip.x -= s * 1.0f; break;
-            default: break;
+        // sides of switches, and E in the corner if entry"). Skipped when "side" is
+        // meaningless: out of bounds (never actually touched - the arrow could otherwise
+        // reach back into the visible picture from just past its edge, looking like a real
+        // on-screen facing), or sitting on a blank tile (just needs walking over, from any
+        // direction) - see switch_side_hidden.
+        if (!switch_side_hidden(r, sw->chunks.data)) {
+            Vector2 tip = o;
+            switch (sw->chunks.data[0].side) {
+                case TOP:    tip.y -= s * 1.0f; break;
+                case RIGHT:  tip.x += s * 1.0f; break;
+                case BOTTOM: tip.y += s * 1.0f; break;
+                case LEFT:   tip.x -= s * 1.0f; break;
+                default: break;
+            }
+            draw_arrow(o, tip, emph_sw || hot_sw ? 4 : 2, 4, emph_sw ? YELLOW : C_SW);
         }
-        draw_arrow(o, tip, emph_sw || hot_sw ? 4 : 2, 4, emph_sw ? YELLOW : C_SW);
         if (sw->chunks.data[0].room_entry) {
             Vector2 corner = tile_pt(g, sw->chunks.data[0].x, sw->chunks.data[0].y);
             gtext(&g->font, g->font_loaded, "E", (int)corner.x + 1, (int)corner.y, fs, emph_sw ? YELLOW : C_SW);

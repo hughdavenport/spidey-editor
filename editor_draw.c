@@ -17,6 +17,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
+        {"O", "preview switch under cursor active/idle on the map"},
         {"u/U", "undo/redo"},
         {"mX", "record to slot X; m=stop"},
         {",X", "replay slot X; ,,=repeat; ,.=saved"},
@@ -26,7 +27,7 @@ help_keys help[][100] = {
         {"Escape", "cancel"},
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
-        {"Ctrl-d[adnopsu]", "toggle display"},
+        {"Ctrl-d[acdnopst]", "toggle display"},
         {0},
     },
 
@@ -48,7 +49,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"Ctrl-r[gtdbcef|-]", "edit room detail (hjkl/arrows = room links)"},
         {"Ctrl-s", "create/edit switch"},
-        {"Ctrl-o", "create/cycle object/sprites"},
+        {"Ctrl-o", "create/cycle object/sprites (over a switch instead: preview it active/idle on the map)"},
         {"Enter", "edit object's MOVERTAB.DAT entry (over an object)"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
@@ -64,7 +65,7 @@ help_keys help[][100] = {
         {"Escape", "cancel"},
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
-        {"Ctrl-d[adnopsu]", "toggle display"},
+        {"Ctrl-d[acdnopst]", "toggle display"},
         {0},
     },
 
@@ -85,6 +86,7 @@ help_keys help[][100] = {
         {"w", "sprite (patrol/chasing): toggle stop at wall / turn around; block (moving horizontally): toggle stop at wall / bounce"},
         {"u", "block: cycle vertical stopped/down/up + speed"},
         {"e", "sprite (patrol/chasing): toggle fall at edge / turn around; block (moving vertically): toggle stop at wall / bounce"},
+        {"g", "sprite: cycle damage 1-4"},
         {"hjkl, arrows", "nudge the x/y tile offset (bytes 0/1)"},
         {"r", "toggle raw hex entry of byte 2 (no glitch protection) / back to attributes"},
         {"0-9a-fA-F", "raw mode: set byte 2 (2 hex digits)"},
@@ -143,6 +145,7 @@ help_keys help[][100] = {
 
     [TOGGLE_DISPLAY]={
         {"a", "all debug info"},
+        {"c", "Spider-Man at the cursor (GUI, default on)"},
         {"d", "room data"},
         {"n", "neighbours"},
         {"o", "objects"},
@@ -203,6 +206,7 @@ help_keys help[][100] = {
     [EDIT_SWITCHDETAILS]={
         {"e", "flip on-entry bit"},
         {"o", "flip one-time-only bit"},
+        {"O", "preview this switch active/idle on the map"},
         {"s", "rotate switch side"},
         {"Left/h", "side: left"},
         {"Down/j", "side: bottom"},
@@ -415,6 +419,17 @@ static const char *room_name_trimmed(uint16_t room_idx, char *buf, size_t buf_si
         if (buf[j] == '\0' || isspace((unsigned char)buf[j])) buf[j] = '\0';
         else break;
     return buf;
+}
+
+// "side" has no meaning for a switch that isn't actually approached from a wall - an
+// out-of-bounds one (SB-SE style off-map targets) is never touched at all, and one sitting on
+// a blank (invisible) tile just needs walking over, from any direction, to fire (Hugh: "when
+// tiles are blank 0x00... side is not important, any direction works and the tile just has to
+// be gone over" - and separately, confirmed by testing, entry=true there controls whether the
+// switch works at all rather than proximity-vs-room-entry). Both cases hide/disable "side".
+bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble) {
+    if (preamble->x >= WIDTH_TILES || preamble->y >= HEIGHT_TILES) return true;
+    return room->tiles[TILE_IDX(preamble->x, preamble->y)] == BLANK_TILE;
 }
 
 static bool chunk_at_cursor(struct SwitchChunk *chunk, int cx, int cy) {
@@ -657,6 +672,8 @@ void redraw() {
 
     size_t level = state->current_level;
     struct DecompressedRoom room = state->rooms.rooms[level].data;
+    int hot_switch = -1, hot_chunk = -1; bool hot_on = false;
+    editor_hot_block_preview(&hot_switch, &hot_chunk, &hot_on);
     char room_name[25] = {0};
     assert(C_ARRAY_LEN(room_name) >= C_ARRAY_LEN(room.name));
     strncpy(room_name, room.name, C_ARRAY_LEN(room.name));
@@ -1120,8 +1137,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                 if (y == chunk->y && x >= chunk->x && x < chunk->x + chunk->size) {
                                     scr_printf("\033[3%d;40m", (s % 3) + 4);
                                     colored = true;
-                                    if ((size_t)s + 1 == state->current_switch && c == state->current_chunk) {
-                                        tile = state->switch_on ? chunk->on : chunk->off;
+                                    if (s == hot_switch && (hot_chunk == -1 || (int)c == hot_chunk)) {
+                                        tile = hot_on ? chunk->on : chunk->off;
                                     } else {
                                         tile = chunk->off;
                                     }
@@ -1129,8 +1146,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             } else if (x == chunk->x && y >= chunk->y && y < chunk->y + chunk->size) {
                                 scr_printf("\033[3%d;40m", (s % 3) + 4);
                                 colored = true;
-                                if ((size_t)s + 1 == state->current_switch && c == state->current_chunk) {
-                                    tile = state->switch_on ? chunk->on : chunk->off;
+                                if (s == hot_switch && (hot_chunk == -1 || (int)c == hot_chunk)) {
+                                    tile = hot_on ? chunk->on : chunk->off;
                                 } else {
                                     tile = chunk->off;
                                 }
@@ -1265,8 +1282,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 struct SwitchChunk *chunk = sw->chunks.data + c;
                 if (chunk->type != TOGGLE_BLOCK) continue;
                 if (chunk->y >= HEIGHT_TILES) continue;   // a "memory" chunk, off-map by design
-                uint8_t ctile = (s + 1 == state->current_switch && c == state->current_chunk)
-                    ? (state->switch_on ? chunk->on : chunk->off)
+                uint8_t ctile = ((int)s == hot_switch && (hot_chunk == -1 || (int)c == hot_chunk))
+                    ? (hot_on ? chunk->on : chunk->off)
                     : chunk->off;
                 scr_printf("\033[3%d;40m", (int)(s % 3) + 4);
                 if (chunk->dir == HORIZONTAL) {
@@ -1643,8 +1660,20 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             PRINTF_DATA(obj->x);
             scr_printf(",");
             PRINTF_DATA(obj->y);
-            scr_printf(" (dmg)=");
-            PRINTF_DATA(obj->sprite.damage);
+            // "(dmg)=" isn't shown at all for Mysterio/Mary Jane - it's not a stat you tweak
+            // for them, that identity only changes via Ctrl-O's sprite cycle (Hugh: "don't show
+            // dmg= for myst or mary, do for others"). Otherwise, highlight the 'g' in "(dmg)="
+            // itself (a mnemonic, not the value) while its key is live.
+            bool is_myst_or_mj = obj->sprite.type == SHARK && obj->sprite.damage >= 3;
+            if (!is_myst_or_mj) {
+                bool dmg_hot = state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i;
+                scr_printf(" (dm");
+                if (dmg_hot) scr_printf("\033[4;1m");
+                scr_printf("g");
+                if (dmg_hot) scr_printf("\033[m");
+                scr_printf(")=");
+                PRINTF_DATA(obj->sprite.damage);
+            }
             draw_movertab_offset((unsigned)room.UNKNOWN_c + (unsigned)i, true,
                                   state->current_state == EDIT_MOVERTAB_OBJECT && state->current_object == i);
             draw_movertab_entry((unsigned)room.UNKNOWN_c + (unsigned)i,
@@ -1734,24 +1763,31 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 #define BOOL_S(b) ((b) ? "true" : "false")
             assert(switcz->chunks.length >= 1);
             struct SwitchChunk *preamble = switcz->chunks.data;
+            bool sw_offscreen = switch_side_hidden(&room, preamble);
             if (state->current_state == EDIT_SWITCHDETAILS) {
                 scr_printf("switch ");
                 if (switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
                 if (switcz == switch_underneath) scr_printf("\033[m");
-                scr_printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
+                scr_printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s",
                         preamble->x, preamble->y,
-                        BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
-                        SWITCH_SIDE(preamble->side));
+                        BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use));
+                if (!sw_offscreen) {
+                    scr_printf(" (\033[1;4ms\033[mide)=%s", SWITCH_SIDE(preamble->side));
+                }
+                scr_printf("\n");
             } else {
                 scr_printf("switch ");
                 if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
                 if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[m");
-                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s\n",
+                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s",
                         preamble->x, preamble->y,
-                        BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
-                        SWITCH_SIDE(preamble->side));
+                        BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use));
+                if (!sw_offscreen) {
+                    scr_printf(" (side)=%s", SWITCH_SIDE(preamble->side));
+                }
+                scr_printf("\n");
             }
             if (switcz->chunks.length > 1) {
                 bottom +=2;
@@ -2061,10 +2097,11 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             GOTO(0, bottom); bottom++;
             scr_printf("switch ");
             PRINTF_DATA((uint16_t)(chunk_switch_underneath - room.switches));
-            scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s [chunk at cursor]\n",
+            scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s",
                     pr->x, pr->y,
-                    BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
-                    SWITCH_SIDE(pr->side));
+                    BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use));
+            if (!switch_side_hidden(&room, pr)) scr_printf(" (side)=%s", SWITCH_SIDE(pr->side));
+            scr_printf(" [chunk at cursor]\n");
             draw_switch_chunks_brief(chunk_switch_underneath, x, y, &bottom);
         }
 
@@ -2092,6 +2129,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 if (panel_oob_switch_n < 16) { panel_oob_switch_row[panel_oob_switch_n] = bottom; panel_oob_switch_id[panel_oob_switch_n++] = (int)s; }
                 GOTO(0, bottom); bottom ++;
 #define BOOL_S(b) ((b) ? "true" : "false")
+                // Everything in this panel is out of bounds by definition, so "side" never
+                // applies here - it's not shown for any of them (see switch_side_hidden).
                 if (state->current_state == EDIT_SWITCHDETAILS && state->current_switch == s) {
                     scr_printf("\033[1;4mswitch id ");
                     PRINTF_DATA((uint16_t)s);
@@ -2099,9 +2138,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     PRINTF_DATA(sw->chunks.data[0].x);
                     scr_printf(",");
                     PRINTF_DATA(sw->chunks.data[0].y);
-                    scr_printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s (\033[1;4ms\033[mide)=%s\n",
-                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
-                            SWITCH_SIDE(sw->chunks.data[0].side));
+                    scr_printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s\n",
+                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use));
 
                 } else {
                     scr_printf("switch id ");
@@ -2116,9 +2154,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     PRINTF_DATA(sw->chunks.data[0].x);
                     scr_printf(",");
                     PRINTF_DATA(sw->chunks.data[0].y);
-                    scr_printf(" (entry)=%s (once)=%s (side)=%s\n",
-                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use),
-                            SWITCH_SIDE(sw->chunks.data[0].side));
+                    scr_printf(" (entry)=%s (once)=%s\n",
+                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use));
                 }
 
                 bottom ++;
@@ -2148,6 +2185,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                             scr_printf(") ");
                         }
                         struct SwitchChunk *chunk = sw->chunks.data + i;
+                        scr_printf("type ");
                         switch (chunk->type) {
                             case PREAMBLE: UNREACHABLE();
                             case TOGGLE_BLOCK: {
@@ -2208,7 +2246,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                     }
                                     scr_printf(" (on/off)=%02x/%02x (size)=%d", chunk->on, chunk->off, chunk->size);
                                 } else {
-                                    scr_printf("block - (x,y)=");
+                                    scr_printf("block: (x,y)=");
                                     PRINTF_DATA(chunk->x);
                                     scr_printf(",");
                                     PRINTF_DATA(chunk->y);
@@ -2221,16 +2259,17 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
                             case TOGGLE_BIT:
                             {
+                                char target_name[25];
+                                room_name_trimmed(chunk->room_idx, target_name, sizeof(target_name));
                                 static const char *TOGGLE_BIT_DESC[4] = { "noop", "turn on", "turn off", "toggle" };
-                                scr_printf("bit - (idx)=%d (mask)=", chunk->index);
-                                PRINTF_DATA(chunk->bitmask);
+                                scr_printf("toggle: (room) %s (switch) %u", target_name, chunk->switch_idx);
                                 scr_printf("\n"); bottom++;
                                 scr_printf("        (on)=%s (off)=%s", TOGGLE_BIT_DESC[chunk->on], TOGGLE_BIT_DESC[chunk->off]);
                             }; break;
 
                             case TOGGLE_OBJECT:
                             {
-                                scr_printf("(idx)=%d (on/off)=%s", chunk->index, (chunk->test & 0x20) ? "on" : "off");
+                                scr_printf("object: (idx)=%d (on/off)=%s", chunk->index, (chunk->test & 0x20) ? "on" : "off");
                                 scr_printf("\n"); bottom++;
                                 scr_printf("        ");
                                 draw_movertab_fields(chunk->value, chunk_target_is_sprite(chunk), false, 0, false);
@@ -2292,4 +2331,34 @@ show_help_if_needed:
     }
 
     screen_flush();
+}
+
+bool editor_hot_block_preview(int *switch_idx, int *chunk_idx, bool *on) {
+    if (state->current_switch != 0 &&
+            (state->current_state == EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS ||
+             state->current_state == EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS)) {
+        *switch_idx = (int)state->current_switch - 1;
+        *chunk_idx = (int)state->current_chunk;
+        *on = state->switch_on;
+        return true;
+    }
+    if (state->current_switch != 0 && state->current_state == EDIT_SWITCHDETAILS) {
+        *switch_idx = (int)state->current_switch - 1;
+        *chunk_idx = -1;   // every TOGGLE_BLOCK chunk of this switch, not just one
+        *on = state->switch_on;
+        return true;
+    }
+    // 'O' outside of switch editing (see toggle_hover_switch_preview): stays live even after
+    // the cursor moves away, but not past the room's own switch count - e.g. after switching
+    // to a room with fewer switches, a stale high index must not be treated as valid.
+    if (state->hot_preview_switch != 0) {
+        struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+        if (state->hot_preview_switch <= (size_t)room->num_switches) {
+            *switch_idx = (int)state->hot_preview_switch - 1;
+            *chunk_idx = -1;
+            *on = state->switch_on;
+            return true;
+        }
+    }
+    return false;
 }

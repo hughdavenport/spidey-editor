@@ -119,6 +119,7 @@ struct debug {
     bool objects;
     bool switches;
     bool tiles;     /* GUI: tint every tile by its class (pass-through / solid / magnetic / slippery) */
+    bool spidey;    /* GUI: draw Spider-Man at the cursor as a size reference (default on); off shows just the cursor square */
     bool all;
 };
 
@@ -180,6 +181,7 @@ typedef struct {
     uint8_t room_idx;
     bool grouped;  /* true = pop one more entry from same stack (cross-room moves) */
     struct DecompressedRoom snapshot;
+    uint8_t movertab[256 * 3];  /* MOVERTAB.DAT is a separate file, not part of the room - snapshotted here too so undo covers it (Hugh: "undo doesn't undo movertab entries") */
 } UndoEntry;
 
 typedef struct {
@@ -216,6 +218,7 @@ typedef struct {
     size_t current_switch;
     size_t current_chunk;
     bool switch_on;
+    size_t hot_preview_switch;   /* NORMAL/TILE_EDIT: 1-based switch index 'O' is previewing while just standing on it (0 = none), independent of current_switch (Hugh: "allowed when just viewing a switch") */
     size_t current_object;   /* EDIT_MOVERTAB_OBJECT: which of the current room's objects */
     bool movertab_raw;       /* EDIT_MOVERTAB_OBJECT: raw hex entry (byte 2 only) instead of the attribute picker */
     char movertab_block_focus;   /* EDIT_MOVERTAB_OBJECT, block only: 0 (hjkl/arrows adjust the x/y offset), or 's'/'d'/'w' (hjkl/arrows and |/- adjust speed/direction/walls instead) */
@@ -305,6 +308,17 @@ bool movertab_save(void);            // write state->movertab to ./MOVERTAB.DAT
 int movertab_offset_x(const uint8_t *entry);                     // decode a MOVERTAB entry's byte 1 (x offset, whole tiles)
 int movertab_offset_y(const uint8_t *entry, bool is_sprite);     // decode a MOVERTAB entry's byte 0 (y offset, whole tiles) - sprite/block encodings differ
 void movertab_clamp_offset(uint8_t *entry, bool is_sprite, int x, int y);   // pull the x/y offset back in if it would draw outside the room at this tile position
+// Whether a switch or one of its TOGGLE_BLOCK/memory chunks is open for editing, and if so
+// which switch/chunk and whether the "switch on" preview ('o'/'O') is active - the map (and,
+// via ged_hot_block_preview, the GUI picture) then shows the "on" tile there instead of the
+// idle "off" one. *chunk_idx is -1 when the whole switch is open (EDIT_SWITCHDETAILS, not one
+// specific chunk) - every TOGGLE_BLOCK chunk it owns previews together, matching the real
+// game's single state bit per switch.
+bool editor_hot_block_preview(int *switch_idx, int *chunk_idx, bool *on);
+// Whether a switch's "side" is meaningless - out of bounds, or sitting on a blank (invisible)
+// tile that just needs walking over from any direction (Hugh, 2026-09-19) - and so should be
+// hidden from display and disabled for editing.
+bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble);
 bool chunk_target_is_sprite(struct SwitchChunk *chunk);   // whether chunk->index currently names a sprite in this room (false, incl. out of bounds, means treat as a block)
 bool editor_save(void);              // writeRooms(); a refused write (room/file size limits) undoes the change and names which in the status line
 void clipboard_clear(void);          // free whatever the clipboard holds; type becomes CLIP_NONE

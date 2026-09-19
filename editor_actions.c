@@ -68,6 +68,11 @@ void room_snapshot_free(struct DecompressedRoom *snap) {
 }
 
 void push_undo(uint8_t room_idx, bool grouped) {
+    /* Load first if this is the very first movertab-touching action this session - otherwise
+     * the snapshot below would capture the "not yet loaded" all-zero default instead of the
+     * real on-disk table, and an undo back to it would wrongly zero MOVERTAB.DAT out. */
+    if (!state->movertab_loaded) movertab_load();
+
     /* Clear redo stack */
     for (size_t i = 0; i < state->redo_stack.length; i++)
         room_snapshot_free(&state->redo_stack.data[i].snapshot);
@@ -75,6 +80,7 @@ void push_undo(uint8_t room_idx, bool grouped) {
 
     UndoEntry entry = { .room_idx = room_idx, .grouped = grouped };
     room_snapshot_copy(&entry.snapshot, &state->rooms.rooms[room_idx].data);
+    memcpy(entry.movertab, state->movertab, sizeof(entry.movertab));
     ARRAY_ADD(state->undo_stack, entry);
 }
 
@@ -96,6 +102,7 @@ uint8_t do_undo(void) {
         /* Save current room state to redo stack */
         UndoEntry redo = { .room_idx = e->room_idx, .grouped = false };
         room_snapshot_copy(&redo.snapshot, &state->rooms.rooms[e->room_idx].data);
+        memcpy(redo.movertab, state->movertab, sizeof(redo.movertab));
         ARRAY_ADD(state->redo_stack, redo);
 
         /* Restore snapshot (transfers ownership of pointers) */
@@ -104,6 +111,7 @@ uint8_t do_undo(void) {
         ARRAY_FREE(state->rooms.rooms[e->room_idx].compressed);
         e->snapshot.objects = NULL;
         e->snapshot.switches = NULL;
+        memcpy(state->movertab, e->movertab, sizeof(state->movertab));
 
         state->undo_stack.length--;
 
@@ -118,6 +126,7 @@ uint8_t do_undo(void) {
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
     redraw();
     editor_save();
+    if (state->movertab_loaded) movertab_save();
     return first_room;
 }
 
@@ -135,6 +144,7 @@ uint8_t do_redo(void) {
 
         UndoEntry undo = { .room_idx = e->room_idx, .grouped = false };
         room_snapshot_copy(&undo.snapshot, &state->rooms.rooms[e->room_idx].data);
+        memcpy(undo.movertab, state->movertab, sizeof(undo.movertab));
         ARRAY_ADD(state->undo_stack, undo);
 
         room_snapshot_free(&state->rooms.rooms[e->room_idx].data);
@@ -142,6 +152,7 @@ uint8_t do_redo(void) {
         ARRAY_FREE(state->rooms.rooms[e->room_idx].compressed);
         e->snapshot.objects = NULL;
         e->snapshot.switches = NULL;
+        memcpy(state->movertab, e->movertab, sizeof(state->movertab));
 
         state->redo_stack.length--;
 
@@ -155,6 +166,7 @@ uint8_t do_redo(void) {
     snprintf(state->status_message, sizeof(state->status_message), "Writing room");
     redraw();
     editor_save();
+    if (state->movertab_loaded) movertab_save();
     return first_room;
 }
 

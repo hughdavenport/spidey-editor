@@ -77,6 +77,7 @@ static game_state *state_new(RoomFile *host) {
     s->help = false;                        // Ctrl-? shows it; it would hide the panels' space
     s->debug.hex = true;
     s->debug.tiles = true;
+    s->debug.spidey = true;
     movertab_load();
     return s;
 }
@@ -195,6 +196,7 @@ void ged_cursor(int *x, int *y) {
 bool ged_show_objects(void) { return state->debug.objects; }
 bool ged_show_switches(void) { return state->debug.switches; }
 bool ged_show_tiles(void)    { return state->debug.tiles; }
+bool ged_show_spidey(void)   { return state->debug.spidey; }
 RoomFile *ged_rooms(void) { return &state->rooms; }
 void ged_set_cursor(int x, int y) {
     if (x < 0 || x >= WIDTH_TILES || y < 0 || y >= HEIGHT_TILES) return;
@@ -342,21 +344,13 @@ void ged_select_chunk(int sw, int chunk) {
 
 int ged_current_chunk(void) { return (int)state->current_chunk; }
 
-// Whether a TOGGLE_BLOCK/memory chunk is open for editing, and if so which
-// one and whether the "switch on" preview ('o') is active - the picture
-// then shows that chunk's on tile there instead of the idle off tile
-// (Hugh: "when editing a block chunk, change the displayed tiles for the
-// on/off value depending on which being edited").
+// Whether a switch or one of its TOGGLE_BLOCK/memory chunks is open for editing, and if so
+// which and whether the "switch on" preview ('o'/'O') is active - the picture then shows the
+// on tile(s) there instead of the idle off tile(s) (Hugh: "when editing a block chunk, change
+// the displayed tiles for the on/off value depending on which being edited"; later extended to
+// the whole switch, not just one open chunk - see editor_hot_block_preview).
 bool ged_hot_block_preview(int *switch_idx, int *chunk_idx, bool *on) {
-    if ((state->current_state != EDIT_SWITCHDETAILS_CHUNK_BLOCK_DETAILS &&
-         state->current_state != EDIT_SWITCHDETAILS_CHUNK_MEMORY_DETAILS) ||
-        state->current_switch == 0) {
-        return false;
-    }
-    *switch_idx = (int)state->current_switch - 1;
-    *chunk_idx = (int)state->current_chunk;
-    *on = state->switch_on;
-    return true;
+    return editor_hot_block_preview(switch_idx, chunk_idx, on);
 }
 
 void ged_goto_object(int idx) {

@@ -499,7 +499,10 @@ uint8_t effective_tile(struct DecompressedRoom *room, int x, int y, const uint8_
             bool hit = (ch->dir == HORIZONTAL)
                 ? (y == ch->y && x >= ch->x && x < ch->x + ch->size)
                 : (x == ch->x && y >= ch->y && y < ch->y + ch->size);
-            if (hit) return (s == hot_switch && (int)c == hot_chunk && hot_on) ? ch->on : ch->off;
+            // hot_chunk == -1 previews every TOGGLE_BLOCK chunk of hot_switch as one (the whole
+            // switch is either idle or active, same as the real game's single state bit) -
+            // used when the switch itself is open for editing, not one specific chunk.
+            if (hit) return (s == hot_switch && (hot_chunk == -1 || (int)c == hot_chunk) && hot_on) ? ch->on : ch->off;
         }
     }
     return tile;
