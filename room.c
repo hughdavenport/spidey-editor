@@ -496,9 +496,12 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         if (color) printf("\033[4%ld;30;1m", (i % 3) + 4);
         assert(room->data.switches[i].chunks.length > 0 && room->data.switches[i].chunks.data[0].type == PREAMBLE);
         struct SwitchChunk *preamble = room->data.switches[i].chunks.data;
+        // entry: the effective value, not the raw stored bit - a switch with no backing
+        // tile has it forced true on every write (see switch_entry_effective), so showing
+        // the raw bit here would make this dump go stale the moment the room is saved.
         printf("switch %ld: (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s",
                 i, preamble->x, preamble->y,
-                BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use),
+                BOOL_S(switch_entry_effective(&room->data, preamble)), BOOL_S(preamble->one_time_use),
                 SWITCH_SIDE(preamble->side));
         if (color) printf("\033[m");
         printf("\n");
@@ -944,6 +947,21 @@ bool readFile(RoomFile *file, FILE *fp) {
     return true;
 }
 
+// "side" has no meaning for a switch that isn't actually approached from a wall - an
+// out-of-bounds one (SB-SE style off-map targets) is never touched at all, and one sitting on
+// a blank (invisible) tile just needs walking over, from any direction, to fire (Hugh: "when
+// tiles are blank 0x00... side is not important, any direction works and the tile just has to
+// be gone over" - and separately, confirmed by testing, entry=true there controls whether the
+// switch works at all rather than proximity-vs-room-entry). Both cases hide/disable "side".
+bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble) {
+    if (preamble->x >= WIDTH_TILES || preamble->y >= HEIGHT_TILES) return true;
+    return room->tiles[TILE_IDX(preamble->x, preamble->y)] == BLANK_TILE;
+}
+
+bool switch_entry_effective(struct DecompressedRoom *room, struct SwitchChunk *preamble) {
+    return preamble->room_entry || switch_side_hidden(room, preamble);
+}
+
 #define MAX_ROOM_FILE_SIZE 0x3100
 // there is also a MAX_ROOM_SIZE, unknown yet, add a few switches to midnight and it will corrupt
 
@@ -1038,7 +1056,7 @@ bool writeRoom(Room *room, FILE *fp) {
                 case PREAMBLE:
                     assert(c == 0);
                     decompressed[d_len++] = (chunk->y & 0x1f) | (chunk->one_time_use ? 0x20 : 0x00);
-                    decompressed[d_len++] = (chunk->x & 0x1f) | (chunk->room_entry ? 0x00 : 0x80) | (chunk->side << 5);
+                    decompressed[d_len++] = (chunk->x & 0x1f) | (switch_entry_effective(&room->data, chunk) ? 0x00 : 0x80) | (chunk->side << 5);
                     break;
 
                 case TOGGLE_BLOCK:

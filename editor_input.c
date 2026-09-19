@@ -1479,6 +1479,9 @@ static bool handle_edit_switchdetails(Key key) {
 
                 case 'e':
                 {
+                    // Forced true (and hidden) for a switch with no backing tile - see
+                    // switch_entry_effective (room.c).
+                    if (side_locked) break;
                     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                     push_undo((uint8_t)state->current_level, false);
                     room->switches[state->current_switch - 1].chunks.data[0].room_entry = !room->switches[state->current_switch - 1].chunks.data[0].room_entry;

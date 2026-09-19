@@ -81,9 +81,8 @@ bool  ged_show_objects(void);
 bool  ged_show_switches(void);
 bool  ged_show_tiles(void);       /* Ctrl-D t: tint tiles by class */
 bool  ged_show_spidey(void);      /* Ctrl-D c: draw Spider-Man at the cursor (default on) */
-// Pure room-data logic (editor_draw.c), not state-dependent - no ged_ wrapper needed. Whether a
-// switch's "side" is meaningless: out of bounds, or sitting on a blank (invisible) tile.
-bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble);
+// switch_side_hidden / switch_entry_effective: declared in room.h (pure room-data logic, no
+// ged_ wrapper needed - gui_bridge.h already pulls in room.h above).
 RoomFile *ged_rooms(void);
 bool  ged_help_shown(void);
 int   ged_current_switch(void);    // the editor's selected switch (Ctrl-S / s#), or -1

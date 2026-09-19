@@ -315,10 +315,7 @@ void movertab_clamp_offset(uint8_t *entry, bool is_sprite, int x, int y);   // p
 // specific chunk) - every TOGGLE_BLOCK chunk it owns previews together, matching the real
 // game's single state bit per switch.
 bool editor_hot_block_preview(int *switch_idx, int *chunk_idx, bool *on);
-// Whether a switch's "side" is meaningless - out of bounds, or sitting on a blank (invisible)
-// tile that just needs walking over from any direction (Hugh, 2026-09-19) - and so should be
-// hidden from display and disabled for editing.
-bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble);
+// switch_side_hidden / switch_entry_effective: declared in room.h (pure room-data logic).
 bool chunk_target_is_sprite(struct SwitchChunk *chunk);   // whether chunk->index currently names a sprite in this room (false, incl. out of bounds, means treat as a block)
 bool editor_save(void);              // writeRooms(); a refused write (room/file size limits) undoes the change and names which in the status line
 void clipboard_clear(void);          // free whatever the clipboard holds; type becomes CLIP_NONE

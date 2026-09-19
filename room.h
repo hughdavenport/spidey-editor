@@ -264,4 +264,13 @@ void recomputeBases(RoomFile *file);
 bool swapRooms(RoomFile *file, int a, int b);
 void dumpRoom(Room *room, RoomFile *file, bool color);
 
+// Whether a switch's "side" is meaningless - out of bounds, or sitting on a blank (invisible)
+// tile that just needs walking over from any direction (Hugh, 2026-09-19) - and so should be
+// hidden from display and disabled for editing.
+bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble);
+// A switch with no backing tile (switch_side_hidden) only works at all when its "entry" bit is
+// set - the game reuses that bit to mean "the switch is live" rather than "fires on room entry"
+// there (confirmed by testing) - so it's forced true on write regardless of the stored value.
+bool switch_entry_effective(struct DecompressedRoom *room, struct SwitchChunk *preamble);
+
 #endif // ROOM_H

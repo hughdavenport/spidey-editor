@@ -52,6 +52,9 @@ static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
 // solid are swapped from their natural order (Hugh: "swap the pass and solid
 // colour's") - blue is pass-through, grey is solid.
 static const Color ATTR_COLOUR[4] = { {0, 120, 255, 255}, {200, 200, 200, 255}, {200, 60, 255, 255}, {0, 230, 230, 255} };
+// Alpha for Ctrl-D t's per-class tint, shared by the room picture and the block
+// object tile editor (see draw_overlay and draw_block_editor).
+static const uint8_t TILE_TINT_ALPHA[4] = {60, 110, 120, 120};
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
@@ -196,7 +199,7 @@ static void label(GuiState *g, const char *s, float x, float y, Color col, bool 
 static void draw_source_grid(GuiState *g, bool block_up);
 static void link_run(int x0, int y0, int x1, int y1, int *rx, int *ry, int *rw, int *rh);
 static Rectangle pixed_button(GuiState *g, int i);
-static Rectangle attr_button(GuiState *g, int i);
+static Rectangle attr_button(GuiState *g, int i, int row_offset);
 static bool grid_row_valid(GuiState *g, int row);
 static Rectangle grid_button(GuiState *g, int row, int col);
 static Rectangle pick_button(GuiState *g);
@@ -897,7 +900,7 @@ static bool feed_mouse(GuiState *g) {
     bool block_panel_up = ged_block_at_cursor(&block_bi, &block_bx, &block_by, &block_bw, &block_bh) && block_bi != g->block_hidden;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && tiles_view(g) && !block_panel_up)
         for (int i = 0; i < 4; i++)
-            if (CheckCollisionPointRec(m, attr_button(g, i))) {
+            if (CheckCollisionPointRec(m, attr_button(g, i, 0))) {
                 g->sel_attr = ATTRS[i].bits;
                 g->focus = FOCUS_ATTRS; g->attr_sel = i;   // the keyboard cursor follows the click
                 return true;
@@ -935,6 +938,12 @@ static bool feed_mouse(GuiState *g) {
                         if (i == 5) { block_export_png(g, bi, bw, bh); return true; }
                         ged_new_input_batch();
                         ged_block_resize(dxy[i][0], dxy[i][1], dxy[i][2]);
+                        return true;
+                    }
+                for (int i = 0; i < 4; i++)   // pass/solid/magnet/slip, below the block buttons
+                    if (CheckCollisionPointRec(m, attr_button(g, i, 3))) {
+                        g->sel_attr = ATTRS[i].bits;
+                        g->focus = FOCUS_ATTRS; g->attr_sel = i;
                         return true;
                     }
                 if (CheckCollisionPointRec(m, grid_button(g, 4, 0))) { g->block_hidden = bi; return true; }   // gfx: the pixel editor; "block" there brings this back
@@ -1987,6 +1996,44 @@ static Rectangle block_button(GuiState *g, int i, int h, int z) {
     return (Rectangle){ palette_x(g) + (i % 2) * (bw + PAD), swatch_y(g) + (i / 2) * (ch(g) + 8), bw, ch(g) + 4 };
 }
 
+// Attribute buttons (pass/solid/magnet/slip): shared by the ordinary tiles view
+// (row_offset 0) and the block panel (row_offset 3, below its own 3 rows of
+// buttons - see attr_button/block_button) so a block's tiles can still be
+// painted with a chosen attribute.
+static void draw_attr_buttons(GuiState *g, int row_offset) {
+    int fs = g->font_px;
+    for (int i = 0; i < 4; i++) {
+        Rectangle rb = attr_button(g, i, row_offset);
+        bool on = ATTRS[i].bits == g->sel_attr;
+        bool kbd = g->focus == FOCUS_ATTRS && i == g->attr_sel % 4;
+        DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
+        int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
+        gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
+    }
+}
+
+// The colour-code legend matching Ctrl-D t's room tint (blue pass, grey solid, violet magnet,
+// cyan slip), so the tint can be read at a glance: "type: X" plus one swatch+label per class.
+// Returns the legend's height in pixels, so a caller stacking more text below it knows how far
+// to push down.
+static int draw_attr_legend(GuiState *g, int lx, int ly) {
+    int fs = g->font_px, y0 = ly;
+    gtext(&g->font, g->font_loaded, TextFormat("type: %s", ATTRS[g->sel_attr >> 6].name), lx, ly, fs, RAYWHITE);
+    ly += ch(g) + 4;
+    for (int i = 0; i < 4; i++) {
+        int cy = ly + i * (fs + 2);
+        // Solid gets the pixel editor's transparent checker, not a flat colour, since it's
+        // the one class Ctrl-D t doesn't actually tint (Hugh: "make the color on the side
+        // show the transparent background you used for sprite editing").
+        if (ATTRS[i].bits == ATTR_SOLID) draw_transparent_swatch(lx, cy, fs);
+        else DrawRectangle(lx, cy, fs, fs, ATTR_COLOUR[i]);
+        DrawRectangleLines(lx, cy, fs, fs, GRAY);
+        gtext(&g->font, g->font_loaded, ATTRS[i].name, lx + fs + 4, cy, fs, RAYWHITE);
+    }
+    return ly + 4 * (fs + 2) - y0;
+}
+
 // The block object under the cursor: its tile grid, click paints the picked
 // tile, right click picks; buttons grow / shrink it.
 static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h) {
@@ -1994,9 +2041,16 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
     Rectangle src_cell = {0, 0, 8, 8};
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
-            int t = ged_block_tile(idx, x, y) & 0x3f;
+            int raw = ged_block_tile(idx, x, y);
+            int t = raw & 0x3f;
             src_cell.x = (t % 8) * 8; src_cell.y = (t / 8) * 8;
             DrawTexturePro(g->pal_tex, src_cell, (Rectangle){x0 + x * z, y0 + y * z, z, z}, (Vector2){0, 0}, 0, WHITE);
+            // Ctrl-D t: tint by class, same as the room picture (draw_overlay) - solid and
+            // empty get no overlay so it only calls out pass/magnet/slip tiles.
+            if (ged_show_tiles() && raw != 0 && (raw >> 6) != 1) {
+                Color c = ATTR_COLOUR[raw >> 6]; c.a = TILE_TINT_ALPHA[raw >> 6];
+                DrawRectangle(x0 + x * z, y0 + y * z, z, z, c);
+            }
         }
     for (int i = 0; i <= w; i++) DrawLine(x0 + i * z, y0, x0 + i * z, y0 + h * z, (Color){90, 90, 90, 255});
     for (int i = 0; i <= h; i++) DrawLine(x0, y0 + i * z, x0 + w * z, y0 + i * z, (Color){90, 90, 90, 255});
@@ -2014,11 +2068,19 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
         gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
     }
+    // Attribute buttons (pass/solid/magnet/slip), below the block panel's own buttons - a
+    // block's tiles are painted with the current attribute too (Hugh: "can the pass/solid/
+    // buttons show up below w-/+h+/-import/export").
+    draw_attr_buttons(g, 3);
     int ty = y0 + h * z + PAD;                        // the text goes under the block grid; the buttons are under the picker
     gtext(&g->font, g->font_loaded, TextFormat("block O%d at %d,%d  %dx%d", idx, bx, by, w, h), x0, ty, fs, RAYWHITE);
-    gtext(&g->font, g->font_loaded, "click paints, right-click picks; w/h resize", x0, ty + ch(g), fs, GRAY);
-    gtext(&g->font, g->font_loaded, "gfx (in the grid below) swaps to the pixel editor", x0, ty + 2 * ch(g), fs, GRAY);
-    gtext(&g->font, g->font_loaded, TextFormat("import / export %s (best tiles)", GetFileName(block_png_path(g, idx))), x0, ty + 3 * ch(g), fs, GRAY);
+    // The colour-code legend, right under that line (Hugh: "the color code can be below the
+    // block tile editor view 'block 01 at 26,5', but only in block edit mode").
+    int legend_h = draw_attr_legend(g, x0, ty + ch(g));
+    ty += ch(g) + legend_h + PAD;
+    gtext(&g->font, g->font_loaded, "click paints, right-click picks; w/h resize", x0, ty, fs, GRAY);
+    gtext(&g->font, g->font_loaded, "gfx (in the grid below) swaps to the pixel editor", x0, ty + ch(g), fs, GRAY);
+    gtext(&g->font, g->font_loaded, TextFormat("import / export %s (best tiles)", GetFileName(block_png_path(g, idx))), x0, ty + 2 * ch(g), fs, GRAY);
 }
 
 // Tile 0 of every tileset is "invisible": the game never draws it (the
@@ -2091,32 +2153,10 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
         }
     }
     if (tiles_view(g)) {
-        for (int i = 0; i < 4; i++) {                    // attribute of painted tiles
-            Rectangle rb = attr_button(g, i);
-            bool on = ATTRS[i].bits == g->sel_attr;
-            bool kbd = g->focus == FOCUS_ATTRS && i == g->attr_sel % 4;
-            DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-            DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
-            int tw = text_w(&g->font, g->font_loaded, ATTRS[i].name, fs);
-            gtext(&g->font, g->font_loaded, ATTRS[i].name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
-        }
-        // type of the currently selected tile, then a colour-code legend
-        // matching Ctrl-D t's room tint (blue pass, grey solid, violet
-        // magnet, cyan slip), so the tint can be read at a glance.
-        int lx = (int)attr_button(g, 0).x;
-        int ly = (int)(attr_button(g, 2).y + attr_button(g, 2).height) + PAD;
-        gtext(&g->font, g->font_loaded, TextFormat("type: %s", ATTRS[g->sel_attr >> 6].name), lx, ly, fs, RAYWHITE);
-        ly += ch(g) + 4;
-        for (int i = 0; i < 4; i++) {
-            int cy = ly + i * (fs + 2);
-            // Solid gets the pixel editor's transparent checker, not a flat colour, since it's
-            // the one class Ctrl-D t doesn't actually tint (Hugh: "make the color on the side
-            // show the transparent background you used for sprite editing").
-            if (ATTRS[i].bits == ATTR_SOLID) draw_transparent_swatch(lx, cy, fs);
-            else DrawRectangle(lx, cy, fs, fs, ATTR_COLOUR[i]);
-            DrawRectangleLines(lx, cy, fs, fs, GRAY);
-            gtext(&g->font, g->font_loaded, ATTRS[i].name, lx + fs + 4, cy, fs, RAYWHITE);
-        }
+        draw_attr_buttons(g, 0);
+        int lx = (int)attr_button(g, 0, 0).x;
+        int ly = (int)(attr_button(g, 2, 0).y + attr_button(g, 2, 0).height) + PAD;
+        draw_attr_legend(g, lx, ly);
     }
     (void)block_available;
 }
@@ -2163,11 +2203,14 @@ static void spidey_build(GuiState *g) {
 
 static int world_y(GuiState *g) { int a = buttons_bottom(g), b = pixed_bottom(g); return (a > b ? a : b) + PAD; }
 // attribute buttons (what painted tiles are): a row under the source buttons
-// The tile attributes (tiles view only): a 2x2 block right under the tile
-// picker, level with the colour swatches; its own Tab stop (FOCUS_ATTRS).
-static Rectangle attr_button(GuiState *g, int i) {
+// The tile attributes: a 2x2 block right under the tile picker, level with the
+// colour swatches; its own Tab stop (FOCUS_ATTRS). `row_offset` pushes it down
+// by that many button rows - 0 in the ordinary tiles view, 3 (below the block
+// panel's own 3 rows of buttons) while a block object's tile grid is up,
+// since both share the same picker-column space (see block_button).
+static Rectangle attr_button(GuiState *g, int i, int row_offset) {
     int bw = (TILESET_PX * g->scale - PAD) / 2;
-    return (Rectangle){ palette_x(g) + (i % 2) * (bw + PAD), swatch_y(g) + (i / 2) * (ch(g) + 8), bw, ch(g) + 4 };
+    return (Rectangle){ palette_x(g) + (i % 2) * (bw + PAD), swatch_y(g) + (row_offset + i / 2) * (ch(g) + 8), bw, ch(g) + 4 };
 }
 // Which grid rows have buttons right now.
 static bool grid_row_valid(GuiState *g, int row) { return row < 4 || (row == 4 && g->block_hidden >= 0); }
@@ -2641,7 +2684,6 @@ static void draw_overlay(GuiState *g) {
     // stays clear; other pass-through tiles are faint blue so scenery and hazards you can
     // walk through read as such next to solid (grey), magnetic (violet) and slippery (cyan).
     if (ged_show_tiles() && !g->text_map) {
-        static const uint8_t tint_alpha[4] = {60, 110, 120, 120};
         // A TOGGLE_BLOCK chunk's currently-shown tile (on or off - see
         // ged_hot_block_preview) gets tinted by its own class too, not the base
         // tilemap's, matching what effective_tile actually draws there (Hugh:
@@ -2657,7 +2699,7 @@ static void draw_overlay(GuiState *g) {
                 // overlay, just the tile as it is defined").
                 if (t == 0 || (t >> 6) == 1) continue;
                 Vector2 p = tile_pt(g, x, y);
-                Color c = ATTR_COLOUR[t >> 6]; c.a = tint_alpha[t >> 6];
+                Color c = ATTR_COLOUR[t >> 6]; c.a = TILE_TINT_ALPHA[t >> 6];
                 DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, c);
             }
     }
@@ -2711,7 +2753,9 @@ static void draw_overlay(GuiState *g) {
             }
             draw_arrow(o, tip, emph_sw || hot_sw ? 4 : 2, 4, emph_sw ? YELLOW : C_SW);
         }
-        if (sw->chunks.data[0].room_entry) {
+        // Hidden for a switch with no backing tile: "entry" there just means "the switch
+        // works at all" (always forced true), not a room-entry sensor - see switch_entry_effective.
+        if (!switch_side_hidden(r, sw->chunks.data) && sw->chunks.data[0].room_entry) {
             Vector2 corner = tile_pt(g, sw->chunks.data[0].x, sw->chunks.data[0].y);
             gtext(&g->font, g->font_loaded, "E", (int)corner.x + 1, (int)corner.y, fs, emph_sw ? YELLOW : C_SW);
         }

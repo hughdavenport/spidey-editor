@@ -204,7 +204,7 @@ help_keys help[][100] = {
     },
 
     [EDIT_SWITCHDETAILS]={
-        {"e", "flip on-entry bit"},
+        {"e", "flip on-entry bit (only for non-blank tiles)"},
         {"o", "flip one-time-only bit"},
         {"O", "preview this switch active/idle on the map"},
         {"s", "rotate switch side"},
@@ -419,17 +419,6 @@ static const char *room_name_trimmed(uint16_t room_idx, char *buf, size_t buf_si
         if (buf[j] == '\0' || isspace((unsigned char)buf[j])) buf[j] = '\0';
         else break;
     return buf;
-}
-
-// "side" has no meaning for a switch that isn't actually approached from a wall - an
-// out-of-bounds one (SB-SE style off-map targets) is never touched at all, and one sitting on
-// a blank (invisible) tile just needs walking over, from any direction, to fire (Hugh: "when
-// tiles are blank 0x00... side is not important, any direction works and the tile just has to
-// be gone over" - and separately, confirmed by testing, entry=true there controls whether the
-// switch works at all rather than proximity-vs-room-entry). Both cases hide/disable "side".
-bool switch_side_hidden(struct DecompressedRoom *room, struct SwitchChunk *preamble) {
-    if (preamble->x >= WIDTH_TILES || preamble->y >= HEIGHT_TILES) return true;
-    return room->tiles[TILE_IDX(preamble->x, preamble->y)] == BLANK_TILE;
 }
 
 static bool chunk_at_cursor(struct SwitchChunk *chunk, int cx, int cy) {
@@ -1763,16 +1752,21 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 #define BOOL_S(b) ((b) ? "true" : "false")
             assert(switcz->chunks.length >= 1);
             struct SwitchChunk *preamble = switcz->chunks.data;
-            bool sw_offscreen = switch_side_hidden(&room, preamble);
+            // Neither field means anything for a switch with no backing tile: "side" because
+            // any direction works, "entry" because the game reuses that bit to mean "the
+            // switch is live" instead - always forced true (see switch_entry_effective).
+            bool no_backing_tile = switch_side_hidden(&room, preamble);
             if (state->current_state == EDIT_SWITCHDETAILS) {
                 scr_printf("switch ");
                 if (switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
                 if (switcz == switch_underneath) scr_printf("\033[m");
-                scr_printf(": (x,y)=%d,%d (\033[1;4me\033[mn\033[mtry)=%s (\033[1;4mo\033[mnce)=%s",
-                        preamble->x, preamble->y,
-                        BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use));
-                if (!sw_offscreen) {
+                scr_printf(": (x,y)=%d,%d", preamble->x, preamble->y);
+                if (!no_backing_tile) {
+                    scr_printf(" (\033[1;4me\033[mn\033[mtry)=%s", BOOL_S(preamble->room_entry));
+                }
+                scr_printf(" (\033[1;4mo\033[mnce)=%s", BOOL_S(preamble->one_time_use));
+                if (!no_backing_tile) {
                     scr_printf(" (\033[1;4ms\033[mide)=%s", SWITCH_SIDE(preamble->side));
                 }
                 scr_printf("\n");
@@ -1781,10 +1775,12 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[4;1m");
                 PRINTF_DATA((uint16_t)(switcz - room.switches));
                 if (state->current_state == TILE_EDIT && switcz == switch_underneath) scr_printf("\033[m");
-                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s",
-                        preamble->x, preamble->y,
-                        BOOL_S(preamble->room_entry), BOOL_S(preamble->one_time_use));
-                if (!sw_offscreen) {
+                scr_printf(": (x,y)=%d,%d", preamble->x, preamble->y);
+                if (!no_backing_tile) {
+                    scr_printf(" (entry)=%s", BOOL_S(preamble->room_entry));
+                }
+                scr_printf(" (once)=%s", BOOL_S(preamble->one_time_use));
+                if (!no_backing_tile) {
                     scr_printf(" (side)=%s", SWITCH_SIDE(preamble->side));
                 }
                 scr_printf("\n");
@@ -2074,14 +2070,15 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                         break;
                     }
                 }
+                bool extra_no_backing = switch_side_hidden(&room, pr);
                 GOTO(0, bottom); bottom++;
                 scr_printf("switch ");
                 PRINTF_DATA((uint16_t)sw_i);
-                scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s (side)=%s%s\n",
-                        pr->x, pr->y,
-                        BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use),
-                        SWITCH_SIDE(pr->side),
-                        has_chunk_at_cur ? " [chunk at cursor]" : "");
+                scr_printf(": (x,y)=%d,%d", pr->x, pr->y);
+                if (!extra_no_backing) scr_printf(" (entry)=%s", BOOL_S(pr->room_entry));
+                scr_printf(" (once)=%s", BOOL_S(pr->one_time_use));
+                if (!extra_no_backing) scr_printf(" (side)=%s", SWITCH_SIDE(pr->side));
+                scr_printf("%s\n", has_chunk_at_cur ? " [chunk at cursor]" : "");
                 draw_switch_chunks_brief(extra, x, y, &bottom);
             }
         }
@@ -2094,13 +2091,14 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     || chunk_switch_underneath->chunks.data[0].y != y)
                 && bottom < state->screen_dimensions.y - 1) {
             struct SwitchChunk *pr = chunk_switch_underneath->chunks.data;
+            bool pr_no_backing = switch_side_hidden(&room, pr);
             GOTO(0, bottom); bottom++;
             scr_printf("switch ");
             PRINTF_DATA((uint16_t)(chunk_switch_underneath - room.switches));
-            scr_printf(": (x,y)=%d,%d (entry)=%s (once)=%s",
-                    pr->x, pr->y,
-                    BOOL_S(pr->room_entry), BOOL_S(pr->one_time_use));
-            if (!switch_side_hidden(&room, pr)) scr_printf(" (side)=%s", SWITCH_SIDE(pr->side));
+            scr_printf(": (x,y)=%d,%d", pr->x, pr->y);
+            if (!pr_no_backing) scr_printf(" (entry)=%s", BOOL_S(pr->room_entry));
+            scr_printf(" (once)=%s", BOOL_S(pr->one_time_use));
+            if (!pr_no_backing) scr_printf(" (side)=%s", SWITCH_SIDE(pr->side));
             scr_printf(" [chunk at cursor]\n");
             draw_switch_chunks_brief(chunk_switch_underneath, x, y, &bottom);
         }
@@ -2129,8 +2127,9 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 if (panel_oob_switch_n < 16) { panel_oob_switch_row[panel_oob_switch_n] = bottom; panel_oob_switch_id[panel_oob_switch_n++] = (int)s; }
                 GOTO(0, bottom); bottom ++;
 #define BOOL_S(b) ((b) ? "true" : "false")
-                // Everything in this panel is out of bounds by definition, so "side" never
-                // applies here - it's not shown for any of them (see switch_side_hidden).
+                // Everything in this panel is out of bounds by definition, so neither "side"
+                // nor "entry" ever applies here - always forced/omitted (see switch_side_hidden,
+                // switch_entry_effective), not shown for any of them.
                 if (state->current_state == EDIT_SWITCHDETAILS && state->current_switch == s) {
                     scr_printf("\033[1;4mswitch id ");
                     PRINTF_DATA((uint16_t)s);
@@ -2138,8 +2137,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     PRINTF_DATA(sw->chunks.data[0].x);
                     scr_printf(",");
                     PRINTF_DATA(sw->chunks.data[0].y);
-                    scr_printf(" (\033[1;4me\033[mntry)=%s (\033[1;4mo\033[mnce)=%s\n",
-                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use));
+                    scr_printf(" (\033[1;4mo\033[mnce)=%s\n", BOOL_S(sw->chunks.data[0].one_time_use));
 
                 } else {
                     scr_printf("switch id ");
@@ -2154,8 +2152,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     PRINTF_DATA(sw->chunks.data[0].x);
                     scr_printf(",");
                     PRINTF_DATA(sw->chunks.data[0].y);
-                    scr_printf(" (entry)=%s (once)=%s\n",
-                            BOOL_S(sw->chunks.data[0].room_entry), BOOL_S(sw->chunks.data[0].one_time_use));
+                    scr_printf(" (once)=%s\n", BOOL_S(sw->chunks.data[0].one_time_use));
                 }
 
                 bottom ++;
