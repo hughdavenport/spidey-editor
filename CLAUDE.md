@@ -8,7 +8,8 @@ A terminal-based map editor for "The Amazing Spider-Man" (1990 DOS game). Reads/
 make             # builds ./a.out with ASAN + debug; editor.so / gui.so are built on first use and hot-reload
 make release     # builds ./spidey-editor: one binary, editor + GUI linked in, static raylib, -O2, no hot reload
 make check       # spl_check: .SPL compressor round trips + background store save/reload (scratch copy of Spider/)
-./a.out editor   # interactive editor
+./a.out editor   # the GUI when a display is available (DISPLAY / WAYLAND_DISPLAY), else the text-mode editor
+./a.out tui      # the text-mode editor; ./a.out gui the GUI, whatever the environment
 ./a.out help     # show all patch commands
 ```
 `SPIDEY_RELEASE` (set by `make release`) selects the linked-in paths in editor.c (`editor_main`)
@@ -132,8 +133,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 
 ## VT100 Tool
 - `./vt100 [opts] [command]`: pipe mode or PTY mode
-- Pipe mode (`./a.out editor | ./vt100`): reads editor stdout, renders virtual screen to stderr
-- PTY mode (`./vt100 ./a.out editor`): wraps program in PTY, correct terminal size propagated
+- Pipe mode (`./a.out tui | ./vt100`): reads editor stdout, renders virtual screen to stderr
+- PTY mode (`./vt100 ./a.out tui`): wraps program in PTY, correct terminal size propagated
 - Constants: `VT_DUMP_GUTTER=5`, `VT_DUMP_SIDEBAR=22` (column overhead for display borders)
 - **Bug**: pipe mode fails because editor gets 0 width from TIOCGWINSZ on non-tty stdout
 
@@ -151,6 +152,12 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Macros: `C_ARRAY_LEN`, `TILE_IDX`, `ARRAY_*`
 - `UNREACHABLE()` macro for impossible branches
 - No external dependencies beyond libc (for editor); raylib for the GUI
+
+## Subcommands `editor` / `gui` / `tui`
+- `tui` is the text-mode editor, `gui` the raylib one, and `editor` picks: the GUI when `DISPLAY` or
+  `WAYLAND_DISPLAY` is set, the TUI otherwise (ssh, a console). Both keep their hot reload. Windows
+  is not a target: the editor is POSIX throughout (termios, poll, fork/exec for play.sh, dlopen for
+  the hot reload, PTYs in the tests), so a port would be its own project, not a display check.
 
 ## Data directory (`./a.out [--data-dir DIR] ...`)
 - Every subcommand reads ROOMS.SPL from one data directory: the working directory unless

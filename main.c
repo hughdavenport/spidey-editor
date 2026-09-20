@@ -1054,8 +1054,9 @@ static void print_subcommands(FILE *out) {
     fprintf(out, "    find_tile TILE [OFFSET]              - Find a tile/offset pair\n");
     fprintf(out, "    find_sprite SPRITENAME               - Find a sprite\n");
     fprintf(out, "    render ROOMID|all|montage OUT|DIR    - Render room(s) to PNG (--debug --scale N --movertab FILE)\n");
+    fprintf(out, "    editor [--scale N]                   - The GUI when a display is available (DISPLAY / WAYLAND_DISPLAY), else the text-mode editor\n");
     fprintf(out, "    gui [--scale N]                      - raylib GUI editor (terminal-editor keys)\n");
-    fprintf(out, "    editor                               - Start the text-mode editor\n");
+    fprintf(out, "    tui                                  - Text-mode editor\n");
     fprintf(out, "      (SPIDEY_NO_HOTRELOAD=1 turns off source watching in the debug build; `make release` has none)\n");
     fprintf(out, "    help                                 - Display this message\n");
 }
@@ -1293,12 +1294,33 @@ int main(int argc, char **argv) {
             return 0;
             argv ++;
             argc = 0;
-        } else if (strcasecmp(argv[0], "editor") == 0) {
+        } else if (strcasecmp(argv[0], "tui") == 0 || strcasecmp(argv[0], "editor") == 0 || strcasecmp(argv[0], "gui") == 0) {
+            // `tui` is the text-mode editor, `gui` the raylib one; `editor` is the GUI when a display
+            // is there to draw on (DISPLAY, or WAYLAND_DISPLAY) and the text-mode editor otherwise -
+            // e.g. over ssh. Both hot-reload their own .so as before (editor_main / gui_main).
+            const char *x11 = getenv("DISPLAY"), *wl = getenv("WAYLAND_DISPLAY");
+            bool have_display = (x11 && *x11) || (wl && *wl);
+            bool want_gui = strcasecmp(argv[0], "gui") == 0 || (strcasecmp(argv[0], "editor") == 0 && have_display);
+            argv ++; argc --;
+            if (!want_gui) {
+                ARRAY_FREE(rooms);
+                ARRAY_FREE(patches);
+                freeRoomFile(&file);
+                if (fp) { fclose(fp); fp = NULL; }
+                return editor_main(data_dir);
+            }
+            int scale = 0;
+            while (argc >= 2) {
+                if (strcmp(argv[0], "--scale") == 0) { scale = atoi(argv[1]); }
+                else break;
+                argv += 2; argc -= 2;
+            }
+            int rc = gui_main(&file, data_dir, scale);
             ARRAY_FREE(rooms);
             ARRAY_FREE(patches);
             freeRoomFile(&file);
             if (fp) { fclose(fp); fp = NULL; }
-            return editor_main(data_dir);
+            return rc;
         } else if (strcasecmp(argv[0], "render") == 0) {
             argv ++; argc --;
             // Collect flags (any position) and up to two positionals (TARGET, OUT).
@@ -1356,20 +1378,6 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Wrote %s\n", out);
             }
             defer_return(0);
-        } else if (strcasecmp(argv[0], "gui") == 0) {
-            argv ++; argc --;
-            int scale = 0;
-            while (argc >= 2) {
-                if (strcmp(argv[0], "--scale") == 0) { scale = atoi(argv[1]); }
-                else break;
-                argv += 2; argc -= 2;
-            }
-            int rc = gui_main(&file, data_dir, scale);
-            ARRAY_FREE(rooms);
-            ARRAY_FREE(patches);
-            freeRoomFile(&file);
-            if (fp) { fclose(fp); fp = NULL; }
-            return rc;
         } else if (strcasecmp(argv[0], "rooms") == 0) {
             list = true;
             argv ++;

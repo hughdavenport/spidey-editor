@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end check of the text-mode editor: run `./a.out editor` on a small PTY (30 rows,
+"""End-to-end check of the text-mode editor: run `./a.out tui` on a small PTY (30 rows,
 the size that used to crash it) and drive it through a key sequence that fills the text
 panel past the terminal's height - room 9 (Undercroft), whose out-of-bounds switch 0 and its
 12 chunks are listed under the map. The editor must still be running afterwards and its output must
@@ -139,7 +139,7 @@ def main():
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
         os.environ['SPIDEY_NO_HOTRELOAD'] = '1'
-        os.execv('./a.out', ['./a.out', '--data-dir', sandbox, 'editor'])
+        os.execv('./a.out', ['./a.out', '--data-dir', sandbox, 'tui'])
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
     start = time.time()
     rooms_before = open(os.path.join(sandbox, 'ROOMS.SPL'), 'rb').read()
