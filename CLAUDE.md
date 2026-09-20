@@ -155,9 +155,15 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 
 ## Subcommands `editor` / `gui` / `tui`
 - `tui` is the text-mode editor, `gui` the raylib one, and `editor` picks: the GUI when `DISPLAY` or
-  `WAYLAND_DISPLAY` is set, the TUI otherwise (ssh, a console). Both keep their hot reload. Windows
-  is not a target: the editor is POSIX throughout (termios, poll, fork/exec for play.sh, dlopen for
-  the hot reload, PTYs in the tests), so a port would be its own project, not a display check.
+  `WAYLAND_DISPLAY` is set, the TUI otherwise (ssh, a console). Both keep their hot reload.
+- Windows and DOS builds are wanted eventually (Hugh, 2026-09-20). The POSIX seams are small and
+  separate, none of them a display check: the GUI itself is raylib, so on Windows `editor` can just
+  be the GUI. The TUI's terminal layer is `editor_screen.c` + the input read in `editor_input.c`
+  (termios / poll): Windows gets the console API or VT mode, DOS (DJGPP) conio or ANSI.SYS. play.sh
+  via fork/exec becomes `play.bat` / `play.ps1` (`system()`), and on DOS is simply running the game.
+  Hot reload (dlopen) is Linux-only and would be off elsewhere, as `make release` already is. The
+  PTY / Xvfb tests stay on Linux; other platforms are driven from here plus manual testing.
+  `data_path` already carries every file path.
 
 ## Data directory (`./a.out [--data-dir DIR] ...`)
 - Every subcommand reads ROOMS.SPL from one data directory: the working directory unless
