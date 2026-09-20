@@ -1718,23 +1718,30 @@ static void draw_palette(GuiState *g) {
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, cellh * 16 + 4}, 2, GOLD);
     }
     int ly = pixed_text_y(g) + 5 * ch(g), lh = ch(g), lx = pixed_x(g);   // under the pixel editor's own lines
-    const char *lines[6];
+    // Each line is copied out at once: TextFormat (which numfmt / tile_desc use too) rotates
+    // through four buffers, so holding its pointers across several calls repeats lines.
+    static char lines[6][160];
     int nlines = 0;
+#define LINE(...) snprintf(lines[nlines++], sizeof lines[0], __VA_ARGS__)
     if (g->backs_view) {
-        lines[nlines++] = TextFormat("background %d  scenery tile %s", cur_backs(), numfmt(g->sel_img[GFX_SCENERY]));
-        lines[nlines++] = TextFormat("shown by rooms %s", backs_users(cur_backs()));
+        LINE("background %d  scenery tile %s", cur_backs(), numfmt(g->sel_img[GFX_SCENERY]));
+        LINE("shown by rooms %s", backs_users(cur_backs()));
     } else if (g->font_view) {
-        lines[nlines++] = TextFormat("%s  tile %s", render_gfx_name(g->rctx, GFX_CHARSET), numfmt(g->sel_img[GFX_CHARSET]));
-    } else if (tiles_view(g)) {   // the selected tile and the one under the room cursor, each with what it is to Spidey
-        int cur = ged_cursor_tile();
-        lines[nlines++] = TextFormat("tileset %d  selected %s", g->pal_offset, numfmt(g->sel_tile | g->sel_attr));
-        lines[nlines++] = TextFormat("  %s", tile_desc(g->sel_tile | g->sel_attr));
-        lines[nlines++] = cur >= 0 ? TextFormat("under cursor %s", numfmt(cur)) : "under cursor: off the map";
-        lines[nlines++] = cur >= 0 ? TextFormat("  %s", tile_desc(cur)) : "";
+        LINE("%s  tile %s", render_gfx_name(g->rctx, GFX_CHARSET), numfmt(g->sel_img[GFX_CHARSET]));
+    } else if (tiles_view(g)) {   // the selected tile, the one under the room cursor and the background there
+        int cur = ged_cursor_tile(), cx, cy;
+        ged_cursor(&cx, &cy);
+        int bid = ged_rooms()->rooms[ged_room()].data.background % BACKS_BLOCKS;
+        LINE("tileset %d  selected %s  %s", g->pal_offset, numfmt(g->sel_tile | g->sel_attr), tile_desc(g->sel_tile | g->sel_attr));
+        if (cur >= 0) {
+            LINE("under cursor %s  %s", numfmt(cur), tile_desc(cur));
+            LINE("background %d  scenery tile %s", bid, numfmt(render_backs_tile(g->rctx, bid, cx, cy)));
+        } else LINE("under cursor: off the map");
     } else {
-        lines[nlines++] = TextFormat("%s  frame %s", render_gfx_name(g->rctx, g->pix_src), numfmt(g->sel_img[g->pix_src]));
+        LINE("%s  frame %s", render_gfx_name(g->rctx, g->pix_src), numfmt(g->sel_img[g->pix_src]));
     }
-    lines[nlines++] = g->cga ? "CGA graphics   Ctrl-? help" : "EGA graphics   Ctrl-? help";
+    LINE("%s", g->cga ? "CGA graphics   Ctrl-? help" : "EGA graphics   Ctrl-? help");
+#undef LINE
     for (int i = 0; i < nlines; i++)
         gtext(&g->font, g->font_loaded, lines[i], lx, ly + i * lh, fs, i == 0 ? RAYWHITE : GRAY);
 
