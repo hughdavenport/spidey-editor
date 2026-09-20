@@ -908,6 +908,50 @@ static bool movertab_read_file(const char *path) {
     return n == sizeof state->movertab;
 }
 
+void rooms_loaded_capture(void) {
+    state->rooms_loaded.length = 0;
+    FILE *fp = fopen(data_path(state->data_dir, ROOMS_FILE), "rb");
+    if (fp == NULL) return;
+    uint8_t buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, fp)) > 0)
+        for (size_t i = 0; i < n; i++) ARRAY_ADD(state->rooms_loaded, buf[i]);
+    fclose(fp);
+}
+
+// The GUI's reset button, for the room: put `room_idx` back to how it was in the ROOMS.SPL
+// this editor loaded (kept as bytes by rooms_loaded_capture; parsed here through readFile),
+// tiles, objects, switches, settings, name and exits alike, as one undo entry, and save.
+bool room_reset_loaded(size_t room_idx) {
+    if (state->rooms_loaded.length == 0) return false;
+    FILE *fp = fmemopen(state->rooms_loaded.data, state->rooms_loaded.length, "rb");
+    RoomFile snap = {0};
+    bool ok = fp != NULL && readFile(&snap, fp);
+    if (fp) fclose(fp);
+    Room *s = &snap.rooms[room_idx];
+    if (!ok || !s->valid) {
+        snprintf(state->status_message, sizeof(state->status_message),
+                 ok ? "Room %02zx did not exist when ROOMS.SPL was loaded" : "Could not re-read the loaded ROOMS.SPL", room_idx);
+        freeRoomFile(&snap);
+        return false;
+    }
+    Room *r = &state->rooms.rooms[room_idx];
+    push_undo((uint8_t)room_idx, false);
+    if (r->valid) room_snapshot_free(&r->data);
+    room_snapshot_copy(&r->data, &s->data);
+    r->rest.length = 0;
+    for (size_t i = 0; i < s->rest.length; i++) ARRAY_ADD(r->rest, s->rest.data[i]);
+    r->valid = true;
+    r->index = (uint8_t)room_idx;
+    ARRAY_FREE(r->compressed);
+    freeRoomFile(&snap);
+    state->current_switch = 0;
+    state->current_chunk = 0;
+    if (!editor_save()) return false;
+    snprintf(state->status_message, sizeof(state->status_message), "Room %02zx reset to how it was loaded", room_idx);
+    return true;
+}
+
 void movertab_load(void) {
     state->movertab_load_attempted = true;
     if (movertab_read_file(data_path(state->data_dir, MOVERTAB_FILE))) { state->movertab_loaded = true; return; }

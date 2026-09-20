@@ -160,6 +160,7 @@ xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 24 + 2*24 + 12)) mousedown 1; 
 xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1
 for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done
 xdotool mouseup 1; xdotool keyup shift; sleep 1.0; snap s10-painted
+xdotool mousemove $((X + 776 + 46)) $((Y + 512 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.0; snap s10b-reset   # reset: the room as loaded (the stroke gone)
 # hot reload: touch a watched source and wait for the rebuild
 touch gui_bridge.h; sleep 10; snap s11-reloaded
 xdotool key h h; sleep 0.5; snap s12-after-reload-keys

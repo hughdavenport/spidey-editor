@@ -247,7 +247,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   data (`render_gfx_set_pixel`) and writes the file in the data dir 0.6 s after a stroke,
   keeping a one-time <file>.orig backup. This edits the game's graphics for every room. `u`
   undoes the last stroke while a pixel stroke is the most recent edit (GUI-side stack, no
-  redo); "reset" restores the image from the .orig; "pick" is an eyedropper for the next click
+  redo); "reset" restores the image, the background block (in background mode) and the room to
+  how they were when this editor loaded them (`render_gfx_loaded`, `render_backs_loaded`,
+  `room_reset_loaded` from the ROOMS.SPL bytes `rooms_loaded_capture` keeps; the <file>.orig
+  copies stay on disk as the shipped versions); "pick" is an eyedropper for the next click
   anywhere on screen; "fill" is a mode: while lit, each click on the image flood-fills that region
   (4-connected, one undo entry each); click it again, or press `f` with the pixel editor focused,
   to go back to painting.
@@ -276,7 +279,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - The button grid sits under the picker (two per row, from below the sprite sheets' height so it
   never moves): tiles backs / sprites font / import export / reset screens (`SRC_*`, `SRC_NAMES`
   in gui.c: one order for labels, highlight, presses and the keyboard) / block (while a block
-  panel is hidden), with pass solid / magnet slip right under the tile picker, level with the
+  panel is hidden; the five view buttons stay live with a block panel up and, clicked, hide it
+  and switch, as Ctrl-B does - only reset / import / export dim), with pass solid / magnet slip right under the tile picker, level with the
   colour swatches (tiles view only); the picker's labels moved into the
   pixel-editor column under its own lines (`grid_button`, `buttons_y0`, `world_y`). "font" is CHARSET (128 tiles, 8 across at the tile zoom, 16 rows: the tallest picker, so it sets `buttons_y0`). "screens" enters screen mode
   (`g->screens_view`): the whole window becomes the chosen full-screen picture (LOADSCRN, WINSCRN,

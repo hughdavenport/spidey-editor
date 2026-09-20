@@ -440,7 +440,7 @@ static void sync_sprite_sel(GuiState *g) {
 
 // Switch the picker between tiles / sprites / backgrounds.
 static void set_view(GuiState *g, int view) {
-    if ((view == VIEW_BACKS) != g->backs_view) g->room_dirty = true;   // the picture drops / regains its objects
+    if ((view == VIEW_BACKS) != g->backs_view) { g->room_dirty = true; g->world_stale = true; }   // the picture and the world map's thumbnails drop / regain the rooms' objects and tiles at once
     g->sprites_view = view == VIEW_SPRITES;
     g->backs_view = view == VIEW_BACKS;
     g->font_view = view == VIEW_FONT;
@@ -461,6 +461,13 @@ static bool tiles_view(GuiState *g) { return !g->sprites_view && !g->backs_view 
 // A tile / frame / room number the way the editor's Ctrl-h says: hex by default, else decimal.
 static const char *numfmt(int v) { return ged_hex() ? TextFormat("0x%02x", v) : TextFormat("%d", v); }
 static const char *idfmt(int v)  { return ged_hex() ? TextFormat("%02x", v) : TextFormat("%d", v); }
+// What a tile byte means to Spidey: its class by the top two bits, and whether it hurts
+// (tile_hurts; heals instead in a room numbered 7 mod 8).
+static const char *tile_desc(int t) {
+    static const char *CLASS[4] = { "pass-through", "solid", "magnetic (no web)", "slippery" };
+    const char *hurt = tile_hurts((uint8_t)t) ? (ged_room() % 8 == 7 ? ", heals (room 7 mod 8)" : ", hurts") : "";
+    return TextFormat("%s%s", CLASS[(t >> 6) & 3], hurt);
+}
 
 // The paint colour must exist for the current image (the CGA sprites' 5th,
 // "transparent" colour does not elsewhere).
@@ -507,6 +514,14 @@ static bool mouse_screen_px(GuiState *g, int *x, int *y) {
 }
 
 // The background block the current room shows.
+// What the renderer draws of a room right now: everything, or in background mode only what
+// its Ctrl-D toggles ask for over the background (default nothing) - for the picture and the
+// world map's thumbnails alike.
+static void apply_render_parts(GuiState *g) {
+    if (g->backs_view) { bool t, b, sp, c; ged_backs_show(&t, &b, &sp, &c); render_show_parts(g->rctx, t, b, sp, c); }
+    else render_show_parts(g->rctx, true, true, true, true);
+}
+
 static int cur_backs(void) {   // the block the backs picker paints and labels: s[nn]'s choice, else the room's own
     int sheet = ged_backs_sheet();
     return sheet >= 0 ? sheet : ged_rooms()->rooms[ged_room()].data.background % BACKS_BLOCKS;
@@ -966,7 +981,14 @@ static bool feed_mouse(GuiState *g) {
                         return true;
                     }
                 if (CheckCollisionPointRec(m, grid_button(g, 5, 0))) { g->block_hidden = bi; return true; }   // gfx: the pixel editor; "block" there brings this back
-                if (m.x >= palette_x(g) && m.x < pixed_x(g) && m.y >= buttons_y0(g) && m.y < buttons_bottom(g)) return true;   // the rest of the grid is dimmed while the block panel is up
+                for (int i = 0; i < 8; i++)   // a view button still works: it hides the block panel and switches, as Ctrl-B does
+                    if ((i == SRC_TILES || i == SRC_BACKS || i == SRC_SPRITES || i == SRC_FONT || i == SRC_SCREENS) && CheckCollisionPointRec(m, pixed_button(g, i))) {
+                        g->block_hidden = bi;
+                        g->focus = FOCUS_BUTTONS; g->btn_row = i / 2; g->btn_sel = i % 2;
+                        pixed_button_press(g, i);
+                        return true;
+                    }
+                if (m.x >= palette_x(g) && m.x < pixed_x(g) && m.y >= buttons_y0(g) && m.y < buttons_bottom(g)) return true;   // reset / import / export are dimmed while the block panel is up (they act on the pixel editor's image)
             }
             if (in_grid) return false;
         }
@@ -1320,7 +1342,8 @@ static void draw_help(GuiState *g) {
         "switch open  - right-click an object / switch links it; right-drag tiles = block chunk",
         "Tab          - focus: room / picker / editor / colours / pick+fill / attributes / buttons / world map;",
         "               arrows move it, Enter or Space applies, Esc (or any editor key) = back to the room",
-        "pixel editor - click paints, right-click picks, u undoes a stroke; pick = eyedropper; fill = flood mode (f leaves); reset = original",
+        "pixel editor - click paints, right-click picks, u undoes a stroke; pick = eyedropper; fill = flood mode (f leaves)",
+        "reset        - the image, the background block (in background mode) and the room as they were when the editor started",
         "font/screens - the CHARSET font and the full-screen pictures; import / export = <name>.png in the data dir (or drop a PNG)",
         "block        - its tiles beside the picker: click paints, w/h resize, import / export = BLOCK-<room>-<n>.png; gfx / block swaps panels",
         "info text    - click a line to edit what it names; click a link to select its chunk, again to follow it, again back",
@@ -1682,23 +1705,30 @@ static void draw_palette(GuiState *g) {
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, cellh * 16 + 4}, 2, GOLD);
     }
     int ly = pixed_text_y(g) + 5 * ch(g), lh = ch(g), lx = pixed_x(g);   // under the pixel editor's own lines
-    const char *lines[] = {
-        g->backs_view    ? TextFormat("background %d  scenery tile %s", cur_backs(), numfmt(g->sel_img[GFX_SCENERY]))
-        : g->font_view   ? TextFormat("%s  tile %s", render_gfx_name(g->rctx, GFX_CHARSET), numfmt(g->sel_img[GFX_CHARSET]))
-        : tiles_view(g)  ? TextFormat("tileset %d  selected %s", g->pal_offset, numfmt(g->sel_tile | g->sel_attr))
-                         : TextFormat("%s  frame %s", render_gfx_name(g->rctx, g->pix_src), numfmt(g->sel_img[g->pix_src])),
-        g->backs_view    ? TextFormat("shown by rooms %s", backs_users(cur_backs()))
-        // a hurting tile says so; in a room numbered 7 mod 8 (a Take) the same tile heals
-        : tiles_view(g) && tile_hurts((uint8_t)(g->sel_tile | g->sel_attr)) ? (ged_room() % 8 == 7 ? "heals (this room is 7 mod 8)" : "hurts") : "",
-        g->cga ? "CGA graphics   Ctrl-? help" : "EGA graphics   Ctrl-? help",
-    };
-    for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
-        gtext(&g->font, g->font_loaded, lines[i], lx, ly + (int)i * lh, fs, i == 0 ? RAYWHITE : GRAY);
+    const char *lines[6];
+    int nlines = 0;
+    if (g->backs_view) {
+        lines[nlines++] = TextFormat("background %d  scenery tile %s", cur_backs(), numfmt(g->sel_img[GFX_SCENERY]));
+        lines[nlines++] = TextFormat("shown by rooms %s", backs_users(cur_backs()));
+    } else if (g->font_view) {
+        lines[nlines++] = TextFormat("%s  tile %s", render_gfx_name(g->rctx, GFX_CHARSET), numfmt(g->sel_img[GFX_CHARSET]));
+    } else if (tiles_view(g)) {   // the selected tile and the one under the room cursor, each with what it is to Spidey
+        int cur = ged_cursor_tile();
+        lines[nlines++] = TextFormat("tileset %d  selected %s", g->pal_offset, numfmt(g->sel_tile | g->sel_attr));
+        lines[nlines++] = TextFormat("  %s", tile_desc(g->sel_tile | g->sel_attr));
+        lines[nlines++] = cur >= 0 ? TextFormat("under cursor %s", numfmt(cur)) : "under cursor: off the map";
+        lines[nlines++] = cur >= 0 ? TextFormat("  %s", tile_desc(cur)) : "";
+    } else {
+        lines[nlines++] = TextFormat("%s  frame %s", render_gfx_name(g->rctx, g->pix_src), numfmt(g->sel_img[g->pix_src]));
+    }
+    lines[nlines++] = g->cga ? "CGA graphics   Ctrl-? help" : "EGA graphics   Ctrl-? help";
+    for (int i = 0; i < nlines; i++)
+        gtext(&g->font, g->font_loaded, lines[i], lx, ly + i * lh, fs, i == 0 ? RAYWHITE : GRAY);
 
     if (g->err_flash > 0)
-        gtext(&g->font, g->font_loaded, g->err, lx, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, g->err_col);
+        gtext(&g->font, g->font_loaded, g->err, lx, ly + nlines * lh, fs, g->err_col);
     else if (g->saved_flash > 0)
-        gtext(&g->font, g->font_loaded, TextFormat("saved %s", g->saved_what), lx, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
+        gtext(&g->font, g->font_loaded, TextFormat("saved %s", g->saved_what), lx, ly + nlines * lh, fs, GREEN);
 }
 
 // Buttons under the editor: reset, then one per view, then "block" while a
@@ -1716,14 +1746,22 @@ static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 9 : 8
 static void pixed_button_press(GuiState *g, int i) {
     g->pix_op = true;
     switch (i) {
-        case SRC_RESET: {                           // reset: the image as shipped
+        case SRC_RESET: {   // reset: the image, in background mode the block too, and the room, all as they were when
+                            // this editor loaded them (Hugh: "take a copy of assets at load time, and reset reloads those");
+                            // each undoable in its own stack. The <file>.orig copies stay on disk as the shipped versions.
             int idx = pixed_index(g);
-            uint8_t orig[GFX_MAX_BYTES];
-            if (render_gfx_original(g->rctx, g->pix_src, idx, orig)) {
+            static uint8_t buf[GFX_MAX_BYTES];
+            if (render_gfx_loaded(g->rctx, g->pix_src, idx, buf)) {
                 pix_undo_push(g, g->pix_src, idx);
-                render_gfx_put(g->rctx, g->pix_src, idx, orig);
+                render_gfx_put(g->rctx, g->pix_src, idx, buf);
                 gfx_touched(g, g->pix_src);
             }
+            if (g->backs_view && render_backs_loaded(g->rctx, cur_backs(), buf)) {
+                backs_undo_push(g, cur_backs());
+                render_backs_put(g->rctx, cur_backs(), buf);
+                g->backs_dirty = true; g->gfx_timer = 0.6f; g->world_pending = true;
+            }
+            if (ged_room_reset()) { g->room_dirty = true; g->world_stale = true; }
             break;
         }
         case SRC_TILES:   set_view(g, VIEW_TILES); break;
@@ -2256,7 +2294,8 @@ static void draw_source_grid(GuiState *g, bool block_up) {
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? WHITE : GRAY);   // white = the view on show; gold = keyboard focus, as everywhere
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
-        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, block_up ? GRAY : RAYWHITE);
+        bool view_button = i == SRC_TILES || i == SRC_BACKS || i == SRC_SPRITES || i == SRC_FONT || i == SRC_SCREENS;   // these stay live with a block panel up
+        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, block_up && !view_button ? GRAY : RAYWHITE);
     }
     if (block_up || g->block_hidden >= 0) {
         Rectangle rb = grid_button(g, block_up ? 5 : 4, 0);
@@ -3021,7 +3060,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             set_view(g, ged_backs_view_on() ? VIEW_BACKS : VIEW_TILES);   // other mode): the picker follows; the GUI's own Ctrl-B is not undone
         {   bool t, b, sp, c; ged_backs_show(&t, &b, &sp, &c);
             int mask = t | b << 1 | sp << 2 | c << 3;
-            if (mask != g->last_backs_show) { g->last_backs_show = mask; g->room_dirty = true; } }
+            if (mask != g->last_backs_show) { g->last_backs_show = mask; g->room_dirty = true; g->world_stale = true; } }
         if (IsFileDropped()) {                             // a PNG dropped on the window replaces the current image
             FilePathList dropped = LoadDroppedFiles();
             int bi, bx, by, bw, bh;
@@ -3032,6 +3071,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             UnloadDroppedFiles(dropped);
             g->room_dirty = true;
         }
+        apply_render_parts(g);   // before the atlas: its thumbnails follow background mode's toggles too
         if (g->world_stale) { world_build(g, ged_rooms(), buf); g->world_stale = false; }
         g->pix_op = false;
         if (feed_mouse(g)) {
@@ -3067,10 +3107,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->room_dirty || g->drawn_room != room) {
             int hot_switch = -1, hot_chunk = -1; bool hot_on = false;
             ged_hot_block_preview(&hot_switch, &hot_chunk, &hot_on);
-            if (g->backs_view) {   // background mode: only what its Ctrl-D toggles ask for over the background (default: nothing)
-                bool t, b, sp, c; ged_backs_show(&t, &b, &sp, &c);
-                render_show_parts(g->rctx, t, b, sp, c);
-            } else render_show_parts(g->rctx, true, true, true, true);
+            apply_render_parts(g);
             render_room_rgb(g->rctx, rooms, room, buf, hot_switch, hot_chunk, hot_on);
             Image img = { .data = buf, .width = ROOM_PX_W, .height = ROOM_PX_H,
                           .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8 };
@@ -3152,7 +3189,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             int bi, bx, by, bw, bh;
             bool on_block = ged_block_at_cursor(&bi, &bx, &by, &bw, &bh);
             if (!on_block) g->block_hidden = -1;
-            if (on_block && bi != g->block_hidden && !tiles_view(g)) set_view(g, VIEW_TILES);   // a block is made of tiles: the picker shows them
+            if (on_block && bi != g->block_hidden && !tiles_view(g) && !g->backs_view) set_view(g, VIEW_TILES);   // a block is made of tiles: the picker shows them (not in background mode, which has no blocks)
             if (on_block && bi != g->block_hidden) draw_block_editor(g, bi, bx, by, bw, bh);
             else draw_gfx_editor(g, on_block);
             draw_source_grid(g, on_block && bi != g->block_hidden);

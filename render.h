@@ -123,6 +123,7 @@ void render_gfx_set_pixel(RenderCtx *ctx, GfxSource src, int idx, int x, int y, 
 bool render_gfx_get(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
 void render_gfx_put(RenderCtx *ctx, GfxSource src, int idx, const uint8_t *in);
 bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
+bool render_gfx_loaded(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);     // the image as it was when this context opened the file
 bool render_gfx_save(RenderCtx *ctx, GfxSource src);
 // One image as RGBA (transparent key -> alpha 0).
 void render_gfx_rgba(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out);
@@ -142,6 +143,7 @@ void render_backs_set_tile(RenderCtx *ctx, int bid, int x, int y, int tile);
 bool render_backs_get(RenderCtx *ctx, int bid, uint8_t *out);           // the block (BACKS_TILES bytes), for undo
 void render_backs_put(RenderCtx *ctx, int bid, const uint8_t *in);
 bool render_backs_original(RenderCtx *ctx, int bid, uint8_t *out);      // as shipped (<file>.orig, or the file on disk)
+bool render_backs_loaded(RenderCtx *ctx, int bid, uint8_t *out);        // the block as it was when this context opened BACKS.SPL
 bool render_backs_save(RenderCtx *ctx);
 
 #define TILESET_PX 64   // 8x8 grid of 8x8 tiles = the 64 tiles of one tileset

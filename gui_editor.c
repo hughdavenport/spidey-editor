@@ -82,6 +82,7 @@ static game_state *state_new(RoomFile *host, const char *data_dir) {
     s->debug.spidey = true;
     s->debug.switch_links = true;
     movertab_load();
+    rooms_loaded_capture();
     return s;
 }
 
@@ -214,6 +215,12 @@ void ged_set_backs_view(bool on) {
     state->backs_view = on;
 }
 int ged_backs_sheet(void) { return state->backs_sheet; }
+bool ged_room_reset(void) { return room_reset_loaded(state->current_level); }
+int ged_cursor_tile(void) {
+    v2 c = state->cursors[state->current_level];
+    if (c.x < 0 || c.x >= WIDTH_TILES || c.y < 0 || c.y >= HEIGHT_TILES) return -1;
+    return state->rooms.rooms[state->current_level].data.tiles[TILE_IDX(c.x, c.y)];
+}
 bool ged_backs_edited(void) { bool e = state->backs_edited; state->backs_edited = false; return e; }
 bool ged_show_spidey(void)   { return state->debug.spidey; }
 bool ged_show_switch_links(void) { return state->debug.switch_links; }

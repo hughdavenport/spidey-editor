@@ -408,6 +408,9 @@ typedef struct {
     size_t len[GFX_SOURCES];
     uint8_t backs[BACKS_BLOCKS][BACKS_TILES];   // BACKS.SPL decoded (absent blocks: zeros)
     bool backs_present[BACKS_BLOCKS];
+    // Copies as loaded, for the GUI's reset button ("as it was when the editor started"):
+    uint8_t *loaded[GFX_SOURCES];
+    uint8_t backs_loaded[BACKS_BLOCKS][BACKS_TILES];
 } Assets;
 
 // The graphics files, one per source. `count` images of w x h; sheets are
@@ -452,14 +455,17 @@ static bool load_assets(const char *dir, Assets *a, bool cga) {
         bool required = GFX[s].required || (cga && (s == GFX_MASKS1 || s == GFX_MASKS2));
         a->data[s] = read_asset(dir, name, &a->len[s], required);
         if (a->data[s] == NULL && GFX[s].required) ok = false;
+        a->loaded[s] = a->data[s] ? malloc(a->len[s]) : NULL;
+        if (a->loaded[s]) memcpy(a->loaded[s], a->data[s], a->len[s]);
     }
     char path[1024];
     snprintf(path, sizeof path, "%s/%s", dir, "BACKS.SPL");
     load_backs_file(path, a->backs, a->backs_present);     // missing file: black backgrounds
+    memcpy(a->backs_loaded, a->backs, sizeof a->backs);
     return ok;
 }
 static void free_assets(Assets *a) {
-    for (int s = 0; s < GFX_SOURCES; s++) free(a->data[s]);
+    for (int s = 0; s < GFX_SOURCES; s++) { free(a->data[s]); free(a->loaded[s]); }
 }
 
 // One frame of a sprite sheet of an asset set, through its CGA mask if any.
@@ -877,6 +883,20 @@ static bool original_record(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out
     return ok;
 }
 
+static bool loaded_record(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    size_t n = (size_t)render_gfx_bytes(ctx, src);
+    if (ctx->a.loaded[src] == NULL || (size_t)idx * n + n > ctx->a.len[src]) return false;
+    memcpy(out, ctx->a.loaded[src] + (size_t)idx * n, n);
+    return true;
+}
+
+bool render_gfx_loaded(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
+    if (ctx == NULL || idx < 0) return false;
+    if (!loaded_record(ctx, src, idx, out)) return false;
+    if (has_mask(&ctx->a, src)) return loaded_record(ctx, mask_of(src), idx, out + render_gfx_bytes(ctx, src));
+    return true;
+}
+
 bool render_gfx_original(RenderCtx *ctx, GfxSource src, int idx, uint8_t *out) {
     if (ctx == NULL || idx < 0) return false;
     if (!original_record(ctx, src, idx, out)) return false;
@@ -962,6 +982,12 @@ void render_backs_put(RenderCtx *ctx, int bid, const uint8_t *in) {
     if (!backs_ok(ctx, bid, 0, 0)) return;
     memcpy(ctx->a.backs[bid], in, BACKS_TILES);
     ctx->a.backs_present[bid] = true;
+}
+
+bool render_backs_loaded(RenderCtx *ctx, int bid, uint8_t *out) {
+    if (!backs_ok(ctx, bid, 0, 0)) return false;
+    memcpy(out, ctx->a.backs_loaded[bid], BACKS_TILES);
+    return true;
 }
 
 bool render_backs_original(RenderCtx *ctx, int bid, uint8_t *out) {

@@ -144,6 +144,7 @@ void setup(const char *data_dir) {
 
     assert(readRooms(&state->rooms, state->data_dir) && "Check that you have ROOMS.SPL");
     movertab_load();
+    rooms_loaded_capture();
 
     for (size_t i = 0; i < C_ARRAY_LEN(state->cursors); i ++) {
         state->cursors[i].x = WIDTH_TILES / 2;
@@ -234,6 +235,7 @@ game_state *loop_main(char *library, game_state *call_state, const char *data_di
                 redraw();
                 freeRoomFile(&state->rooms);
                 assert(readRooms(&state->rooms, state->data_dir) && "Check that you have ROOMS.SPL");
+                rooms_loaded_capture();   // "as loaded" now means this file
                 dirty = true;
             }
         }

@@ -234,6 +234,9 @@ typedef struct {
      * gui.so, which have their own copy of room.c and no view of main()'s variables. */
     char data_dir[1024];
     RoomFile rooms;
+    /* ROOMS.SPL's bytes as last loaded (rooms_loaded_capture): the GUI's reset button puts a
+     * room back to that (room_reset_loaded), the way it resets an image or a background block. */
+    ARRAY(uint8_t) rooms_loaded;
     bool resized;
     bool help;
     struct debug debug;
@@ -353,7 +356,9 @@ bool room_prune_blank(size_t room_idx);   // remove a room again if it is still 
 // fix up any TOGGLE_BIT chunk elsewhere that named a switch after it in that room, so it still
 // points at the same switch (see editor_actions.c for why this exists).
 void fixup_toggle_bit_after_switch_removed(uint8_t room_idx, size_t removed_switch_idx);
-void movertab_load(void);            // read ./MOVERTAB.DAT, else Spider/MOVERTAB.DAT(.original), else zero; sets movertab_loaded
+void movertab_load(void);            // read the data dir's MOVERTAB.DAT, else zero; sets movertab_loaded
+void rooms_loaded_capture(void);     // keep ROOMS.SPL's bytes as just loaded, for room_reset_loaded
+bool room_reset_loaded(size_t room_idx);   // that room as it was when loaded, undoable; false if it did not exist then or the save was refused
 bool movertab_save(void);            // write state->movertab to ./MOVERTAB.DAT
 int movertab_offset_x(const uint8_t *entry);                     // decode a MOVERTAB entry's byte 1 (x offset, whole tiles)
 int movertab_offset_y(const uint8_t *entry, bool is_sprite);     // decode a MOVERTAB entry's byte 0 (y offset, whole tiles) - sprite/block encodings differ
