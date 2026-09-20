@@ -118,6 +118,8 @@ xdotool key u; sleep 0.8
 xdotool mousemove $((X + 1224 + 54)) $((Y + 410 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 1.2; snap s12l-screen-import   # import
 xdotool key u; sleep 0.6
 xdotool key Escape; sleep 0.5; snap s12m-back-from-screens   # Esc leaves screen mode
+xdotool mousemove $((X + 876 + 46)) $((Y + 544 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8   # screens again...
+xdotool key q; sleep 0.5; snap s12n-q-leaves-screens   # ...and q leaves it too
 xdotool mousemove $((X + 776 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
 # world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
 # buttons under the picker in two columns (x 776 / 876, rows of 32 px from y 416, below the tallest picker (sprite sheets / font); attributes level with the swatches at 224 / 256); world map at 584; thumbs ~65x45 + 4 gap (height-limited)

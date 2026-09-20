@@ -481,7 +481,7 @@ static int screen_index(GfxSource s) { for (int i = 0; i < NSCREENS; i++) if (SC
 
 // Screen mode: the whole window is the chosen picture at the largest integer
 // zoom that fits left of a side panel (list, swatches, buttons); nothing of
-// the room editor is shown until Esc / "room".
+// the room editor is shown until Esc, q or "room".
 #define SMODE_PANEL_COLS 32
 static int smode_panel_x(GuiState *g) { return GetScreenWidth() - SMODE_PANEL_COLS * cw(g); }
 static void screen_geom(GuiState *g, int *z, int *ox, int *oy, int *w, int *h) {
@@ -679,6 +679,7 @@ static bool feed_keys(GuiState *g) {
     // printable characters: shift is already applied; Alt rides along as a modifier
     for (int c = GetCharPressed(); c != 0; c = GetCharPressed()) {
         if (c < 0x20 || c > 0x7e) continue;
+        if (g->screens_view && c == 'q') { set_view(g, VIEW_TILES); any = true; continue; }   // screen mode: q leaves, as Esc does
         if (g->screens_view && c != 'h' && c != 'j' && c != 'k' && c != 'l' && c != ' ' && c != 'f' && c != 'u') continue;   // screen mode: the room is not there to edit
         if (g->focus != FOCUS_ROOM && (c == 'h' || c == 'j' || c == 'k' || c == 'l')) {
             focus_move(g, c == 'h' ? -1 : c == 'l' ? 1 : 0, c == 'k' ? -1 : c == 'j' ? 1 : 0);
@@ -713,7 +714,7 @@ static bool feed_keys(GuiState *g) {
             any = true; continue;
         }
         if (rk == KEY_F3) { set_gfx_mode(g, !g->cga); any = true; continue; }   // GUI-only: EGA / CGA files
-        if (g->screens_view) {                                          // screen mode: Esc leaves, Tab cycles, arrows / Enter edit, help still works
+        if (g->screens_view) {                                          // screen mode: Esc (or q above) leaves, Tab cycles, arrows / Enter edit, help still works
             if (rk == KEY_ESCAPE) { set_view(g, VIEW_TILES); any = true; continue; }
             if (rk == KEY_TAB) {
                 static const int cycle[] = { FOCUS_PICKER, FOCUS_COLOURS, FOCUS_BUTTONS, FOCUS_EDITOR };
@@ -1549,7 +1550,7 @@ static void draw_screen_mode(GuiState *g) {
     gtext(&g->font, g->font_loaded, "click / drag paints", px0 + PAD, ty + lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, "right-click picks a colour", px0 + PAD, ty + 2 * lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, "Tab: list/colours/buttons/picture", px0 + PAD, ty + 3 * lh, fs, GRAY);
-    gtext(&g->font, g->font_loaded, TextFormat("u undo   F3 %s   Esc back", g->cga ? "EGA" : "CGA"), px0 + PAD, ty + 4 * lh, fs, GRAY);
+    gtext(&g->font, g->font_loaded, TextFormat("u undo   F3 %s   Esc / q back", g->cga ? "EGA" : "CGA"), px0 + PAD, ty + 4 * lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, dirty ? "saving..." : g->saved_flash > 0 ? TextFormat("saved %s", g->saved_what) : "", px0 + PAD, ty + 5 * lh, fs, dirty ? ORANGE : GREEN);
     if (g->err_flash > 0) gtext(&g->font, g->font_loaded, g->err, px0 + PAD, ty + 6 * lh, fs, g->err_col);
 }
