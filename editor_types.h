@@ -214,6 +214,10 @@ typedef struct {
      * indices instead of the room map. rctx is the GUI's own render context
      * (ged_set_render) or one the TUI opens from the data dir on first use. */
     bool backs_view;
+    /* s[nn] in the background view: view / edit block nn instead of the room's own background
+     * (-1 = the room's own); backs_sheet_prompt is the digits typed so far (0 = no prompt,
+     * 0xF000 = waiting for the first, 0xF100 | d after one). */
+    int backs_sheet, backs_sheet_prompt;
     /* Ctrl-D in the background view: which of the room's things to overlay on the background
      * (all off by default: the background alone). Separate from the room view's debug flags. */
     struct { bool tiles, blocks, sprites, chunks; } backs_show;

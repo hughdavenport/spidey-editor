@@ -507,7 +507,10 @@ static bool mouse_screen_px(GuiState *g, int *x, int *y) {
 }
 
 // The background block the current room shows.
-static int cur_backs(void) { return ged_rooms()->rooms[ged_room()].data.background % BACKS_BLOCKS; }
+static int cur_backs(void) {   // the block the backs picker paints and labels: s[nn]'s choice, else the room's own
+    int sheet = ged_backs_sheet();
+    return sheet >= 0 ? sheet : ged_rooms()->rooms[ged_room()].data.background % BACKS_BLOCKS;
+}
 
 // Is the block panel (rather than the pixel editor) showing right now?
 static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh) {
@@ -1306,36 +1309,21 @@ static void draw_help(GuiState *g) {
     }
     if (x1 < 0) return;
     int cols = x1 - x0 + 1, rows = y1 - y0 + 1;
-    static const char *gui_help[] = {
+    static const char *gui_help[] = {   // short, like the editor's table above; nothing that table already says
         "GUI  (mouse and keys on top of the editor's)",
-        "F2 hex map (with the backs picker: the background block's hex, two hex digits edit a tile)",
-        "Ctrl-B toggle background view (picker and panel; the hex map too while F2 is on; nothing while sprites / font / screens is up)",
-        "F3 switch between the .EGA and .CGA graphics     q quit     wheel over text: scroll",
-        "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
-        "        that creature); middle-click on the room picks the tile",
-        "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
-        "        (BACKS.SPL, shared by every room with that background number); middle-click picks",
-        "wheel over room: background; Shift+wheel / horizontal wheel, or wheel over the tile picker: tileset",
-        "Ctrl-D t tile colours: blue pass-through, none solid, violet magnetic, cyan slippery, red hurts (also the",
-        "        red borders in the tile picker and the hex map; a hurting tile heals in a room numbered 7 mod 8)",
-        "world map: click = go there (an empty slot becomes a new room); Ctrl-click = go there and put the cursor",
-        "        where you clicked; right-click = move the thing under the cursor there",
-        "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
-        "focus: Tab cycles room / picker / editor / colours / pick+fill / attributes / buttons / world map (or click one);",
-        "       arrows, hjkl move it; Enter or Space applies (picker: put tile or creature at the room cursor; editor: paint); Esc or any editor",
-        "       key (r, s, o, ...) = back to the room",
-        "pixel editor: click paints, right-click picks, u undoes a stroke, reset restores the original,",
-        "        pick = then click any colour on screen (room, picker, world map); fill = a mode: clicks on",
-        "        the image (or Space at the editor cursor) flood that region with the colour; click fill again",
-        "        (or f while the pixel editor has focus) to leave",
-        "font / screens buttons: the CHARSET font, and the title, story, ending, high-score and health-figure",
-        "        pictures (painted on the big picture); import / export = <name>.png in the data dir, or drop a PNG",
-        "        on the window: it is scaled to the image and snapped to the palette",
-        "block under cursor: its tiles are shown beside the picker; click paints, w/h buttons resize, import / export",
-        "        = BLOCK-<room>-<n>.png; the grid's 5th slot reads gfx (show the pixel editor instead) or block (back)",
-        "info text: click a switch / chunk / object / room field line to edit it; click a link line to select its",
-        "        chunk; clicking it again goes to what it toggles (object, tile run, or the other room's switch) and again",
-        "        back to the chunk; a plain click on the room leaves any mode",
+        "F2           - hex map (with the backs picker: the block's hex)",
+        "F3           - EGA / CGA graphics",
+        "wheel        - over the room: background; Shift+wheel or over the tile picker: tileset; over text: scroll",
+        "picker       - click selects; Shift+drag paints the room (sprites: Shift+click places); middle-click picks",
+        "backs        - Shift+drag paints the room's background block (shared by every room that uses it)",
+        "world map    - click: go there (empty slot = new room); Ctrl-click: also place the cursor; right-click: move item there",
+        "switch open  - right-click an object / switch links it; right-drag tiles = block chunk",
+        "Tab          - focus: room / picker / editor / colours / pick+fill / attributes / buttons / world map;",
+        "               arrows move it, Enter or Space applies, Esc (or any editor key) = back to the room",
+        "pixel editor - click paints, right-click picks, u undoes a stroke; pick = eyedropper; fill = flood mode (f leaves); reset = original",
+        "font/screens - the CHARSET font and the full-screen pictures; import / export = <name>.png in the data dir (or drop a PNG)",
+        "block        - its tiles beside the picker: click paints, w/h resize, import / export = BLOCK-<room>-<n>.png; gfx / block swaps panels",
+        "info text    - click a line to edit what it names; click a link to select its chunk, again to follow it, again back",
     };
     int nextra = (int)(sizeof gui_help / sizeof gui_help[0]);
     for (int i = 0; i < nextra; i++) { int l = (int)strlen(gui_help[i]) + 2; if (l > cols) cols = l; }
@@ -2266,7 +2254,7 @@ static void draw_source_grid(GuiState *g, bool block_up) {
                || (i == SRC_FONT && g->font_view) || (i == SRC_SCREENS && g->screens_view);
         bool kbd = !block_up && g->focus == FOCUS_BUTTONS && g->btn_row == i / 2 && g->btn_sel % 2 == i % 2;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
-        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
+        DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? WHITE : GRAY);   // white = the view on show; gold = keyboard focus, as everywhere
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
         gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, block_up ? GRAY : RAYWHITE);
     }

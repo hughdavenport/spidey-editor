@@ -124,6 +124,7 @@ void setup(const char *data_dir) {
     assert(state != NULL && "Not enough memory");
     state->size = sizeof(game_state);
     snprintf(state->data_dir, sizeof state->data_dir, "%s", data_dir);
+    state->backs_sheet = -1;
     memset(state->screen_prev, 0xFF, sizeof(state->screen_prev));
 
     debugalltoggle();

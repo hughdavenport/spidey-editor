@@ -95,7 +95,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   (hex digits edit the background, r goes to a room, u/U its own undo stack `backs_undo`, y/x/p
   yank/cut/paste a tile index, m/, macros, Ctrl-p, q), its panel ("BACKGROUND NN", the rooms
   sharing it with their names, "an edit here changes every one of them") and its help
-  (`backs_help`, plus the GUI lines; `?` alone opens it too). The picture stays but is rendered
+  (`backs_help`, plus the GUI lines; `?` alone opens it too). `s[nn]` in the view chooses
+  another block to show and edit (`backs_sheet`, -1 = the room's own; the GUI's picker paints
+  and labels that block too via `cur_backs` / `ged_backs_sheet`; Esc or leaving the view drops
+  it). The panel lists "used by rooms:" one per line with names. The picture stays but is rendered
   without objects, sprites or the tiles any TOGGLE_BLOCK chunk covers (`render_show_objects`:
   background plus the room's fixed tiles) and without any room overlays; the block panel never
   comes up in this mode (it would dim the view buttons and snap the picker back to the tiles,

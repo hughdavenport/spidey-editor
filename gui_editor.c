@@ -62,6 +62,7 @@ static game_state *state_new(RoomFile *host, const char *data_dir) {
     assert(s != NULL && "Not enough memory");
     s->size = sizeof *s;
     snprintf(s->data_dir, sizeof s->data_dir, "%s", data_dir);
+    s->backs_sheet = -1;
     memset(s->screen_prev, 0xFF, sizeof s->screen_prev);
     s->rooms = *host;                       // take over the room data
     state = s;
@@ -209,8 +210,10 @@ void ged_backs_show(bool *tiles, bool *blocks, bool *sprites, bool *chunks) {
 void ged_set_backs_view(bool on) {
     if (on && state->rctx == NULL) on = false;
     if (state->backs_view != on) state->partial_byte = 0;
+    if (!on) { state->backs_sheet = -1; state->backs_sheet_prompt = 0; }   // leaving: back to the room's own block
     state->backs_view = on;
 }
+int ged_backs_sheet(void) { return state->backs_sheet; }
 bool ged_backs_edited(void) { bool e = state->backs_edited; state->backs_edited = false; return e; }
 bool ged_show_spidey(void)   { return state->debug.spidey; }
 bool ged_show_switch_links(void) { return state->debug.switch_links; }

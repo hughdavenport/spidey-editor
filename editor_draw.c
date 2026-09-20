@@ -378,6 +378,7 @@ static help_keys backs_help[] = {
     {"Up/k", "Move cursor up"},
     {"Right/l", "Move cursor right (off an edge: the neighbouring room's background)"},
     {"r[nn]", "goto room"},
+    {"s[nn]", "goto sheet: view / edit background block nn instead of the room's own (Esc: back to it)"},
     {"u/U", "undo/redo (background edits)"},
     {"mX", "record to slot X; m=stop"},
     {",X", "replay slot X; ,,=repeat; ,.=saved"},
@@ -719,24 +720,40 @@ size_t panel_oob_switch_n = 0;
 
 // The background's panel: which block, which rooms share it (the one thing to know before
 // typing), how to edit. Under the hex view, and in the GUI whenever the backs picker is up.
+// The block on show: s[nn]'s choice, else the room's own background (see backs_bid in editor_input.c).
+static int backs_panel_bid(void) {
+    return state->backs_sheet >= 0 ? state->backs_sheet : state->rooms.rooms[state->current_level].data.background;
+}
+
 static void draw_backs_panel(int *bottom) {
-    int bid = state->rooms.rooms[state->current_level].data.background;
+    int bid = backs_panel_bid();
     PANEL_GOTO(0, *bottom); (*bottom)++;
     scr_printf("\033[1mBACKGROUND \033[m");   // the block number and the room ids follow Ctrl-h (hex / decimal)
     scr_printf("\033[1m"); PRINTF_DATA(bid); scr_printf("\033[m (BACKS.SPL block %d): SCENERY tile indices, 00 = black", bid);
+    if (state->backs_sheet >= 0) {   // chosen with s: say so, and whose it is not
+        scr_printf("   sheet chosen with s; this room's own is ");
+        PRINTF_DATA(state->rooms.rooms[state->current_level].data.background);
+    }
+    if (state->backs_sheet_prompt) {
+        scr_printf("   \033[1mgoto sheet: ");
+        if (state->backs_sheet_prompt & 0x0F00) scr_printf(state->debug.hex ? "%x" : "%u", state->backs_sheet_prompt & 0xFF);
+        scr_printf("\033[4;5m_\033[m");
+    }
     PANEL_GOTO(0, *bottom); (*bottom)++;
-    int col = scr_printf("shown by rooms");
+    scr_printf("used by rooms:");
     int n = 0;
     for (size_t r = 0; r < C_ARRAY_LEN(state->rooms.rooms); r++) {
         if (!state->rooms.rooms[r].valid || state->rooms.rooms[r].data.background != bid) continue;
         char name[25] = {0};
         memcpy(name, state->rooms.rooms[r].data.name, sizeof state->rooms.rooms[r].data.name);
         for (int k = 23; k >= 0 && (name[k] == ' ' || name[k] == '\0'); k--) name[k] = '\0';
-        if (col > 90) { PANEL_GOTO(0, *bottom); (*bottom)++; col = scr_printf("              "); }   // wrap under the list
-        col += scr_printf(n++ ? ", " : " ");
-        col += PRINTF_DATA((unsigned)r);
-        col += scr_printf(" - \"%s\"", name);
+        PANEL_GOTO(0, *bottom); (*bottom)++;
+        scr_printf("  ");
+        PRINTF_DATA((unsigned)r);
+        scr_printf(" - \"%s\"", name);
+        n++;
     }
+    if (n == 0) { PANEL_GOTO(0, *bottom); (*bottom)++; scr_printf("  none"); }
     PANEL_GOTO(0, *bottom); (*bottom)++;
     scr_printf("\033[1;33man edit here changes every one of them\033[m");
     if (screen_headless) {   // the GUI shows the how-to; the TUI's help box has it (Hugh: no need to print it there)
@@ -748,7 +765,7 @@ static void draw_backs_panel(int *bottom) {
 
 static void draw_backs_view(void) {
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
-    int bid = room->background;
+    int bid = backs_panel_bid();
     int cx = state->cursors[state->current_level].x, cy = state->cursors[state->current_level].y;
     // Ctrl-D overlays, each in its own colour over the background's plain hex: chunk-covered
     // tiles (magenta), the room's other tiles (blue), block objects' tiles (green), sprites

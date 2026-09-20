@@ -4878,6 +4878,13 @@ static void backs_view_enter(void) {
 static void backs_view_leave(void) {
     state->backs_view = false;
     state->partial_byte = 0;
+    state->backs_sheet = -1;
+    state->backs_sheet_prompt = 0;
+}
+
+// The block being viewed / edited: s[nn]'s choice, else the room's own background.
+static int backs_bid(void) {
+    return state->backs_sheet >= 0 ? state->backs_sheet : state->rooms.rooms[state->current_level].data.background;
 }
 
 // Write one tile of a block and save BACKS.SPL at once. false (and the old value back) when
@@ -4902,7 +4909,7 @@ static bool backs_write(int bid, int x, int y, int v) {
 // room undo stack knows nothing about BACKS.SPL). A new edit drops any undone entries; a full
 // stack forgets its oldest entry.
 static void backs_set(int x, int y, int v) {
-    int bid = state->rooms.rooms[state->current_level].data.background;
+    int bid = backs_bid();
     int old = render_backs_tile(state->rctx, bid, x, y);
     if (old == v) return;
     if (!backs_write(bid, x, y, v)) return;
@@ -4955,7 +4962,10 @@ static void handle_backs_view(Key key) {
         case KEY_RIGHT: move_cursor_plain(1, 0);  state->partial_byte = 0; break;
         case KEY_UP:    move_cursor_plain(0, -1); state->partial_byte = 0; break;
         case KEY_DOWN:  move_cursor_plain(0, 1);  state->partial_byte = 0; break;
-        case KEY_ESC:   backs_view_leave(); break;
+        case KEY_ESC:
+            if (state->backs_sheet_prompt) state->backs_sheet_prompt = 0;   // cancel the sheet prompt first
+            else backs_view_leave();
+            break;
         case KEY_BS: case KEY_DELETE:
             if (state->partial_byte) state->partial_byte = 0;
             else backs_set(c->x, c->y, 0);
@@ -4969,12 +4979,27 @@ static void handle_backs_view(Key key) {
             break;
         case KEY_CHAR: {
             if (key.mod != MOD_NONE) break;
-            int bid = state->rooms.rooms[state->current_level].data.background;
+            int bid = backs_bid();
+            if (state->backs_sheet_prompt) {   // s[nn]: the block number, two hex digits (or decimal after Ctrl-h)
+                if (state->debug.hex ? isxdigit(key.ch) : isdigit(key.ch)) {
+                    int base = state->debug.hex ? 16 : 10;
+                    int d = isdigit(key.ch) ? key.ch - '0' : tolower(key.ch) - 'a' + 10;
+                    if ((state->backs_sheet_prompt & 0x0F00) == 0) state->backs_sheet_prompt = 0xF100 | d;
+                    else {
+                        int v = (state->backs_sheet_prompt & 0xFF) * base + d;
+                        if (v < BACKS_BLOCKS) state->backs_sheet = v;
+                        else snprintf(state->status_message, sizeof(state->status_message), "No such background block (0-%d)", BACKS_BLOCKS - 1);
+                        state->backs_sheet_prompt = 0;
+                    }
+                } else state->backs_sheet_prompt = 0;   // any other key cancels the prompt
+                break;
+            }
             if (key.ch == 'h') { move_cursor_plain(-1, 0); state->partial_byte = 0; }
             else if (key.ch == 'l') { move_cursor_plain(1, 0); state->partial_byte = 0; }
             else if (key.ch == 'k') { move_cursor_plain(0, -1); state->partial_byte = 0; }
             else if (key.ch == 'j') { move_cursor_plain(0, 1); state->partial_byte = 0; }
-            else if (key.ch == 'r') {   // goto room, as in the room view; the view comes back for the room chosen
+            else if (key.ch == 'r') {   // goto room, as in the room view; the view comes back for the room chosen, showing its own block
+                state->backs_sheet = -1;
                 state->previous_state = state->current_state;
                 state->current_state = GOTO_ROOM;
                 state->current_switch = 0;
@@ -4982,6 +5007,7 @@ static void handle_backs_view(Key key) {
                 state->current_chunk = 0;
                 state->partial_byte = 0;
             }
+            else if (key.ch == 's') { state->backs_sheet_prompt = 0xF000; state->partial_byte = 0; }   // goto sheet
             else if (key.ch == 'u') backs_undo();
             else if (key.ch == 'U') backs_redo();
             else if (key.ch == 'y') state->backs_clip = render_backs_tile(state->rctx, bid, c->x, c->y) + 1;

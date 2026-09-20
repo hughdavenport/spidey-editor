@@ -182,7 +182,14 @@ def main():
                 failures.append(f"Ctrl-B map row 0 is {scr.row(1)[:64]!r}, BACKS.SPL block 1 says {expect!r}")
             if 'BACKGROUND 01' not in scr.text():
                 failures.append("Ctrl-B panel does not name the background block")
-            # r 09 inside the view: the room prompt works and the view comes back for Undercroft
+            # s 02 inside the view: another sheet, shown with its own room list
+            os.write(fd, b's'); drain(fd, 0.3); os.write(fd, b'02'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
+            if 'BACKGROUND 02' not in scr.text() or 'used by rooms:' not in scr.text():
+                failures.append("s 02 in the background view did not switch to sheet 02")
+            expect2 = backs_block(2)
+            if scr.row(1)[:64] != expect2:
+                failures.append(f"sheet 02 map row 0 is {scr.row(1)[:64]!r}, BACKS.SPL block 2 says {expect2!r}")
+            # r 09 inside the view: the room prompt works and the view comes back for Undercroft (its own block again)
             os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'09'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
             if 'BACKGROUND 08' not in scr.text() or 'Undercroft' not in scr.row(0):
                 failures.append(f"r 09 in the background view did not show Undercroft's background (header {scr.row(0).rstrip()[:60]!r})")
