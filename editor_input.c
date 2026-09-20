@@ -833,6 +833,7 @@ static bool handle_toggle_display(Key key) {
                 case 'a': debugalltoggle(); break;
                 case 'c': state->debug.spidey = !state->debug.spidey; break;
                 case 'd': state->debug.data = !state->debug.data; break;
+                case 'h': state->debug.hurt = !state->debug.hurt; break;
                 case 'l': state->debug.switch_links = !state->debug.switch_links; break;
                 case 'n': state->debug.neighbours = !state->debug.neighbours; break;
                 case 'o': state->debug.objects = !state->debug.objects; break;

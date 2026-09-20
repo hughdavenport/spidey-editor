@@ -158,6 +158,7 @@ void setup(const char *data_dir) {
     state->debug.tiles = true;
     state->debug.spidey = true;
     state->debug.switch_links = true;
+    state->debug.hurt = true;
 }
 
 typedef game_state *(*main_fn)(char *library, game_state *call_state, const char *data_dir);

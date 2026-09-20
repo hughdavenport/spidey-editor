@@ -13,6 +13,13 @@
 #define MOVERTAB_FILE "MOVERTAB.DAT"
 const char *data_path(const char *dir, const char *name);
 
+// Whether a tile hurts Spidey (by the room's `dmg`; in a room numbered 7 mod 8 it heals
+// instead). The one place that knows: the GUI's red picker borders and map overlay both
+// read it. Codified from Hugh's `tiles` notes, to be corrected from play: hurting goes by
+// the tile index (low 6 bits) - 0x01, 0x1c-0x1f, 0x20-0x21, 0x3c-0x3f - and a slippery
+// tile (0xc0+) never hurts, whatever its index.
+bool tile_hurts(uint8_t tile);
+
 #define WIDTH_TILES 32
 #define HEIGHT_TILES 22
 

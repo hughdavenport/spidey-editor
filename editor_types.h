@@ -121,6 +121,7 @@ struct debug {
     bool tiles;     /* GUI: tint every tile by its class (pass-through / solid / magnetic / slippery) */
     bool spidey;    /* GUI: draw Spider-Man at the cursor as a size reference (default on); off shows just the cursor square */
     bool switch_links;   /* GUI: draw every switch chunk's link line/arrow (default on); off shows only the active switch's (viewed or being edited) */
+    bool hurt;      /* GUI: red border round the picker's hurting tiles, red overlay on them in the room (tile_hurts, room.h; default on) */
     bool all;
 };
 

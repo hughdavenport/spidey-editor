@@ -55,6 +55,8 @@ static const Color ATTR_COLOUR[4] = { {0, 120, 255, 255}, {200, 200, 200, 255}, 
 // Alpha for Ctrl-D t's per-class tint, shared by the room picture and the block
 // object tile editor (see draw_overlay and draw_block_editor).
 static const uint8_t TILE_TINT_ALPHA[4] = {60, 110, 120, 120};
+static const Color HURT_COLOUR = {255, 40, 40, 255};   // Ctrl-D h: hurting tiles (tile_hurts, room.h)
+#define HURT_TINT_ALPHA 90
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
 #define MAP_COLS (2 * WIDTH_TILES)
@@ -97,7 +99,8 @@ typedef struct {
     int paint_x, paint_y;
     bool paint_dirty;       // painted cells not yet written to disk
     float save_timer;       // seconds until the pending paint write
-    float saved_flash;      // seconds left to show "saved"
+    float saved_flash;      // seconds left to show "saved <files>"
+    char saved_what[160];   // the file names the last save wrote (ROOMS.SPL, BLOCKS.EGA, BACKS.SPL, ...)
     float err_flash;        // seconds left to show err
     char err[96];           // a refused write, shown under the picker in red
     float src_check;        // seconds until the next hot-reload source check
@@ -1501,7 +1504,7 @@ static void draw_screen_mode(GuiState *g) {
     gtext(&g->font, g->font_loaded, "right-click picks a colour", px0 + PAD, ty + 2 * lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, "Tab: list/colours/buttons/picture", px0 + PAD, ty + 3 * lh, fs, GRAY);
     gtext(&g->font, g->font_loaded, TextFormat("u undo   F3 %s   Esc back", g->cga ? "EGA" : "CGA"), px0 + PAD, ty + 4 * lh, fs, GRAY);
-    gtext(&g->font, g->font_loaded, dirty ? "saving..." : g->saved_flash > 0 ? "saved" : "", px0 + PAD, ty + 5 * lh, fs, dirty ? ORANGE : GREEN);
+    gtext(&g->font, g->font_loaded, dirty ? "saving..." : g->saved_flash > 0 ? TextFormat("saved %s", g->saved_what) : "", px0 + PAD, ty + 5 * lh, fs, dirty ? ORANGE : GREEN);
     if (g->err_flash > 0) gtext(&g->font, g->font_loaded, g->err, px0 + PAD, ty + 6 * lh, fs, g->err_col);
 }
 
@@ -1629,6 +1632,17 @@ static void draw_palette(GuiState *g) {
                 DrawRectangle(tx, ty, s, ch(g), (Color){0, 0, 0, 150});
                 gtext(&g->font, g->font_loaded, TextFormat("%02x", t), tx, ty, fs, RAYWHITE);
             }
+        // Ctrl-D h: a red border round each run of hurting tiles (tile_hurts) in a picker row -
+        // unless the attribute being painted is slippery, which never hurts
+        if (ged_show_hurt() && g->sel_attr != 0xC0)
+            for (int row = 0; row < 8; row++)
+                for (int c = 0; c < 8; c++) {
+                    if (!tile_hurts((uint8_t)(row * 8 + c))) continue;
+                    int run = 1;
+                    while (c + run < 8 && tile_hurts((uint8_t)(row * 8 + c + run))) run++;
+                    DrawRectangleLinesEx((Rectangle){x0 + c * s, y0 + row * s, run * s, s}, 2, HURT_COLOUR);
+                    c += run - 1;
+                }
         int sx = g->sel_tile % 8, sy = g->sel_tile / 8;
         DrawRectangleLinesEx((Rectangle){x0 + sx * s, y0 + sy * s, s, s}, 2, GOLD);
         if (g->focus == FOCUS_PICKER) DrawRectangleLinesEx((Rectangle){x0 - 2, y0 - 2, side + 4, side + 4}, 2, GOLD);
@@ -1665,7 +1679,7 @@ static void draw_palette(GuiState *g) {
     if (g->err_flash > 0)
         gtext(&g->font, g->font_loaded, g->err, lx, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, g->err_col);
     else if (g->saved_flash > 0)
-        gtext(&g->font, g->font_loaded, "saved", lx, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
+        gtext(&g->font, g->font_loaded, TextFormat("saved %s", g->saved_what), lx, ly + (int)(sizeof lines / sizeof lines[0]) * lh, fs, GREEN);
 }
 
 // Buttons under the editor: reset, then one per view, then "block" while a
@@ -1927,18 +1941,24 @@ static bool pix_undo_pop(GuiState *g) {
 
 // Write every edited graphics file; the Spider-Man marker is rebuilt in case
 // his frame changed. true if anything was written.
+static void saved_add(GuiState *g, const char *name) {   // append to the "saved ..." indicator's file list
+    size_t n = strlen(g->saved_what);
+    snprintf(g->saved_what + n, sizeof g->saved_what - n, "%s%s", n ? ", " : "", name);
+}
+
 static bool gfx_save_all(GuiState *g) {
     bool any = false;
+    g->saved_what[0] = '\0';
     for (int i = 0; i < GFX_SOURCES; i++) {
         if (!g->gfx_dirty[i]) continue;
         g->gfx_dirty[i] = false;
-        if (render_gfx_save(g->rctx, (GfxSource)i)) any = true;
+        if (render_gfx_save(g->rctx, (GfxSource)i)) { any = true; saved_add(g, render_gfx_name(g->rctx, (GfxSource)i)); }
         else gui_error(g, TextFormat("could not write %s", render_gfx_name(g->rctx, (GfxSource)i)));
         if (i == GFX_SPIDS1) spidey_build(g);
     }
     if (g->backs_dirty) {
         g->backs_dirty = false;
-        if (render_backs_save(g->rctx)) any = true;
+        if (render_backs_save(g->rctx)) { any = true; saved_add(g, "BACKS.SPL"); }
         else {
             // refused: the file would pass its size limit. Undo background
             // strokes, newest first, until what is left fits again.
@@ -2074,6 +2094,10 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
             // empty get no overlay so it only calls out pass/magnet/slip tiles.
             if (ged_show_tiles() && raw != 0 && (raw >> 6) != 1) {
                 Color c = ATTR_COLOUR[raw >> 6]; c.a = TILE_TINT_ALPHA[raw >> 6];
+                DrawRectangle(x0 + x * z, y0 + y * z, z, z, c);
+            }
+            if (ged_show_hurt() && raw != 0 && tile_hurts((uint8_t)raw)) {   // Ctrl-D h, as in the room picture
+                Color c = HURT_COLOUR; c.a = HURT_TINT_ALPHA;
                 DrawRectangle(x0 + x * z, y0 + y * z, z, z, c);
             }
         }
@@ -2790,6 +2814,21 @@ static void draw_overlay(GuiState *g) {
             }
     }
 
+    // Ctrl-D h: every hurting tile (tile_hurts, room.h) under a red tint, so a hazard reads
+    // as one whatever its picture; the same tile in a room numbered 7 mod 8 heals instead.
+    if (ged_show_hurt() && !g->text_map) {
+        int hot_switch = -1, hot_chunk = -1; bool hot_on = false;
+        ged_hot_block_preview(&hot_switch, &hot_chunk, &hot_on);
+        for (int y = 0; y < HEIGHT_TILES; y++)
+            for (int x = 0; x < WIDTH_TILES; x++) {
+                uint8_t t = effective_tile(r, x, y, NULL, hot_switch, hot_chunk, hot_on);
+                if (t == 0 || !tile_hurts(t)) continue;
+                Vector2 p = tile_pt(g, x, y);
+                Color c = HURT_COLOUR; c.a = HURT_TINT_ALPHA;
+                DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, c);
+            }
+    }
+
     if (ged_show_objects() || emph_obj) {
         for (int i = 0; i < r->num_objects; i++) {
             struct RoomObject *o = r->objects + i;
@@ -2984,7 +3023,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->paint_dirty) {                              // debounced write of paint strokes
             g->save_timer -= dt;
             if (g->save_timer <= 0 && !g->painting) {
-                if (ged_flush()) g->saved_flash = 1.2f;
+                if (ged_flush()) { g->saved_flash = 1.2f; snprintf(g->saved_what, sizeof g->saved_what, "%s", ROOMS_FILE); }
                 g->room_dirty = true;                  // a refused write undid the stroke: show the room as saved
                 g->paint_dirty = false;
             }

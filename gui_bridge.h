@@ -82,6 +82,7 @@ bool  ged_show_switches(void);
 bool  ged_show_tiles(void);       /* Ctrl-D t: tint tiles by class */
 bool  ged_show_spidey(void);      /* Ctrl-D c: draw Spider-Man at the cursor (default on) */
 bool  ged_show_switch_links(void);  /* Ctrl-D l: every switch chunk's link (default on); off = just the active switch's */
+bool  ged_show_hurt(void);          /* Ctrl-D h: red border round the picker's hurting tiles, red overlay on them in the room (default on) */
 // switch_side_hidden / switch_entry_effective: declared in room.h (pure room-data logic, no
 // ged_ wrapper needed - gui_bridge.h already pulls in room.h above).
 RoomFile *ged_rooms(void);

@@ -1720,6 +1720,12 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
     return true;
 }
 
+bool tile_hurts(uint8_t tile) {
+    if ((tile & 0xC0) == 0xC0) return false;   // slippery: "won't hurt"
+    uint8_t idx = tile & 0x3F;
+    return idx == 0x01 || (idx >= 0x1C && idx <= 0x21) || idx >= 0x3C;
+}
+
 const char *data_path(const char *dir, const char *name) {
     static char bufs[4][4096];
     static unsigned next = 0;

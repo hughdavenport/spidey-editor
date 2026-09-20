@@ -165,7 +165,8 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   The reverse is drawn too: another room's exit-memory chunk that leads here is an orange arrow
   from that room's thumbnail to the edge of this room the player would arrive at (`arrival_edge`),
   labelled e.g. "east on -> here"; a click goes to that chunk. A hot switch's links (cursor on it, or selected) keep their colour
-  and thicken; yellow is only for goto mode. Overlay colours: magenta switch markers, orange TOGGLE_BLOCK,
+  and thicken; yellow is only for goto mode. Overlay colours: red tint = hurting tiles (Ctrl-D h, `tile_hurts`
+  in room.h, also a red border round each run of them in the tile picker), magenta switch markers, orange TOGGLE_BLOCK,
   blue TOGGLE_OBJECT lines (light blue = block object outlines and the map's neighbour frames), green
   TOGGLE_BIT, yellow sprite outlines / goto emphasis / the current room on the map, gold keyboard focus.
 - Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an

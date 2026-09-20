@@ -469,9 +469,26 @@ static void check_data_dir(const char *rooms_path) {
     printf("data dir: ROOMS.SPL read and written where --data-dir points, cwd untouched\n");
 }
 
+// tile_hurts(): the one place that says which tiles hurt Spidey (the GUI's red picker
+// borders and map overlay both read it). Codified from Hugh's `tiles` notes: by tile index
+// 0x01, 0x1c-0x1f, 0x20-0x21 and 0x3c-0x3f, never a slippery (0xc0+) tile.
+static void check_tile_hurts(void) {
+    CHECK(tile_hurts(0x1C) && tile_hurts(0x1F), "pass-through electric/fire 0x1c-0x1f hurt");
+    CHECK(tile_hurts(0x5C) && tile_hurts(0x5F), "solid electric/fire 0x5c-0x5f hurt");
+    CHECK(tile_hurts(0x9C), "magnetic 0x9c hurts");
+    CHECK(!tile_hurts(0xDC) && !tile_hurts(0xFC) && !tile_hurts(0xC1), "slippery tiles never hurt");
+    CHECK(tile_hurts(0x01) && tile_hurts(0x41), "the red square 0x01 hurts");
+    CHECK(tile_hurts(0x20) && tile_hurts(0x21) && tile_hurts(0x61), "the sewer chains 0x20-0x21 hurt");
+    CHECK(tile_hurts(0x3C) && tile_hurts(0x7C) && tile_hurts(0x7F), "0x3c-0x3f (the TAKE floor) hurt");
+    CHECK(!tile_hurts(0x00) && !tile_hurts(0x42) && !tile_hurts(0x1B) && !tile_hurts(0x22) && !tile_hurts(0x3B) && !tile_hurts(0x69),
+          "ordinary tiles do not hurt");
+    printf("tile_hurts: index families 01, 1c-1f, 20-21, 3c-3f; slippery exempt\n");
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s DATA_DIR [SPL_FILE...]\n", argv[0]); return 2; }
     check_random();
+    check_tile_hurts();
     for (int i = 2; i < argc; i++) check_spl_file(argv[i]);
     check_backs_store(argv[1]);
     if (argc > 2) check_room_values(argv[2]);

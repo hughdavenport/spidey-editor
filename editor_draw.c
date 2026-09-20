@@ -27,7 +27,7 @@ help_keys help[][100] = {
         {"Escape", "cancel"},
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
-        {"Ctrl-d[acdnopst]", "toggle display"},
+        {"Ctrl-d[acdhlnopst]", "toggle display"},
         {0},
     },
 
@@ -65,7 +65,7 @@ help_keys help[][100] = {
         {"Escape", "cancel"},
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
-        {"Ctrl-d[acdnopst]", "toggle display"},
+        {"Ctrl-d[acdhlnopst]", "toggle display"},
         {0},
     },
 
@@ -145,9 +145,10 @@ help_keys help[][100] = {
 
     [TOGGLE_DISPLAY]={
         {"a", "all debug info"},
-        {"c", "Spider-Man at the cursor (GUI, default on)"},
+        {"c", "Spider-Man at the cursor (GUI)"},
         {"d", "room data"},
-        {"l", "switch links (GUI, default on)"},
+        {"h", "hurting tiles (GUI)"},
+        {"l", "switch links (GUI)"},
         {"n", "neighbours"},
         {"o", "objects"},
         {"p", "position"},
