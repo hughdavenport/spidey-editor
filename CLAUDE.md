@@ -277,10 +277,12 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   undo record / reset / save of a CGA sprite covers its mask frame too (`has_mask`, `mask_of`).
   The two sets are separate files: an EGA edit is not mirrored into the CGA file or vice versa.
 - The button grid sits under the picker (two per row, from below the sprite sheets' height so it
-  never moves): tiles backs / sprites font / import export / reset screens (`SRC_*`, `SRC_NAMES`
-  in gui.c: one order for labels, highlight, presses and the keyboard) / block (while a block
-  panel is hidden; the five view buttons stay live with a block panel up and, clicked, hide it
-  and switch, as Ctrl-B does - only reset / import / export dim), with pass solid / magnet slip right under the tile picker, level with the
+  never moves): row 0 holds the gfx / block toggle alone (gfx while a block panel is up: hides
+  it; block while hidden: brings it back), rows 1-4 tiles backs / sprites font / import export /
+  reset screens (`SRC_*`, `SRC_NAMES` in gui.c: one order for labels, highlight, presses and the
+  keyboard; `SRC_ROW0`), row 5 imp room / exp room, always. Nothing dims with a block panel up:
+  a view button hides the panel and switches (as Ctrl-B does), import / export take the block's
+  PNG, reset resets the room (block included). Pass solid / magnet slip sit right under the tile picker, level with the
   colour swatches (tiles view only); the picker's labels moved into the
   pixel-editor column under its own lines (`grid_button`, `buttons_y0`, `world_y`). "font" is CHARSET (128 tiles, 8 across at the tile zoom, 16 rows: the tallest picker, so it sets `buttons_y0`). "screens" enters screen mode
   (`g->screens_view`): the whole window becomes the chosen full-screen picture (LOADSCRN, WINSCRN,

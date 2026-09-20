@@ -43,7 +43,8 @@
 enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_TOOLS, FOCUS_ATTRS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
 #define BLOCK_BUTTONS 6         // block panel: w+ w- / h+ h- / import export (gfx is the grid's row-4 slot)
-#define BUTTON_ROWS 6           // two per row: tiles backs / sprites font / import export / reset screens / block / room
+#define BUTTON_ROWS 6           // row 0: the gfx / block toggle (alone); rows 1-4, two per row: tiles backs / sprites font / import export / reset screens; row 5: imp room / exp room
+#define SRC_ROW0 1              // the first view-button row
 // The source grid's eight buttons in that order (Hugh's layout); everything indexes them by it.
 enum { SRC_TILES, SRC_BACKS, SRC_SPRITES, SRC_FONT, SRC_IMPORT, SRC_EXPORT, SRC_RESET, SRC_SCREENS };
 static const char *SRC_NAMES[8] = { "tiles", "backs", "sprites", "font", "import", "export", "reset", "screens" };
@@ -527,13 +528,18 @@ static int cur_backs(void) {   // the block the backs picker paints and labels: 
     return sheet >= 0 ? sheet : ged_rooms()->rooms[ged_room()].data.background % BACKS_BLOCKS;
 }
 
+// A block object under the editor cursor - except in background mode, which has no blocks
+// (they are not drawn), so neither its tile grid, its w/h buttons nor its picker rules apply.
+static bool block_at_cursor(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh) {
+    return !g->backs_view && ged_block_at_cursor(bi, bx, by, bw, bh);
+}
+
 // Is the block panel (rather than the pixel editor) showing right now?
 static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh) {
     // Background mode has no blocks (they are not even drawn), so the cursor resting on one
     // must not bring the block panel up - that would dim the view buttons and snap the picker
     // back to the tiles, undoing a Ctrl-B the moment it was pressed.
-    if (g->backs_view) return false;
-    return ged_block_at_cursor(bi, bx, by, bw, bh) && *bi != g->block_hidden;
+    return block_at_cursor(g, bi, bx, by, bw, bh) && *bi != g->block_hidden;
 }
 
 // Arrow / hjkl movement for the panel that has keyboard focus.
@@ -567,7 +573,7 @@ static void focus_move(GuiState *g, int dx, int dy) {
         }
         if (!grid_row_valid(g, g->btn_row)) g->btn_row = 0;
         g->btn_sel = ((g->btn_sel + dx) % 2 + 2) % 2;
-        if (g->btn_row == 4) g->btn_sel = 0;              // "block" stands alone in its row
+        if (g->btn_row == 0) g->btn_sel = 0;              // the gfx / block toggle stands alone in its row
     } else if (g->focus == FOCUS_EDITOR) {
         int bi, bx, by, w, h;
         if (!block_panel(g, &bi, &bx, &by, &w, &h)) pixed_dims(g, &w, &h);
@@ -595,7 +601,11 @@ static void focus_apply(GuiState *g) {
         g->pix_op = true;
     } else if (g->focus == FOCUS_BUTTONS) {
         if (g->btn_row == 5) { if (g->btn_sel % 2 == 0) room_import_button(g); else room_export_button(g); }
-        else if (g->btn_row * 2 + g->btn_sel % 2 < pixed_button_count(g)) pixed_button_press(g, g->btn_row * 2 + g->btn_sel % 2);
+        else if (g->btn_row == 0) {   // gfx / block: hide the block panel, or bring it back
+            int bi, bx, by, bw, bh;
+            if (block_panel(g, &bi, &bx, &by, &bw, &bh)) g->block_hidden = bi; else g->block_hidden = -1;
+        }
+        else pixed_button_press(g, (g->btn_row - SRC_ROW0) * 2 + g->btn_sel % 2);
     } else if (g->focus == FOCUS_EDITOR) {         // paint at the editor cursor
         int bi, bx, by, bw, bh;
         if (block_panel(g, &bi, &bx, &by, &bw, &bh)) {
@@ -792,13 +802,13 @@ static bool feed_mouse(GuiState *g) {
         g->pix_op = true;
         return true;
     }
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, pick_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, pick_button(g)) && !block_at_cursor(g, &tx, &ty, &tx, &ty, &tx)) {
         g->eyedrop = !g->eyedrop; g->fill_armed = false;
         g->focus = FOCUS_TOOLS; g->tool_sel = 0;
         g->pix_op = true;
         return true;
     }
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, fill_button(g)) && !ged_block_at_cursor(&tx, &ty, &tx, &ty, &tx)) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, fill_button(g)) && !block_at_cursor(g, &tx, &ty, &tx, &ty, &tx)) {
         g->fill_armed = !g->fill_armed; g->eyedrop = false;
         g->focus = FOCUS_TOOLS; g->tool_sel = 1;
         g->pix_op = true;
@@ -931,7 +941,7 @@ static bool feed_mouse(GuiState *g) {
     // when a block is at the cursor), so this must not fire while that panel is up -
     // otherwise a click on "w+" etc. lands here first and w+/w-/h+/h- never see it.
     int block_bi, block_bx, block_by, block_bw, block_bh;
-    bool block_panel_up = ged_block_at_cursor(&block_bi, &block_bx, &block_by, &block_bw, &block_bh) && block_bi != g->block_hidden;
+    bool block_panel_up = block_at_cursor(g, &block_bi, &block_bx, &block_by, &block_bw, &block_bh) && block_bi != g->block_hidden;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && tiles_view(g) && !block_panel_up)
         for (int i = 0; i < 4; i++)
             if (CheckCollisionPointRec(m, attr_button(g, i, 0))) {
@@ -943,7 +953,7 @@ static bool feed_mouse(GuiState *g) {
     // block editor (while the cursor is on a block object it replaces the pixel editor)
     {
         int bi, bx, by, bw, bh;
-        if (ged_block_at_cursor(&bi, &bx, &by, &bw, &bh) && bi != g->block_hidden) {
+        if (block_at_cursor(g, &bi, &bx, &by, &bw, &bh) && bi != g->block_hidden) {
             int z = block_zoom(g, bw, bh), x0 = pixed_x(g), y0 = palette_y(g);
             bool in_grid = m.x >= x0 && m.x < x0 + bw * z && m.y >= y0 && m.y < y0 + bh * z;
             if (in_grid) {
@@ -980,15 +990,18 @@ static bool feed_mouse(GuiState *g) {
                         g->focus = FOCUS_ATTRS; g->attr_sel = i;
                         return true;
                     }
-                if (CheckCollisionPointRec(m, grid_button(g, 5, 0))) { g->block_hidden = bi; return true; }   // gfx: the pixel editor; "block" there brings this back
-                for (int i = 0; i < 8; i++)   // a view button still works: it hides the block panel and switches, as Ctrl-B does
-                    if ((i == SRC_TILES || i == SRC_BACKS || i == SRC_SPRITES || i == SRC_FONT || i == SRC_SCREENS) && CheckCollisionPointRec(m, pixed_button(g, i))) {
-                        g->block_hidden = bi;
-                        g->focus = FOCUS_BUTTONS; g->btn_row = i / 2; g->btn_sel = i % 2;
-                        pixed_button_press(g, i);
+                if (CheckCollisionPointRec(m, grid_button(g, 0, 0))) { g->block_hidden = bi; return true; }   // gfx: the pixel editor; "block" there brings this back
+                for (int i = 0; i < 8; i++)   // the grid stays live with a block panel up: views hide it and switch (as Ctrl-B does),
+                    if (CheckCollisionPointRec(m, pixed_button(g, i))) {   // import / export take the block's PNG, reset the room (block included)
+                        g->focus = FOCUS_BUTTONS; g->btn_row = SRC_ROW0 + i / 2; g->btn_sel = i % 2;
+                        if (i == SRC_IMPORT) block_import_png(g, bi, bw, bh, NULL);
+                        else if (i == SRC_EXPORT) block_export_png(g, bi, bw, bh);
+                        else if (i == SRC_RESET) { if (ged_room_reset()) { g->room_dirty = true; g->world_stale = true; } }
+                        else { g->block_hidden = bi; pixed_button_press(g, i); }
                         return true;
                     }
-                if (m.x >= palette_x(g) && m.x < pixed_x(g) && m.y >= buttons_y0(g) && m.y < buttons_bottom(g)) return true;   // reset / import / export are dimmed while the block panel is up (they act on the pixel editor's image)
+                if (CheckCollisionPointRec(m, grid_button(g, 5, 0))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 0; room_import_button(g); return true; }
+                if (CheckCollisionPointRec(m, grid_button(g, 5, 1))) { g->focus = FOCUS_BUTTONS; g->btn_row = 5; g->btn_sel = 1; room_export_button(g); return true; }
             }
             if (in_grid) return false;
         }
@@ -1029,7 +1042,7 @@ static bool feed_mouse(GuiState *g) {
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
             for (int i = 0; i < pixed_button_count(g); i++)
                 if (CheckCollisionPointRec(m, pixed_button(g, i))) {
-                    g->focus = FOCUS_BUTTONS; g->btn_row = i / 2; g->btn_sel = i % 2;   // the keyboard cursor follows the click
+                    g->focus = FOCUS_BUTTONS; g->btn_row = i == 8 ? 0 : SRC_ROW0 + i / 2; g->btn_sel = i % 2;   // the keyboard cursor follows the click
                     pixed_button_press(g, i);
                     return true;
                 }
@@ -1740,7 +1753,7 @@ static Rectangle grid_button(GuiState *g, int row, int col) {
     int bw = (TILESET_PX * g->scale - PAD) / 2;
     return (Rectangle){ palette_x(g) + col * (bw + PAD), buttons_y0(g) + row * (ch(g) + 8), bw, ch(g) + 4 };
 }
-static Rectangle pixed_button(GuiState *g, int i) { return grid_button(g, i / 2, i % 2); }
+static Rectangle pixed_button(GuiState *g, int i) { return i == 8 ? grid_button(g, 0, 0) : grid_button(g, SRC_ROW0 + i / 2, i % 2); }   // 8 = the block toggle
 static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 9 : 8; }
 
 static void pixed_button_press(GuiState *g, int i) {
@@ -2290,23 +2303,22 @@ static void draw_source_grid(GuiState *g, bool block_up) {
         Rectangle rb = pixed_button(g, i);
         bool on = (i == SRC_TILES && tiles_view(g)) || (i == SRC_SPRITES && g->sprites_view) || (i == SRC_BACKS && g->backs_view)
                || (i == SRC_FONT && g->font_view) || (i == SRC_SCREENS && g->screens_view);
-        bool kbd = !block_up && g->focus == FOCUS_BUTTONS && g->btn_row == i / 2 && g->btn_sel % 2 == i % 2;
+        bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == SRC_ROW0 + i / 2 && g->btn_sel % 2 == i % 2;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : on ? WHITE : GRAY);   // white = the view on show; gold = keyboard focus, as everywhere
         int tw = text_w(&g->font, g->font_loaded, names[i], fs);
-        bool view_button = i == SRC_TILES || i == SRC_BACKS || i == SRC_SPRITES || i == SRC_FONT || i == SRC_SCREENS;   // these stay live with a block panel up
-        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, block_up && !view_button ? GRAY : RAYWHITE);
+        gtext(&g->font, g->font_loaded, names[i], (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);   // all live in block mode too (import / export: the block's PNG; reset: the room)
     }
-    if (block_up || g->block_hidden >= 0) {
-        Rectangle rb = grid_button(g, block_up ? 5 : 4, 0);
+    if (block_up || g->block_hidden >= 0) {   // the gfx / block toggle, alone on the row above the views, under the colour legend
+        Rectangle rb = grid_button(g, 0, 0);
         const char *name = block_up ? "gfx" : "block";
-        bool kbd = !block_up && g->focus == FOCUS_BUTTONS && g->btn_row == 4;
+        bool kbd = g->focus == FOCUS_BUTTONS && g->btn_row == 0;
         DrawRectangleRec(rb, (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd ? GOLD : GRAY);
         int tw = text_w(&g->font, g->font_loaded, name, fs);
         gtext(&g->font, g->font_loaded, name, (int)rb.x + ((int)rb.width - tw) / 2, (int)rb.y + 2, fs, RAYWHITE);
     }
-    if (!block_up) {
+    {   // imp room / exp room, in block mode too
         static const char *rnames[2] = { "imp room", "exp room" };
         for (int i = 0; i < 2; i++) {
             Rectangle rb = grid_button(g, 5, i);
@@ -2345,7 +2357,10 @@ static Rectangle attr_button(GuiState *g, int i, int row_offset) {
     return (Rectangle){ palette_x(g) + (i % 2) * (bw + PAD), swatch_y(g) + (row_offset + i / 2) * (ch(g) + 8), bw, ch(g) + 4 };
 }
 // Which grid rows have buttons right now.
-static bool grid_row_valid(GuiState *g, int row) { return row < 4 || row == 5 || (row == 4 && g->block_hidden >= 0); }
+static bool grid_row_valid(GuiState *g, int row) {   // row 0 only while its gfx / block toggle shows
+    int bi, bx, by, bw, bh;
+    return (row >= SRC_ROW0 && row < SRC_ROW0 + 4) || row == 5 || (row == 0 && (g->block_hidden >= 0 || block_panel(g, &bi, &bx, &by, &bw, &bh)));
+}
 
 // Thumbnail size: 8 columns across the space right of the picture, shrunk if
 // 8 rows would not fit the window.
@@ -3187,7 +3202,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         draw_palette(g);
         {
             int bi, bx, by, bw, bh;
-            bool on_block = ged_block_at_cursor(&bi, &bx, &by, &bw, &bh);
+            bool on_block = block_at_cursor(g, &bi, &bx, &by, &bw, &bh);
             if (!on_block) g->block_hidden = -1;
             if (on_block && bi != g->block_hidden && !tiles_view(g) && !g->backs_view) set_view(g, VIEW_TILES);   // a block is made of tiles: the picker shows them (not in background mode, which has no blocks)
             if (on_block && bi != g->block_hidden) draw_block_editor(g, bi, bx, by, bw, bh);
