@@ -568,7 +568,8 @@ bool render_sprite_box(struct RoomObject *o, const uint8_t *movertab, unsigned g
 // plus the overlay if requested). Assumes the room is valid. hot_switch/
 // hot_chunk/hot_on: see effective_tile (-1/-1/false for none).
 static void render_room_base(RoomFile *file, int room_id,
-                             const Assets *a, bool debug, bool player, bool objects, uint8_t *cv, const uint8_t *movertab,
+                             const Assets *a, bool debug, bool player, bool tiles, bool blocks, bool sprites, bool chunks,
+                             uint8_t *cv, const uint8_t *movertab,
                              int hot_switch, int hot_chunk, bool hot_on) {
     struct DecompressedRoom *room = &file->rooms[room_id].data;
     memset(cv, 0, (size_t)BW * BH * 3);
@@ -579,10 +580,11 @@ static void render_room_base(RoomFile *file, int room_id,
             int v = bg[ty * WIDTH_TILES + tx];
             if (v) draw_tile(cv, a->data[GFX_SCENERY], a->len[GFX_SCENERY], v, tx * 8, ty * 8, a->cga);
         }
-    // Without objects (the GUI's background mode) the tiles a switch's TOGGLE_BLOCK chunks
-    // cover are left out too, so what shows is the background plus the room's fixed tiles only.
+    // The GUI's background mode draws only what its Ctrl-D toggles ask for; with everything on
+    // (the room view) the ordinary path applies, blocks and switch previews through effective_tile.
+    bool all = tiles && blocks && sprites && chunks;
     bool chunk_tile[HEIGHT_TILES * WIDTH_TILES] = {0};
-    if (!objects)
+    if (!all)
         for (int s = 0; s < room->num_switches; s++)
             for (size_t c = 0; c < room->switches[s].chunks.length; c++) {
                 struct SwitchChunk *ch = room->switches[s].chunks.data + c;
@@ -594,13 +596,26 @@ static void render_room_base(RoomFile *file, int room_id,
             }
     for (int ty = 0; ty < HEIGHT_TILES; ty++)
         for (int tx = 0; tx < WIDTH_TILES; tx++) {
-            int v = (objects ? effective_tile(room, tx, ty, movertab, hot_switch, hot_chunk, hot_on)
-                             : chunk_tile[ty * WIDTH_TILES + tx] ? 0 : room->tiles[ty * WIDTH_TILES + tx]) & 0x3f;
+            int v;
+            if (all) v = effective_tile(room, tx, ty, movertab, hot_switch, hot_chunk, hot_on) & 0x3f;
+            else {
+                bool covered = chunk_tile[ty * WIDTH_TILES + tx];
+                v = ((covered ? chunks : tiles) ? room->tiles[ty * WIDTH_TILES + tx] : 0) & 0x3f;
+                if (blocks) {   // a block object's tile over it (its logical place; offsets in the pass below)
+                    for (int o = 0; o < room->num_objects; o++) {
+                        struct RoomObject *ob = room->objects + o;
+                        if (ob->type == BLOCK && ob->tiles && tx >= ob->x && tx < ob->x + ob->block.width && ty >= ob->y && ty < ob->y + ob->block.height) {
+                            int bt = ob->tiles[(ty - ob->y) * ob->block.width + (tx - ob->x)] & 0x3f;
+                            if (bt) v = bt;
+                        }
+                    }
+                }
+            }
             if (v) draw_tile(cv, a->data[GFX_TILES], a->len[GFX_TILES], v + room->tile_offset * 16, tx * 8, ty * 8, a->cga);
         }
     // A block with a nonzero x/y offset draws there instead of at its logical (x,y) - effective_tile
     // (above) already skipped it at the logical position once it saw the same offset.
-    for (int i = 0; objects && i < room->num_objects; i++) {
+    for (int i = 0; blocks && i < room->num_objects; i++) {
         struct RoomObject *o = room->objects + i;
         if (o->type != BLOCK || !o->tiles) continue;
         int ox, oy;
@@ -614,7 +629,7 @@ static void render_room_base(RoomFile *file, int room_id,
                 if (v) draw_tile(cv, a->data[GFX_TILES], a->len[GFX_TILES], v + room->tile_offset * 16, tx * 8, ty * 8, a->cga);
             }
     }
-    for (int i = 0; objects && i < room->num_objects; i++) {
+    for (int i = 0; sprites && i < room->num_objects; i++) {
         struct RoomObject *o = room->objects + i;
         if (o->type != SPRITE) continue;
         int s2, frame;
@@ -656,7 +671,7 @@ bool render_room_png(RoomFile *file, int room_id, const char *out_path, RenderOp
     uint8_t *cv = malloc((size_t)BW * BH * 3);
     bool ok = cv != NULL;
     if (ok) {
-        render_room_base(file, room_id, &a, opts.debug, true, true, cv, opts.movertab, -1, -1, false);
+        render_room_base(file, room_id, &a, opts.debug, true, true, true, true, true, cv, opts.movertab, -1, -1, false);
         ok = write_scaled(out_path, cv, opts.scale > 0 ? opts.scale : 1);
     }
     free(cv); free_assets(&a);
@@ -678,7 +693,7 @@ bool render_all_png(RoomFile *file, const char *out_dir, RenderOpts opts) {
         if (!file->rooms[rid].valid) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/room%02d.png", out_dir, rid);
-        render_room_base(file, rid, &a, opts.debug, true, true, cv, opts.movertab, -1, -1, false);
+        render_room_base(file, rid, &a, opts.debug, true, true, true, true, true, cv, opts.movertab, -1, -1, false);
         ok = write_scaled(path, cv, opts.scale > 0 ? opts.scale : 1);
         n++;
     }
@@ -694,7 +709,7 @@ struct RenderCtx {
     Assets a;
     char dir[1024];
     bool hide_player;
-    bool hide_objects;
+    bool hide_tiles, hide_blocks, hide_sprites, hide_chunks;
     const uint8_t *movertab;
 };
 
@@ -722,7 +737,7 @@ bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out,
                       int hot_switch, int hot_chunk, bool hot_on) {
     if (ctx == NULL || room_id < 0 || room_id >= 64 || !file->rooms[room_id].valid)
         return false;
-    render_room_base(file, room_id, &ctx->a, false, !ctx->hide_player, !ctx->hide_objects, out, ctx->movertab,
+    render_room_base(file, room_id, &ctx->a, false, !ctx->hide_player, !ctx->hide_tiles, !ctx->hide_blocks, !ctx->hide_sprites, !ctx->hide_chunks, out, ctx->movertab,
                       hot_switch, hot_chunk, hot_on);
     return true;
 }
@@ -735,8 +750,9 @@ void render_show_player(RenderCtx *ctx, bool show) {
     if (ctx) ctx->hide_player = !show;
 }
 
-void render_show_objects(RenderCtx *ctx, bool show) {
-    if (ctx) ctx->hide_objects = !show;
+void render_show_parts(RenderCtx *ctx, bool tiles, bool blocks, bool sprites, bool chunks) {
+    if (!ctx) return;
+    ctx->hide_tiles = !tiles; ctx->hide_blocks = !blocks; ctx->hide_sprites = !sprites; ctx->hide_chunks = !chunks;
 }
 
 int render_player_frame(void) { return PLAYER_FRAME; }
@@ -1036,7 +1052,7 @@ bool render_montage_png(RoomFile *file, const char *out_path, RenderOpts opts) {
         for (int i = 0; i < mw * mh; i++) { m[i*3] = 40; m[i*3+1] = 40; m[i*3+2] = 48; }
         for (int rid = 0; rid < 64; rid++) {
             if (!file->rooms[rid].valid) continue;
-            render_room_base(file, rid, &a, opts.debug, true, true, cv, opts.movertab, -1, -1, false);
+            render_room_base(file, rid, &a, opts.debug, true, true, true, true, true, cv, opts.movertab, -1, -1, false);
             int ox = pad + (rid % 8) * (cw + pad), oy = pad + (rid / 8) * (ch + pad);
             for (int y = 0; y < ch; y++)
                 for (int x = 0; x < cw; x++) {

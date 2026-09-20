@@ -70,10 +70,12 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Editor uses ANSI escape codes (`\033[row;colH` cursor movement, color codes)
 - `get_screen_dimensions()`: calls `ioctl(STDOUT_FILENO, TIOCGWINSZ, &w)` — **fails when piped (returns 0)**
 - `GOTO(x, y)` macro asserts `x < screen_dimensions.x && y < screen_dimensions.y`; the text panel
-  under the map uses `PANEL_GOTO` (editor_draw.c) instead, which does not assert on the row and
-  applies `panel_scroll`: PgUp/PgDn scroll the panel (rows scrolled off the top are parked on a cell
-  row never shown; the header's right end says "panel +N"), clamped at the top of redraw by last
-  frame's `panel_end`. The TUI no longer demands `MIN_HEIGHT + offset_y` rows for the panel: a
+  under the map uses `PANEL_GOTO` (editor_draw.c) instead, which does not assert on the row: the
+  panel is drawn at its natural rows into the 512-row cell buffer and the TUI's `screen_flush`
+  scrolls it (`screen_panel_shift` = `panel_scroll`, 0 in the GUI and while the help box is up),
+  so lines the editor continues with "\n" scroll with the rest. PgUp/PgDn move `panel_scroll`
+  (the header's right end says "panel +N"), clamped at the top of redraw by last frame's
+  `panel_end`; the macro overlay is drawn at the buffer row the flush shows on the last line. The TUI no longer demands `MIN_HEIGHT + offset_y` rows for the panel: a
   terminal tall enough for the map (23 rows) is enough. The help box likewise clips to the
   terminal and PgUp/PgDn scroll it while it is up (`help_scroll`, "PgUp/PgDn: N more lines").
   `python3 tui_smoke_test.py` drives the TUI on a 30-row PTY (a sandbox data dir) through all of
@@ -98,7 +100,19 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   background plus the room's fixed tiles) and without any room overlays; the block panel never
   comes up in this mode (it would dim the view buttons and snap the picker back to the tiles,
   which read as Ctrl-B "toggling twice"); F2 shows the block's hex. Esc or Ctrl-B goes back to
-  the tiles picker (the editor's Esc alone would be undone next frame).
+  the tiles picker (the editor's Esc alone would be undone next frame). By default the picture
+  is the background alone; Ctrl-D in this mode (both interfaces) is its own toggle menu with
+  separate flags (`backs_show`): t the room's tiles, b block objects' tiles, s sprites, c the
+  tiles TOGGLE_BLOCK chunks cover - in the GUI through `render_show_parts`, in the TUI's hex as
+  blue / green / yellow @@ / magenta over the background's values. A macro remembers the
+  mode it was recorded in (`macro_slot_backs`) and a replay switches to it first; the GUI
+  follows the editor's mode after its keys ran (`ged_backs_view_on`).
+- Numbers in the GUI's labels ("tile 0x52", "selected 0x52", "background 2 scenery tile 0x13",
+  the picker's hover id under F2, the world map's hovered room id, "shown by rooms") follow the
+  editor's Ctrl-h: hex by default, decimal after (`ged_hex`, `numfmt` / `idfmt`). Under F2 the
+  tiles picker no longer paints every id; the hovered tile's id is a label, as the world map
+  names its rooms. Under "tileset N selected" a hurting tile says "hurts", or "heals" in a
+  room numbered 7 mod 8.
 - SIGWINCH handler sets `state->resized = true`; main loop calls `get_screen_dimensions()` on next iteration
 
 ## Hot Reload (editor.c)

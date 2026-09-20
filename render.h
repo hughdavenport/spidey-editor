@@ -60,7 +60,9 @@ bool render_room_rgb(RenderCtx *ctx, RoomFile *file, int room_id, uint8_t *out,
 // Whether render_room_rgb draws Spider-Man at his start position in room 1
 // (default true; the GUI draws him at the cursor instead).
 void render_show_player(RenderCtx *ctx, bool show);
-void render_show_objects(RenderCtx *ctx, bool show);   // blocks and sprites (default on); off = just tiles over the background
+// What of the room to draw over its background (all on by default): its tiles (those no
+// TOGGLE_BLOCK chunk covers), block objects' tiles, sprites, and the chunk-covered tiles.
+void render_show_parts(RenderCtx *ctx, bool tiles, bool blocks, bool sprites, bool chunks);
 
 // MOVERTAB.DAT (768 bytes: 256 objects x 3 bytes), so render_room_rgb can mirror a sprite
 // horizontally/vertically per its byte 2 facing/upside-down bits (see room.c's

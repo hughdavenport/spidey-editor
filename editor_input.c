@@ -2,6 +2,7 @@
 #include "render.h"
 
 static void backs_view_enter(void);   /* Ctrl-B (defined with handle_backs_view below) */
+static void backs_view_leave(void);
 #include <ctype.h>
 #include <errno.h>
 #include <poll.h>
@@ -3232,6 +3233,7 @@ static bool handle_normal(Key key) {
                         *slot = state->macro_buf;
                         state->macro_buf = (KeyArray){0};
                         state->macro_last_saved = state->macro_slot;
+                        state->macro_slot_backs[state->macro_slot - 'a'] = state->macro_start_backs;
                         state->macro_recording = false;
                         snprintf(state->status_message, sizeof(state->status_message),
                                  "Macro '%c' saved (%zu keys)", state->macro_slot,
@@ -4928,6 +4930,24 @@ static void backs_redo(void) {
     state->backs_redo_n--;
 }
 
+// Ctrl-D inside the background view: one key flips one overlay and returns; q / Esc return.
+static void handle_backs_toggle(Key key) {
+    bool done = true;
+    if (key.code == KEY_CHAR && key.mod == MOD_NONE) {
+        switch (key.ch) {
+            case 't': state->backs_show.tiles = !state->backs_show.tiles; break;
+            case 'b': state->backs_show.blocks = !state->backs_show.blocks; break;
+            case 's': state->backs_show.sprites = !state->backs_show.sprites; break;
+            case 'c': state->backs_show.chunks = !state->backs_show.chunks; break;
+            case 'q': break;
+            case '?': state->help = !state->help; done = false; break;
+            default: done = false; break;
+        }
+    } else if (key.code == KEY_CTRL && key.ch == '_') { state->help = !state->help; done = false; }
+    else if (key.code != KEY_ESC) done = false;
+    if (done) state->current_state = state->previous_state;
+}
+
 static void handle_backs_view(Key key) {
     v2 *c = &state->cursors[state->current_level];
     switch (key.code) {
@@ -4944,6 +4964,7 @@ static void handle_backs_view(Key key) {
             if (key.ch == 'B') backs_view_leave();
             else if (key.ch == '_') state->help = !state->help;
             else if (key.ch == 'P') fork_play();
+            else if (key.ch == 'D') { state->previous_state = state->current_state; state->current_state = TOGGLE_DISPLAY; }   // overlays: t b s c
             break;
         case KEY_CHAR: {
             if (key.mod != MOD_NONE) break;
@@ -4976,6 +4997,7 @@ static void handle_backs_view(Key key) {
                     state->macro_buf = (KeyArray){0};
                     state->macro_recording = false;
                     state->macro_last_saved = state->macro_slot;
+                    state->macro_slot_backs[state->macro_slot - 'a'] = state->macro_start_backs;
                 } else {
                     state->macro_meta = true;
                 }
@@ -5010,6 +5032,7 @@ void editor_handle_key(Key key) {
                 key.ch >= 'a' && key.ch <= 'z') {
             state->macro_recording = true;
             state->macro_slot = key.ch;
+            state->macro_start_backs = state->backs_view;   // the mode this macro's keys are for
             state->macro_buf.length = 0;
         }
         /* ESC or any other key: cancel, key consumed */
@@ -5027,6 +5050,11 @@ void editor_handle_key(Key key) {
             else if (ch == '.')              slot = state->macro_last_saved;
             if (slot >= 'a' && slot <= 'z') {
                 KeyArray *m = &state->macro_slots[slot - 'a'];
+                if (m->length > 0 && state->macro_slot_backs[slot - 'a'] != state->backs_view) {
+                    // the macro was recorded in the other mode: go there first (in the GUI the
+                    // picker follows, see gui.c after feed_keys)
+                    if (state->macro_slot_backs[slot - 'a']) backs_view_enter(); else backs_view_leave();
+                }
                 if (m->length > 0) {
                     for (size_t mi = 0; mi < m->length; mi++)
                         ARRAY_ADD(state->macro_replay, m->data[mi]);
@@ -5053,6 +5081,7 @@ void editor_handle_key(Key key) {
         if (*scroll < 0) *scroll = 0;
         return;
     }
+    if (state->backs_view && state->current_state == TOGGLE_DISPLAY) { handle_backs_toggle(key); return; }
     if (state->backs_view && state->current_state != GOTO_ROOM) { handle_backs_view(key); return; }   // (the r prompt keeps its own keys)
 
     /* Plain left click below the map: act on the info line clicked (any state);

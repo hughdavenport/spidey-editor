@@ -87,7 +87,11 @@ xdotool mousemove $((X + 876 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; x
 # Shift+drag along room row 3, wait for the BACKS.SPL write, undo, back to tiles
 xdotool mousemove $((X + 876 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12e-backs-view
 xdotool key ctrl+shift+slash; sleep 0.5; snap s12e1-backs-help; xdotool key ctrl+shift+slash; sleep 0.3   # background mode has its own help table
+xdotool key ctrl+d; sleep 0.3; xdotool key t; sleep 0.6; snap s12e1b-backs-with-tiles; xdotool key ctrl+d; sleep 0.3; xdotool key t; sleep 0.4   # Ctrl-D t overlays the room's tiles
 xdotool key F2; sleep 0.6; snap s12e2-backs-hex; xdotool key F2; sleep 0.3   # F2 with the backs picker: the background block's hex
+# tiles picker under F2: no ids painted over the tiles, the hovered tile's id as a label (decimal after Ctrl-h)
+xdotool key ctrl+b; sleep 0.4; xdotool key F2; sleep 0.3; xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 24 + 1*24 + 12)); sleep 0.5; snap s12e2b-picker-hover
+xdotool key ctrl+h; sleep 0.5; snap s12e2c-picker-hover-dec; xdotool key ctrl+h; xdotool key F2; sleep 0.3; xdotool key ctrl+b; sleep 0.4
 # Ctrl-B swaps the picker tiles <-> background (the panel under the picture follows)
 xdotool key ctrl+b; sleep 0.6; snap s12e3-ctrlb-tiles; xdotool key ctrl+b; sleep 0.6; snap s12e4-ctrlb-backs
 xdotool mousemove $((X + 776 + 0*24 + 12)) $((Y + 24 + 1*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3

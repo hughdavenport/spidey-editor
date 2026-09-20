@@ -82,8 +82,11 @@ bool  ged_show_switches(void);
 bool  ged_show_tiles(void);       /* Ctrl-D t: tint tiles by class, hurting tiles red */
 unsigned ged_save_count(const char **file);   /* bumps on every editor write; *file names it (ROOMS.SPL, MOVERTAB.DAT, BACKS.SPL) */
 typedef struct RenderCtx RenderCtx;
+bool  ged_hex(void);                         /* Ctrl-h: numbers shown in hex (default) or decimal */
 void  ged_set_render(RenderCtx *ctx);        /* the GUI's render context: backgrounds for the editor's Ctrl-B / F2 background view */
-void  ged_set_backs_view(bool on);           /* F2 with the backs picker: the editor draws and edits the background block's hex */
+void  ged_set_backs_view(bool on);
+bool  ged_backs_view_on(void);
+void  ged_backs_show(bool *tiles, bool *blocks, bool *sprites, bool *chunks);   /* Ctrl-D in background mode: which of the room's things to draw over the background */               /* the editor's own idea of it after its keys ran (a macro replay may have switched it) */           /* F2 with the backs picker: the editor draws and edits the background block's hex */
 bool  ged_backs_edited(void);                /* a background tile was edited through the editor since the last call (redraw the picture) */
 bool  ged_show_spidey(void);      /* Ctrl-D c: draw Spider-Man at the cursor (default on) */
 bool  ged_show_switch_links(void);  /* Ctrl-D l: every switch chunk's link (default on); off = just the active switch's */

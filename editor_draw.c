@@ -2,15 +2,18 @@
 #include "render.h"
 #include <ctype.h>
 #include <string.h>
-/* A row of the text panel under the map. Unlike GOTO it does not assert on the row: a
- * terminal shorter than the panel simply loses the panel's tail (scr_printf keeps the cell
- * buffer's SCREEN_MAX_HEIGHT rows and screen_flush shows only the rows the terminal has;
- * beyond those the writes are dropped) instead of crashing the TUI, which a switch with
- * many chunks used to do (Hugh: Undercroft's switch 0 on a small terminal). */
+/* A number the way Ctrl-h says: hex (the default) or decimal. */
+#define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
+
+/* A row of the text panel under the map. Unlike GOTO it does not assert on the row: the panel
+ * is drawn at its natural rows into the cell buffer (SCREEN_MAX_HEIGHT of them) and the TUI's
+ * screen_flush shows the rows the terminal has, scrolled by panel_scroll (PgUp/PgDn), so a
+ * terminal shorter than the panel loses nothing but needs scrolling, instead of the TUI
+ * crashing as it did on a switch with many chunks (Hugh: Undercroft's switch 0). */
+
 #define PANEL_GOTO(_x, _y) do { \
     assert((_x) < state->screen_dimensions.x && "width out of bounds"); \
-    int _r = (_y) - (screen_headless ? 0 : state->panel_scroll); /* PgUp/PgDn: rows scrolled */ \
-    if (_r <= HEIGHT_TILES) _r = SCREEN_MAX_HEIGHT - 1;         /* off the top: park it on a row never shown */ \
+    int _r = (_y) < SCREEN_MAX_HEIGHT ? (_y) : SCREEN_MAX_HEIGHT - 1;   /* natural row; screen_flush scrolls the panel (screen_panel_shift) */ \
     scr_printf("\033[%d;%dH", _r + 1, (_x) + 1); \
 } while (false)
 
@@ -387,14 +390,28 @@ static help_keys backs_help[] = {
     {"?, Ctrl-?", "help"},
     {"Escape", "back to the room"},
     {"Ctrl-b", "toggle background view"},
+    {"Ctrl-d[tbsc]", "toggle overlays: the room's tiles / blocks / sprites / chunks over the background"},
     {"PgUp/PgDn", "scroll the help box"},
+    {0},
+};
+
+static help_keys backs_toggle_help[] = {   // Ctrl-D inside the background view
+    {"t", "the room's tiles (blue in the hex)"},
+    {"b", "block objects' tiles (green)"},
+    {"s", "sprites (yellow @@)"},
+    {"c", "the tiles a switch's TOGGLE_BLOCK chunks cover (magenta)"},
+    {"ESC", "cancel"},
+    {"q", "cancel"},
+    {"?, Ctrl-?", "help"},
     {0},
 };
 
 void show_help()
 {
-    help_keys *table = state->backs_view ? backs_help : help[state->current_state];
-    size_t table_len = state->backs_view ? C_ARRAY_LEN(backs_help) : C_ARRAY_LEN(help[state->current_state]);
+    help_keys *table = !state->backs_view ? help[state->current_state]
+                     : state->current_state == TOGGLE_DISPLAY ? backs_toggle_help : backs_help;
+    size_t table_len = !state->backs_view ? C_ARRAY_LEN(help[state->current_state])
+                     : state->current_state == TOGGLE_DISPLAY ? C_ARRAY_LEN(backs_toggle_help) : C_ARRAY_LEN(backs_help);
     int x = 0, x1 = 0, x2 = 0, y = 0;
     for (size_t i = 0; i < table_len; i ++, y ++) {
         if (table[i].key == NULL) break;
@@ -704,7 +721,8 @@ size_t panel_oob_switch_n = 0;
 static void draw_backs_panel(int *bottom) {
     int bid = state->rooms.rooms[state->current_level].data.background;
     PANEL_GOTO(0, *bottom); (*bottom)++;
-    scr_printf("\033[1mBACKGROUND %02X\033[m (BACKS.SPL block %d): SCENERY tile indices, 00 = black", bid, bid);
+    scr_printf("\033[1mBACKGROUND \033[m");   // the block number and the room ids follow Ctrl-h (hex / decimal)
+    scr_printf("\033[1m"); PRINTF_DATA(bid); scr_printf("\033[m (BACKS.SPL block %d): SCENERY tile indices, 00 = black", bid);
     PANEL_GOTO(0, *bottom); (*bottom)++;
     int col = scr_printf("shown by rooms");
     int n = 0;
@@ -714,7 +732,9 @@ static void draw_backs_panel(int *bottom) {
         memcpy(name, state->rooms.rooms[r].data.name, sizeof state->rooms.rooms[r].data.name);
         for (int k = 23; k >= 0 && (name[k] == ' ' || name[k] == '\0'); k--) name[k] = '\0';
         if (col > 90) { PANEL_GOTO(0, *bottom); (*bottom)++; col = scr_printf("              "); }   // wrap under the list
-        col += scr_printf("%s %02zx - \"%s\"", n++ ? "," : "", r, name);
+        col += scr_printf(n++ ? ", " : " ");
+        col += PRINTF_DATA((unsigned)r);
+        col += scr_printf(" - \"%s\"", name);
     }
     PANEL_GOTO(0, *bottom); (*bottom)++;
     scr_printf("\033[1;33man edit here changes every one of them\033[m");
@@ -724,15 +744,47 @@ static void draw_backs_panel(int *bottom) {
     }
 }
 
+
 static void draw_backs_view(void) {
     struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
     int bid = room->background;
     int cx = state->cursors[state->current_level].x, cy = state->cursors[state->current_level].y;
+    // Ctrl-D overlays, each in its own colour over the background's plain hex: chunk-covered
+    // tiles (magenta), the room's other tiles (blue), block objects' tiles (green), sprites
+    // (yellow @@) - the same four the GUI's picture toggles.
+    bool chunk_at[HEIGHT_TILES * WIDTH_TILES] = {0};
+    if (state->backs_show.chunks || state->backs_show.tiles)
+        for (int s = 0; s < room->num_switches; s++)
+            for (size_t c = 0; c < room->switches[s].chunks.length; c++) {
+                struct SwitchChunk *ch = room->switches[s].chunks.data + c;
+                if (ch->type != TOGGLE_BLOCK || ch->x >= WIDTH_TILES || ch->y >= HEIGHT_TILES) continue;
+                for (int k = 0; k < ch->size; k++) {
+                    int cx = ch->x + (ch->dir == VERTICAL ? 0 : k), cy = ch->y + (ch->dir == VERTICAL ? k : 0);
+                    if (cx < WIDTH_TILES && cy < HEIGHT_TILES) chunk_at[TILE_IDX(cx, cy)] = true;
+                }
+            }
     for (int y = 0; y < HEIGHT_TILES; y++) {
         GOTO(0, y + 1);
         for (int x = 0; x < WIDTH_TILES; x++) {
             int v = render_backs_tile(state->rctx, bid, x, y);
-            if (v) scr_printf("%02X", v); else scr_printf("  ");
+            uint8_t t = room->tiles[TILE_IDX(x, y)];
+            if (chunk_at[TILE_IDX(x, y)] ? (state->backs_show.chunks && t) : (state->backs_show.tiles && t))
+                scr_printf(chunk_at[TILE_IDX(x, y)] ? "\033[35;1m%02X\033[m" : "\033[34;1m%02X\033[m", t);
+            else if (v) scr_printf("%02X", v);
+            else scr_printf("  ");
+        }
+    }
+    for (int i = 0; i < room->num_objects; i++) {
+        struct RoomObject *o = room->objects + i;
+        if (o->type == BLOCK && state->backs_show.blocks && o->tiles) {
+            for (int by = 0; by < (int)o->block.height; by++)
+                for (int bx = 0; bx < (int)o->block.width; bx++) {
+                    int tx = o->x + bx, ty = o->y + by;
+                    uint8_t t = o->tiles[by * (int)o->block.width + bx];
+                    if (tx < WIDTH_TILES && ty < HEIGHT_TILES && t) { GOTO(2 * tx, ty + 1); scr_printf("\033[32;1m%02X\033[m", t); }
+                }
+        } else if (o->type == SPRITE && state->backs_show.sprites && o->x < WIDTH_TILES && o->y < HEIGHT_TILES) {
+            GOTO(2 * o->x, o->y + 1); scr_printf("\033[33;1m@@\033[m");
         }
     }
     GOTO(2 * cx, cy + 1);
@@ -744,7 +796,6 @@ static void draw_backs_view(void) {
 }
 
 void redraw() {
-#define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
     // A long-running hot-reloaded session never re-runs the startup init that first calls
     // movertab_load() (hot-reload only swaps in new code, not the one-time setup that ran
     // before this feature existed), so try once here too - the first redraw of any session,
@@ -1685,13 +1736,13 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             snprintf(right_buf, sizeof right_buf, "right: %s - \"%s\"", idbuf, neighbour_name);
 
             int up_len = (int)strlen(up_buf), down_len = (int)strlen(down_buf), right_len = (int)strlen(right_buf);
-            GOTO(up_len < MIN_WIDTH ? (MIN_WIDTH - up_len) / 2 : 0, bottom); bottom ++;
+            PANEL_GOTO(up_len < MIN_WIDTH ? (MIN_WIDTH - up_len) / 2 : 0, bottom); bottom ++;
             scr_printf("%s", up_buf);
             PANEL_GOTO(0, bottom);
             scr_printf("%s", left_buf);
-            GOTO(right_len < MIN_WIDTH ? MIN_WIDTH - right_len : 0, bottom); bottom ++;
+            PANEL_GOTO(right_len < MIN_WIDTH ? MIN_WIDTH - right_len : 0, bottom); bottom ++;
             scr_printf("%s", right_buf);
-            GOTO(down_len < MIN_WIDTH ? (MIN_WIDTH - down_len) / 2 : 0, bottom); bottom ++;
+            PANEL_GOTO(down_len < MIN_WIDTH ? (MIN_WIDTH - down_len) / 2 : 0, bottom); bottom ++;
             scr_printf("%s", down_buf);
             bottom ++;   // a blank line before whatever comes next (Hugh: "add a blank line
                          // between the room neighbours compass and the info below")
@@ -2108,7 +2159,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                                         scr_printf("\033[3%ld;40m", (i % 7));
                                         scr_printf("\033[4;1m%x\033[m", (state->switch_on ? chunk->on : chunk->off) % (state->debug.hex ? 16 : 10));
                                     }
-                                    GOTO(0, bottom - 1);
+                                    PANEL_GOTO(0, bottom - 1);
                                 }
                             }
                         }; break;
@@ -2447,9 +2498,10 @@ show_help_if_needed:
 
     if (state->help) show_help();
 
-    /* Macro slot overlay: drawn at bottom row while awaiting a slot key */
+    /* Macro slot overlay: drawn at bottom row while awaiting a slot key (the buffer row the
+     * flush shows there, once the panel is scrolled) */
     if (state->macro_meta || state->macro_replay_pending) {
-        GOTO(0, state->screen_dimensions.y - 1);
+        PANEL_GOTO(0, state->screen_dimensions.y - 1 + screen_panel_shift());
         scr_printf("\033[7m");
         if (state->macro_replay_pending) {
             char lr = state->macro_last_replayed;

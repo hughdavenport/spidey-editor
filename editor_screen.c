@@ -89,6 +89,10 @@ int scr_printf(const char *fmt, ...) {
     return printed;
 }
 
+int screen_panel_shift(void) {
+    return screen_headless || state->help ? 0 : state->panel_scroll;
+}
+
 void screen_flush(void) {
     int w = state->screen_dimensions.x;
     int h = state->screen_dimensions.y;
@@ -96,12 +100,21 @@ void screen_flush(void) {
     if (h > SCREEN_MAX_HEIGHT) h = SCREEN_MAX_HEIGHT;
     int cur_x = -1, cur_y = -1;
     uint8_t cur_fg = 0, cur_bg = 0, cur_attr = 0;
+    /* The panel under the map is drawn at its natural rows (the buffer has room for 512) and
+     * scrolled here: terminal row y shows buffer row y + shift once past the map, so lines the
+     * editor continues with "\n" scroll with the rest. A change of shift redraws that area. */
+    static int last_shift = 0;
+    static const Cell blank = {0};
+    int shift = screen_panel_shift();
+    bool shifted = shift != last_shift;
+    last_shift = shift;
 
     for (int y = 0; y < h && !screen_headless; y++) {
+        int src = y <= HEIGHT_TILES ? y : y + shift;
         for (int x = 0; x < w; x++) {
-            Cell *curr = &state->screen_curr[y * SCREEN_MAX_WIDTH + x];
-            Cell *prev = &state->screen_prev[y * SCREEN_MAX_WIDTH + x];
-            if (memcmp(curr, prev, sizeof(Cell)) == 0) continue;
+            Cell *curr = src < SCREEN_MAX_HEIGHT ? &state->screen_curr[src * SCREEN_MAX_WIDTH + x] : (Cell *)&blank;
+            Cell *prev = src < SCREEN_MAX_HEIGHT ? &state->screen_prev[src * SCREEN_MAX_WIDTH + x] : (Cell *)&blank;
+            if (!(shifted && y > HEIGHT_TILES) && memcmp(curr, prev, sizeof(Cell)) == 0) continue;
 
             if (cur_y != y || cur_x != x) {
                 printf("\033[%d;%dH", y + 1, x + 1);

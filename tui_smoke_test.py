@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end check of the text-mode editor: run `./a.out editor` on a small PTY (30 rows,
 the size that used to crash it) and drive it through a key sequence that fills the text
-panel past the terminal's height - room 9 (Undercroft), its 11-chunk switch 0 opened with
-Ctrl-S, chunk 1 selected. The editor must still be running afterwards and its output must
+panel past the terminal's height - room 9 (Undercroft), whose out-of-bounds switch 0 and its
+12 chunks are listed under the map. The editor must still be running afterwards and its output must
 hold no assertion message; then Esc, Esc, q must make it exit cleanly.
 
 Runs on a sandbox copy (ROOMS.SPL, MOVERTAB.DAT, BACKS.SPL and the graphics, if present,
@@ -127,6 +127,11 @@ def main():
     for name in ['ROOMS.SPL', 'MOVERTAB.DAT', 'BACKS.SPL'] + glob.glob('*.EGA') + glob.glob('*.CGA'):
         if os.path.exists(name):
             shutil.copy(name, os.path.join(sandbox, name))
+    # Put the copy in our own compressor's form first: the editor re-encodes the room whose
+    # switch gets selected, and a file written by an older build re-encodes to different bytes
+    # while meaning the same - the check below is about the sequence not editing anything.
+    import subprocess
+    subprocess.run(['./a.out', '--data-dir', sandbox, 'recompress'], check=True, capture_output=True, timeout=60)
     have_backs = os.path.exists(os.path.join(sandbox, 'BACKS.SPL')) and os.path.exists(os.path.join(sandbox, 'BLOCKS.EGA'))
     if not have_backs:
         print("SKIP the background view check: no BACKS.SPL and graphics here")
@@ -146,7 +151,7 @@ def main():
     if 'help' not in scr.text() or 'PgUp/PgDn:' not in scr.text():
         failures.append(f"help box on a 30-row terminal is not shown clipped with a PgUp/PgDn note (row 0 {scr.row(0).rstrip()[:40]!r})")
     os.write(fd, b'\x1f'); more = drain(fd, 0.6); out += more; scr.feed(more.decode('latin1'))
-    for key in ['r', '0', '9', 's', '0', '\x13', 'c', '1']:
+    for key in ['r', '0', '9']:   # Undercroft: its out-of-bounds switch 0 and its 12 chunks are listed under a 30-row screen
         os.write(fd, key.encode())
         more = drain(fd, 0.4); out += more; scr.feed(more.decode('latin1'))
         if time.time() - start > DEADLINE_S:
@@ -166,9 +171,10 @@ def main():
             failures.append("PgDn did not scroll the panel (no 'panel +N' in the header)")
         if scr.text() == before:
             failures.append("PgDn changed nothing on screen")
+        if 'type block' not in scr.text():
+            failures.append("the switch's chunk list did not scroll into view")
         # Ctrl-B: the background block's hex replaces the map; Esc brings the room back
         if have_backs:
-            os.write(fd, b'\x1b'); drain(fd, 0.3); os.write(fd, b'\x1b'); drain(fd, 0.3)   # leave the chunk edit
             os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'01'); more = drain(fd, 0.6); scr.feed(more.decode('latin1'))
             os.write(fd, b'\x02'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
             expect = backs_block(1)

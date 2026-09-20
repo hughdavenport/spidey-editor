@@ -214,6 +214,9 @@ typedef struct {
      * indices instead of the room map. rctx is the GUI's own render context
      * (ged_set_render) or one the TUI opens from the data dir on first use. */
     bool backs_view;
+    /* Ctrl-D in the background view: which of the room's things to overlay on the background
+     * (all off by default: the background alone). Separate from the room view's debug flags. */
+    struct { bool tiles, blocks, sprites, chunks; } backs_show;
     bool backs_edited;         /* set by a background edit; the GUI reads and clears it (ged_backs_edited) to redraw */
     RenderCtx *rctx;
     /* The background view's own undo: one tile per entry, [0, backs_undo_n) done and the
@@ -283,6 +286,11 @@ typedef struct {
     char       macro_last_replayed;  /* '\0' = none */
     KeyArray   macro_buf;            /* keys being recorded */
     KeyArray   macro_slots[26];      /* named slots a-z */
+    /* A macro's keys mean different things in the room and in the background view (hex digits
+     * paint tiles or background), so each slot remembers the mode it was recorded in and a
+     * replay switches to it first (Hugh: "macros need to know what mode they are in"). */
+    bool macro_slot_backs[26];
+    bool macro_start_backs;
     KeyArray   macro_replay;         /* injection queue */
 
     Cell screen_prev[SCREEN_MAX_HEIGHT * SCREEN_MAX_WIDTH];
@@ -323,6 +331,11 @@ void editor_feed_room_number(int room);   /* type a room id into a room-choosing
 
 /* Screen buffer output switch (editor_screen.c): true = GUI renders the cells */
 extern bool screen_headless;
+/* TUI: rows under the map come out of the cell buffer `panel_scroll` rows further down
+ * (PgUp/PgDn); 0 in the GUI (it scrolls its own panel) and while the help box is up (it is
+ * drawn at screen rows, so it must not move). Used by screen_flush and by anything drawn at
+ * a screen row inside the panel area (the macro overlay). */
+int screen_panel_shift(void);
 /* Out-of-bounds switch list placement recorded by redraw() (editor_draw.c) */
 extern int panel_oob_switch_row[16], panel_oob_switch_id[16];
 extern size_t panel_oob_switch_n;

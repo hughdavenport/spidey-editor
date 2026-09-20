@@ -200,6 +200,12 @@ bool ged_show_switches(void) { return state->debug.switches; }
 bool ged_show_tiles(void)    { return state->debug.tiles; }
 unsigned ged_save_count(const char **file) { *file = state->saved_file; return state->save_count; }
 void ged_set_render(RenderCtx *ctx) { state->rctx = ctx; }
+bool ged_hex(void) { return state->debug.hex; }
+bool ged_backs_view_on(void) { return state->backs_view; }
+void ged_backs_show(bool *tiles, bool *blocks, bool *sprites, bool *chunks) {
+    *tiles = state->backs_show.tiles; *blocks = state->backs_show.blocks;
+    *sprites = state->backs_show.sprites; *chunks = state->backs_show.chunks;
+}
 void ged_set_backs_view(bool on) {
     if (on && state->rctx == NULL) on = false;
     if (state->backs_view != on) state->partial_byte = 0;
