@@ -43,7 +43,10 @@
 enum { FOCUS_ROOM, FOCUS_PICKER, FOCUS_EDITOR, FOCUS_COLOURS, FOCUS_TOOLS, FOCUS_ATTRS, FOCUS_BUTTONS, FOCUS_WORLD, FOCUS_COUNT };
 #define ATTR_SOLID 0x40
 #define BLOCK_BUTTONS 6         // block panel: w+ w- / h+ h- / import export (gfx is the grid's row-4 slot)
-#define BUTTON_ROWS 6           // two per row: reset tiles / sprites backs / font screens / import export / block / room
+#define BUTTON_ROWS 6           // two per row: tiles backs / sprites font / import export / reset screens / block / room
+// The source grid's eight buttons in that order (Hugh's layout); everything indexes them by it.
+enum { SRC_TILES, SRC_BACKS, SRC_SPRITES, SRC_FONT, SRC_IMPORT, SRC_EXPORT, SRC_RESET, SRC_SCREENS };
+static const char *SRC_NAMES[8] = { "tiles", "backs", "sprites", "font", "import", "export", "reset", "screens" };
 static const struct { uint8_t bits; const char *name; } ATTRS[4] = {
     {0x00, "pass"}, {0x40, "solid"}, {0x80, "magnet"}, {0xc0, "slip"},
 };
@@ -1724,18 +1727,26 @@ static int pixed_button_count(GuiState *g) { return g->block_hidden >= 0 ? 9 : 8
 
 static void pixed_button_press(GuiState *g, int i) {
     g->pix_op = true;
-    if (i == 0) {                                   // reset: the image as shipped
-        int idx = pixed_index(g);
-        uint8_t orig[GFX_MAX_BYTES];
-        if (render_gfx_original(g->rctx, g->pix_src, idx, orig)) {
-            pix_undo_push(g, g->pix_src, idx);
-            render_gfx_put(g->rctx, g->pix_src, idx, orig);
-            gfx_touched(g, g->pix_src);
+    switch (i) {
+        case SRC_RESET: {                           // reset: the image as shipped
+            int idx = pixed_index(g);
+            uint8_t orig[GFX_MAX_BYTES];
+            if (render_gfx_original(g->rctx, g->pix_src, idx, orig)) {
+                pix_undo_push(g, g->pix_src, idx);
+                render_gfx_put(g->rctx, g->pix_src, idx, orig);
+                gfx_touched(g, g->pix_src);
+            }
+            break;
         }
-    } else if (i <= 5) set_view(g, i == 1 ? VIEW_TILES : i == 2 ? VIEW_SPRITES : i == 3 ? VIEW_BACKS : i == 4 ? VIEW_FONT : VIEW_SCREENS);
-    else if (i == 6) import_png(g, NULL);
-    else if (i == 7) export_png(g);
-    else if (g->block_hidden >= 0) g->block_hidden = -1;   // block: show its panel again
+        case SRC_TILES:   set_view(g, VIEW_TILES); break;
+        case SRC_BACKS:   set_view(g, VIEW_BACKS); break;
+        case SRC_SPRITES: set_view(g, VIEW_SPRITES); break;
+        case SRC_FONT:    set_view(g, VIEW_FONT); break;
+        case SRC_SCREENS: set_view(g, VIEW_SCREENS); break;
+        case SRC_IMPORT:  import_png(g, NULL); break;
+        case SRC_EXPORT:  export_png(g); break;
+        default: if (g->block_hidden >= 0) g->block_hidden = -1;   // block: show its panel again
+    }
 }
 
 /* ----------------------------------------------------------- PNG import / export */
@@ -2247,11 +2258,12 @@ static void draw_gfx_editor(GuiState *g, bool block_available) {
 // moves to row 5 reading "gfx"; with the panel hidden that toggle sits at row 4 reading "block"
 // (the two never show at once, so one function draws both) and room import/export take row 5.
 static void draw_source_grid(GuiState *g, bool block_up) {
-    static const char *names[] = { "reset", "tiles", "sprites", "backs", "font", "screens", "import", "export" };
+    const char **names = SRC_NAMES;
     int fs = g->font_px;
     for (int i = 0; i < 8; i++) {
         Rectangle rb = pixed_button(g, i);
-        bool on = (i == 1 && tiles_view(g)) || (i == 2 && g->sprites_view) || (i == 3 && g->backs_view) || (i == 4 && g->font_view) || (i == 5 && g->screens_view);
+        bool on = (i == SRC_TILES && tiles_view(g)) || (i == SRC_SPRITES && g->sprites_view) || (i == SRC_BACKS && g->backs_view)
+               || (i == SRC_FONT && g->font_view) || (i == SRC_SCREENS && g->screens_view);
         bool kbd = !block_up && g->focus == FOCUS_BUTTONS && g->btn_row == i / 2 && g->btn_sel % 2 == i % 2;
         DrawRectangleRec(rb, on ? (Color){90, 70, 20, 255} : (Color){50, 50, 60, 255});
         DrawRectangleLinesEx(rb, kbd ? 2 : 1, kbd || on ? GOLD : GRAY);
