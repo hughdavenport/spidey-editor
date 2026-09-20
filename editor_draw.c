@@ -2,6 +2,16 @@
 #include "render.h"
 #include <ctype.h>
 #include <string.h>
+/* A row of the text panel under the map. Unlike GOTO it does not assert on the row: a
+ * terminal shorter than the panel simply loses the panel's tail (scr_printf keeps the cell
+ * buffer's SCREEN_MAX_HEIGHT rows and screen_flush shows only the rows the terminal has;
+ * beyond those the writes are dropped) instead of crashing the TUI, which a switch with
+ * many chunks used to do (Hugh: Undercroft's switch 0 on a small terminal). */
+#define PANEL_GOTO(_x, _y) do { \
+    assert((_x) < state->screen_dimensions.x && "width out of bounds"); \
+    scr_printf("\033[%d;%dH", (_y) + 1, (_x) + 1); \
+} while (false)
+
 
 typedef struct {
     const char *key;
@@ -27,7 +37,7 @@ help_keys help[][100] = {
         {"Escape", "cancel"},
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
-        {"Ctrl-d[acdhlnopst]", "toggle display"},
+        {"Ctrl-d[acdlnopst]", "toggle display"},
         {0},
     },
 
@@ -53,6 +63,7 @@ help_keys help[][100] = {
         {"Enter", "edit object's MOVERTAB.DAT entry (over an object)"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
+        {"Space", "preview switch under cursor active/idle on the map"},
         {"Delete/Backspace", "remove nibble / delete / clear tile"},
         {"x/DEL/BS", "cut (yank + delete)"},
         {"y", "yank (obj/switch/block; empty cell: room)"},
@@ -65,7 +76,7 @@ help_keys help[][100] = {
         {"Escape", "cancel"},
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
-        {"Ctrl-d[acdhlnopst]", "toggle display"},
+        {"Ctrl-d[acdlnopst]", "toggle display"},
         {0},
     },
 
@@ -147,13 +158,12 @@ help_keys help[][100] = {
         {"a", "all debug info"},
         {"c", "Spider-Man at the cursor (GUI)"},
         {"d", "room data"},
-        {"h", "hurting tiles (GUI)"},
         {"l", "switch links (GUI)"},
         {"n", "neighbours"},
         {"o", "objects"},
         {"p", "position"},
         {"s", "switches"},
-        {"t", "tile types (GUI)"},
+        {"t", "tile types (GUI): blue pass, none solid, violet magnet, cyan slip, red hurts"},
         {"ESC", "cancel"},
         {"q", "cancel"},
         {"Ctrl-?", "help"},
@@ -437,15 +447,15 @@ static void draw_switch_chunks_brief(struct SwitchObject *sw, int cx, int cy, in
      * terminal (or even the GUI's virtual screen) is tall. Stop and say so
      * rather than let the GOTO below assert. */
     if (*bottom >= state->screen_dimensions.y - 1) return;
-    GOTO(0, *bottom); (*bottom)++;
+    PANEL_GOTO(0, *bottom); (*bottom)++;
     scr_printf("  chunks:");
     for (size_t i = 1; i < sw->chunks.length; i++) {
         if (*bottom >= state->screen_dimensions.y - 1) {
-            GOTO(0, *bottom); (*bottom)++;
+            PANEL_GOTO(0, *bottom); (*bottom)++;
             scr_printf("  ... %zu more chunk%s not shown", sw->chunks.length - i, sw->chunks.length - i == 1 ? "" : "s");
             return;
         }
-        GOTO(0, *bottom); (*bottom)++;
+        PANEL_GOTO(0, *bottom); (*bottom)++;
         struct SwitchChunk *chunk = sw->chunks.data + i;
         bool at_cur = chunk_at_cursor(chunk, cx, cy);
         scr_printf("    (%zu) type ", i);
@@ -603,7 +613,7 @@ static void draw_movertab_offset(unsigned global, bool is_sprite, bool hot) {
 static void draw_movertab_entry(unsigned global, bool active_edit, int *bottom, bool is_sprite) {
     if (global >= C_ARRAY_LEN(state->movertab) / 3) return;
     const uint8_t *entry = state->movertab + global * 3;
-    GOTO(0, *bottom); (*bottom)++;
+    PANEL_GOTO(0, *bottom); (*bottom)++;
     scr_printf("  ");
     bool raw_editing = active_edit && state->movertab_raw;
     draw_movertab_fields(entry[2], is_sprite, active_edit && !raw_editing, state->movertab_block_focus, true);
@@ -1144,9 +1154,15 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                     }
                 }
                 bool attr_colored = false;
+                // Ctrl-D t: a hurting tile (tile_hurts, room.h) is red whatever its class, as
+                // in the GUI's room tint and tile picker.
+                if (!colored && state->debug.tiles && tile != BLANK_TILE && tile_hurts(tile)) {
+                    scr_printf("\033[41;37;1m");
+                    attr_colored = true;
+                }
                 // Solid gets no overlay - same as the GUI's room tint (Hugh: "make solid be
                 // no overlay, just the tile as it is defined").
-                if (!colored && state->debug.tiles && tile != BLANK_TILE && (tile >> 6) != 1) {
+                else if (!colored && state->debug.tiles && tile != BLANK_TILE && (tile >> 6) != 1) {
                     // Same blue/violet/cyan legend as Ctrl-D t on the room picture
                     // (pass/magnet/slip), in the 8-colour ANSI palette the hex map itself is
                     // drawn in.
@@ -1405,7 +1421,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 
     if (debugany()) bottom ++;
     if (state->debug.data) {
-        GOTO(0, bottom); bottom ++;
+        PANEL_GOTO(0, bottom); bottom ++;
         switch (state->current_state) {
             case EDIT_ROOMDETAILS:
                 scr_printf("bk\033[1;4mg\033[mrnd: ");PRINTF_DATA(room.background);
@@ -1518,19 +1534,19 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
 } while (0)
 
         if (state->current_state == EDIT_ROOMDETAILS) {
-            GOTO(0, bottom); bottom ++;
+            PANEL_GOTO(0, bottom); bottom ++;
             scr_printf("\033[1;4mLEFT\033[m: ");PRINTF_DATA(room.room_west);
             READ_NEIGHBOUR(room.room_west);
             scr_printf(" - \"%s\"", neighbour_name);
-            GOTO(0, bottom); bottom ++;
+            PANEL_GOTO(0, bottom); bottom ++;
             scr_printf("\033[1;4mDOWN\033[m: ");PRINTF_DATA(room.room_south);
             READ_NEIGHBOUR(room.room_south);
             scr_printf(" - \"%s\"", neighbour_name);
-            GOTO(0, bottom); bottom ++;
+            PANEL_GOTO(0, bottom); bottom ++;
             scr_printf("\033[1;4mUP\033[m: ");PRINTF_DATA(room.room_north);
             READ_NEIGHBOUR(room.room_north);
             scr_printf(" - \"%s\"", neighbour_name);
-            GOTO(0, bottom); bottom ++;
+            PANEL_GOTO(0, bottom); bottom ++;
             scr_printf("\033[1;4mRIGHT\033[m: ");PRINTF_DATA(room.room_east);
             READ_NEIGHBOUR(room.room_east);
             scr_printf(" - \"%s\"", neighbour_name);
@@ -1561,7 +1577,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             int up_len = (int)strlen(up_buf), down_len = (int)strlen(down_buf), right_len = (int)strlen(right_buf);
             GOTO(up_len < MIN_WIDTH ? (MIN_WIDTH - up_len) / 2 : 0, bottom); bottom ++;
             scr_printf("%s", up_buf);
-            GOTO(0, bottom);
+            PANEL_GOTO(0, bottom);
             scr_printf("%s", left_buf);
             GOTO(right_len < MIN_WIDTH ? MIN_WIDTH - right_len : 0, bottom); bottom ++;
             scr_printf("%s", right_buf);
@@ -1619,7 +1635,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             if (bottom >= state->screen_dimensions.y - 2) continue;
             bool is_active = first_hit && obj_selected;
             first_hit = false;
-            GOTO(0, bottom); bottom++;
+            PANEL_GOTO(0, bottom); bottom++;
             scr_printf("sprite ");
             if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
             PRINTF_DATA((uint16_t)i);
@@ -1691,7 +1707,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             if (bottom >= state->screen_dimensions.y - 2) continue;   // see the same guard in the sprite pass above
             bool is_active = first_hit && obj_selected;
             first_hit = false;
-            GOTO(0, bottom); bottom++;
+            PANEL_GOTO(0, bottom); bottom++;
             scr_printf("block ");
             if (state->current_state == TILE_EDIT && is_active) scr_printf("\033[4;1m");
             PRINTF_DATA((uint16_t)i);
@@ -1713,36 +1729,36 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     }
 
     if (state->current_state == EDIT_ROOMNAME) {
-        GOTO(0, bottom); bottom +=2;
+        PANEL_GOTO(0, bottom); bottom +=2;
         scr_printf("\nEnter new room name in space highlighted at top of screen");
         goto show_help_if_needed;
     }
 
     if (state->current_state == GOTO_SWITCH) {
-        GOTO(0, bottom);
+        PANEL_GOTO(0, bottom);
         scr_printf("\nEnter switch id (in hex) or q to go to main view");
     }
 
     if (state->current_state == GOTO_OBJECT) {
-        GOTO(0, bottom);
+        PANEL_GOTO(0, bottom);
         scr_printf("\nEnter object id (in hex) or q to go to main view");
     }
 
     if (state->current_state == TOGGLE_DISPLAY) {
-        GOTO(0, bottom); bottom +=2;
+        PANEL_GOTO(0, bottom); bottom +=2;
         scr_printf("\nEnter type to toggle, a for all, Ctrl-? for help");
         goto show_help_if_needed;
     }
 
     if (state->current_state == EDIT_ROOMDETAILS) {
-        GOTO(0, bottom); bottom +=2;
+        PANEL_GOTO(0, bottom); bottom +=2;
         scr_printf("\nEnter element to edit, Ctrl-? for help");
         goto show_help_if_needed;
     }
 
     if (state->debug.switches) {
 
-        GOTO(0, bottom);
+        PANEL_GOTO(0, bottom);
     (void)chunk_switch_underneath;
     (void)chunk_underneath;
         struct SwitchObject *switcz = switch_underneath;
@@ -2064,7 +2080,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 if (extra->chunks.length < 1) continue;
                 if (extra->chunks.data[0].x != x || extra->chunks.data[0].y != y) continue;
                 if (bottom >= state->screen_dimensions.y - 1) {
-                    GOTO(0, bottom); bottom++;
+                    PANEL_GOTO(0, bottom); bottom++;
                     scr_printf("  ... more switches at this tile not shown");
                     break;
                 }
@@ -2078,7 +2094,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
                 }
                 bool extra_side_hidden = switch_side_hidden(&room, pr);
                 bool extra_entry_forced = switch_entry_forced(&room, pr);
-                GOTO(0, bottom); bottom++;
+                PANEL_GOTO(0, bottom); bottom++;
                 scr_printf("switch ");
                 PRINTF_DATA((uint16_t)sw_i);
                 scr_printf(": (x,y)=");
@@ -2103,7 +2119,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             struct SwitchChunk *pr = chunk_switch_underneath->chunks.data;
             bool pr_side_hidden = switch_side_hidden(&room, pr);
             bool pr_entry_forced = switch_entry_forced(&room, pr);
-            GOTO(0, bottom); bottom++;
+            PANEL_GOTO(0, bottom); bottom++;
             scr_printf("switch ");
             PRINTF_DATA((uint16_t)(chunk_switch_underneath - room.switches));
             scr_printf(": (x,y)=");
@@ -2128,7 +2144,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             }
         }
         if (found) {
-            GOTO(0, bottom);
+            PANEL_GOTO(0, bottom);
             scr_printf("\n\nOut of bounds switches:\n");
             bottom +=3;
         }
@@ -2138,7 +2154,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             int y = sw->chunks.data[0].y;
             if (x >= WIDTH_TILES || y >= HEIGHT_TILES) {
                 if (panel_oob_switch_n < 16) { panel_oob_switch_row[panel_oob_switch_n] = bottom; panel_oob_switch_id[panel_oob_switch_n++] = (int)s; }
-                GOTO(0, bottom); bottom ++;
+                PANEL_GOTO(0, bottom); bottom ++;
 #define BOOL_S(b) ((b) ? "true" : "false")
                 // Everything in this panel is out of bounds by definition, so "side" never
                 // applies here (see switch_side_hidden) - but "entry" keeps its ordinary meaning
@@ -2304,7 +2320,7 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         }
     }
 
-    /* GOTO(0, bottom); bottom ++; */
+    /* PANEL_GOTO(0, bottom); bottom ++; */
     /* uint8_array rest = state->rooms.rooms[level].rest; */
     /* int pre = scr_printf("Rest (length=%zu):", rest.length); */
     /* for (size_t i = 0; i < rest.length; i ++) { */

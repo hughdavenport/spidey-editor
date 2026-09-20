@@ -825,6 +825,8 @@ bool editor_save(void) {
     char dangling[128] = {0};
     if (writeRooms(&state->rooms, state->data_dir, &failed_room, dangling, sizeof dangling)) {
         state->saved_undo_len = state->undo_stack.length;
+        state->save_count++;
+        snprintf(state->saved_file, sizeof state->saved_file, "%s", ROOMS_FILE);
         struct stat st;
         if (stat(data_path(state->data_dir, ROOMS_FILE), &st) == 0) state->last_own_write_mtim = st.st_mtim;
         return true;
@@ -918,6 +920,7 @@ bool movertab_save(void) {
     size_t n = fwrite(state->movertab, 1, sizeof state->movertab, fp);
     fclose(fp);
     state->movertab_loaded = (n == sizeof state->movertab);
+    if (state->movertab_loaded) { state->save_count++; snprintf(state->saved_file, sizeof state->saved_file, "%s", MOVERTAB_FILE); }
     return state->movertab_loaded;
 }
 

@@ -69,7 +69,11 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 ## Terminal / Screen Handling
 - Editor uses ANSI escape codes (`\033[row;colH` cursor movement, color codes)
 - `get_screen_dimensions()`: calls `ioctl(STDOUT_FILENO, TIOCGWINSZ, &w)` — **fails when piped (returns 0)**
-- `GOTO(x, y)` macro asserts `x < screen_dimensions.x && y < screen_dimensions.y`
+- `GOTO(x, y)` macro asserts `x < screen_dimensions.x && y < screen_dimensions.y`; the text panel
+  under the map uses `PANEL_GOTO` (editor_draw.c) instead, which does not assert on the row: on a
+  terminal shorter than the panel the tail is simply not shown (scr_printf drops writes past the
+  cell buffer, screen_flush shows only the terminal's rows). `python3 tui_smoke_test.py` drives the
+  TUI on a 30-row PTY through Undercroft's 11-chunk switch to keep it that way.
 - SIGWINCH handler sets `state->resized = true`; main loop calls `get_screen_dimensions()` on next iteration
 
 ## Hot Reload (editor.c)
@@ -165,8 +169,10 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   The reverse is drawn too: another room's exit-memory chunk that leads here is an orange arrow
   from that room's thumbnail to the edge of this room the player would arrive at (`arrival_edge`),
   labelled e.g. "east on -> here"; a click goes to that chunk. A hot switch's links (cursor on it, or selected) keep their colour
-  and thicken; yellow is only for goto mode. Overlay colours: red tint = hurting tiles (Ctrl-D h, `tile_hurts`
-  in room.h, also a red border round each run of them in the tile picker), magenta switch markers, orange TOGGLE_BLOCK,
+  and thicken; yellow is only for goto mode. Overlay colours: Ctrl-D t tints tiles by class (blue pass-through,
+  none solid, violet magnetic, cyan slippery) and hurting tiles red whatever their class (`tile_hurts` in room.h,
+  also a red border round each run of them in the tile picker; the legend under pass/solid/magnet/slip and the
+  Ctrl-? overlay list the colours), magenta switch markers, orange TOGGLE_BLOCK,
   blue TOGGLE_OBJECT lines (light blue = block object outlines and the map's neighbour frames), green
   TOGGLE_BIT, yellow sprite outlines / goto emphasis / the current room on the map, gold keyboard focus.
 - Switch links: with a switch open (Ctrl-S, any EDIT_SWITCHDETAILS* state) right-click an
@@ -273,7 +279,12 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - GUI-only: Spider-Man drawn at the cursor as a size reference; tileset palette right of the
   picture (click selects, Shift+drag / middle-drag paints; one undo entry per stroke,
   written 0.4 s after the stroke). Left/right click go to the editor's mouse handling.
-- `./gui_smoke_test.sh` drives the GUI headlessly (Xvfb + xdotool) and screenshots each step.
+- `./gui_smoke_test.sh` drives the GUI headlessly (Xvfb + xdotool) and screenshots each step;
+  `python3 tui_smoke_test.py` is the terminal editor's equivalent (a PTY, no display needed).
+- The green "saved <file>" flash names what was written. Graphics and BACKS.SPL come from the
+  GUI's own debounced save; ROOMS.SPL and MOVERTAB.DAT writes are the editor's (`editor_save`,
+  `movertab_save`), which bump `save_count` / `saved_file` in `game_state` so the GUI sees a
+  keyboard edit's save as well as a paint stroke's (`ged_save_count`).
 
 ## Raylib notes
 - Raylib 6.0 prebuilt (headers, `libraylib.a`, `libraylib.so`, zlib licence) is committed in

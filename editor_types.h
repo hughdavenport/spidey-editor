@@ -118,10 +118,9 @@ struct debug {
     bool neighbours;
     bool objects;
     bool switches;
-    bool tiles;     /* GUI: tint every tile by its class (pass-through / solid / magnetic / slippery) */
+    bool tiles;     /* GUI: tint every tile by its class (pass-through / solid / magnetic / slippery), hurting tiles red (tile_hurts, room.h) */
     bool spidey;    /* GUI: draw Spider-Man at the cursor as a size reference (default on); off shows just the cursor square */
     bool switch_links;   /* GUI: draw every switch chunk's link line/arrow (default on); off shows only the active switch's (viewed or being edited) */
-    bool hurt;      /* GUI: red border round the picker's hurting tiles, red overlay on them in the room (tile_hurts, room.h; default on) */
     bool all;
 };
 
@@ -200,6 +199,10 @@ typedef struct {
      * mistake our own save for an external edit and free+reread state out
      * from under whatever the UI is mid-way through doing with it. */
     struct timespec last_own_write_mtim;
+    /* Every successful write bumps save_count and names its file, so the GUI can flash
+     * "saved ROOMS.SPL" for a keyboard edit's save as well as for its own paint strokes. */
+    unsigned save_count;
+    char saved_file[16];
     /* Where ROOMS.SPL and MOVERTAB.DAT are read and written: main()'s --data-dir, or "."
      * (room.h data_path). Lives here so it survives hot reloads and reaches editor.so /
      * gui.so, which have their own copy of room.c and no view of main()'s variables. */

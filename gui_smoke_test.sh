@@ -44,11 +44,11 @@ xdotool key l l l j j; sleep 0.5; snap s3-moved
 xdotool key r; sleep 0.4; snap s4a-gotoroom-list; xdotool type 02; sleep 0.6; snap s4-room2
 xdotool key r; sleep 0.3; xdotool type 03; sleep 0.6; snap s4b-lift
 xdotool mousemove $((X + 30)) $((Y + HEIGHT - 60)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s4c-lift-oob-click
-# TAKE 1's floor is a hurting tile (7C): red overlay on it and red borders in the picker until Ctrl-D h turns it off
+# TAKE 1's floor is a hurting tile (7C): red in the Ctrl-D t tile overlay and red borders in the picker until Ctrl-D t turns it off
 # (help is up at this point; hide it for these two frames and put it back)
 xdotool key r; sleep 0.3; xdotool type 07; sleep 0.6; xdotool key ctrl+shift+slash; sleep 0.4; snap s4d-take1-hurt-on
-xdotool key ctrl+d; sleep 0.2; xdotool key h; sleep 0.5; snap s4e-take1-hurt-off
-xdotool key ctrl+d; sleep 0.2; xdotool key h; sleep 0.3; xdotool key ctrl+shift+slash; sleep 0.3
+xdotool key ctrl+d; sleep 0.2; xdotool key t; sleep 0.5; snap s4e-take1-tiles-off
+xdotool key ctrl+d; sleep 0.2; xdotool key t; sleep 0.3; xdotool key ctrl+shift+slash; sleep 0.3
 xdotool key r; sleep 0.3; xdotool type 02; sleep 0.6
 xdotool key ctrl+r; sleep 0.5; snap s5-roomdetails
 xdotool key Escape; sleep 0.3

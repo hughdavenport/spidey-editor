@@ -55,7 +55,7 @@ static const Color ATTR_COLOUR[4] = { {0, 120, 255, 255}, {200, 200, 200, 255}, 
 // Alpha for Ctrl-D t's per-class tint, shared by the room picture and the block
 // object tile editor (see draw_overlay and draw_block_editor).
 static const uint8_t TILE_TINT_ALPHA[4] = {60, 110, 120, 120};
-static const Color HURT_COLOUR = {255, 40, 40, 255};   // Ctrl-D h: hurting tiles (tile_hurts, room.h)
+static const Color HURT_COLOUR = {255, 40, 40, 255};   // Ctrl-D t: hurting tiles (tile_hurts, room.h), whatever their class
 #define HURT_TINT_ALPHA 90
 #define MAP_GAP 4               // pixels between world-map thumbnails
 #define SCROLLBAR_W 8
@@ -101,6 +101,7 @@ typedef struct {
     float save_timer;       // seconds until the pending paint write
     float saved_flash;      // seconds left to show "saved <files>"
     char saved_what[160];   // the file names the last save wrote (ROOMS.SPL, BLOCKS.EGA, BACKS.SPL, ...)
+    unsigned seen_saves;    // ged_save_count() last frame: any editor write (keyboard edits included) flashes "saved"
     float err_flash;        // seconds left to show err
     char err[96];           // a refused write, shown under the picker in red
     float src_check;        // seconds until the next hot-reload source check
@@ -1290,12 +1291,13 @@ static void draw_help(GuiState *g) {
     static const char *gui_help[] = {
         "GUI  (mouse and keys on top of the editor's)",
         "F2 hex map     F3 switch between the .EGA and .CGA graphics     q quit     wheel over text: scroll",
-        "Ctrl-D t: tint tiles by class (blue pass-through, grey solid, violet magnetic, cyan slippery)",
         "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
         "        that creature); middle-click on the room picks the tile",
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
         "        (BACKS.SPL, shared by every room with that background number); middle-click picks",
         "wheel over room: background; Shift+wheel / horizontal wheel, or wheel over the tile picker: tileset",
+        "Ctrl-D t tile colours: blue pass-through, none solid, violet magnetic, cyan slippery, red hurts (also the",
+        "        red borders in the tile picker and the hex map; a hurting tile heals in a room numbered 7 mod 8)",
         "world map: click = go there (an empty slot becomes a new room); Ctrl-click = go there and put the cursor",
         "        where you clicked; right-click = move the thing under the cursor there",
         "switch open (Ctrl-S): right-click an object or switch links it; right-drag tiles = block chunk",
@@ -1632,9 +1634,9 @@ static void draw_palette(GuiState *g) {
                 DrawRectangle(tx, ty, s, ch(g), (Color){0, 0, 0, 150});
                 gtext(&g->font, g->font_loaded, TextFormat("%02x", t), tx, ty, fs, RAYWHITE);
             }
-        // Ctrl-D h: a red border round each run of hurting tiles (tile_hurts) in a picker row -
+        // Ctrl-D t: a red border round each run of hurting tiles (tile_hurts) in a picker row -
         // unless the attribute being painted is slippery, which never hurts
-        if (ged_show_hurt() && g->sel_attr != 0xC0)
+        if (ged_show_tiles() && g->sel_attr != 0xC0)
             for (int row = 0; row < 8; row++)
                 for (int c = 0; c < 8; c++) {
                     if (!tile_hurts((uint8_t)(row * 8 + c))) continue;
@@ -2066,17 +2068,21 @@ static int draw_attr_legend(GuiState *g, int lx, int ly) {
     int fs = g->font_px, y0 = ly;
     gtext(&g->font, g->font_loaded, TextFormat("type: %s", ATTRS[g->sel_attr >> 6].name), lx, ly, fs, RAYWHITE);
     ly += ch(g) + 4;
-    for (int i = 0; i < 4; i++) {
-        int cy = ly + i * (fs + 2);
+    // Two columns, three rows, so the fifth entry (hurt) fits in the height the four classes
+    // used to take: the button grid below is pinned and would cover a fifth row.
+    int colw = text_w(&g->font, g->font_loaded, "magnet", fs) + fs + 12;
+    for (int i = 0; i < 5; i++) {
+        int cx = lx + (i / 3) * colw, cy = ly + (i % 3) * (fs + 2);
         // Solid gets the pixel editor's transparent checker, not a flat colour, since it's
         // the one class Ctrl-D t doesn't actually tint (Hugh: "make the color on the side
         // show the transparent background you used for sprite editing").
-        if (ATTRS[i].bits == ATTR_SOLID) draw_transparent_swatch(lx, cy, fs);
-        else DrawRectangle(lx, cy, fs, fs, ATTR_COLOUR[i]);
-        DrawRectangleLines(lx, cy, fs, fs, GRAY);
-        gtext(&g->font, g->font_loaded, ATTRS[i].name, lx + fs + 4, cy, fs, RAYWHITE);
+        if (i == 4) DrawRectangle(cx, cy, fs, fs, HURT_COLOUR);   // the red Ctrl-D t lays over a hurting tile of any class (tile_hurts)
+        else if (ATTRS[i].bits == ATTR_SOLID) draw_transparent_swatch(cx, cy, fs);
+        else DrawRectangle(cx, cy, fs, fs, ATTR_COLOUR[i]);
+        DrawRectangleLines(cx, cy, fs, fs, GRAY);
+        gtext(&g->font, g->font_loaded, i == 4 ? "hurt" : ATTRS[i].name, cx + fs + 4, cy, fs, RAYWHITE);
     }
-    return ly + 4 * (fs + 2) - y0;
+    return ly + 3 * (fs + 2) - y0;
 }
 
 // The block object under the cursor: its tile grid, click paints the picked
@@ -2090,14 +2096,13 @@ static void draw_block_editor(GuiState *g, int idx, int bx, int by, int w, int h
             int t = raw & 0x3f;
             src_cell.x = (t % 8) * 8; src_cell.y = (t / 8) * 8;
             DrawTexturePro(g->pal_tex, src_cell, (Rectangle){x0 + x * z, y0 + y * z, z, z}, (Vector2){0, 0}, 0, WHITE);
-            // Ctrl-D t: tint by class, same as the room picture (draw_overlay) - solid and
-            // empty get no overlay so it only calls out pass/magnet/slip tiles.
-            if (ged_show_tiles() && raw != 0 && (raw >> 6) != 1) {
-                Color c = ATTR_COLOUR[raw >> 6]; c.a = TILE_TINT_ALPHA[raw >> 6];
-                DrawRectangle(x0 + x * z, y0 + y * z, z, z, c);
-            }
-            if (ged_show_hurt() && raw != 0 && tile_hurts((uint8_t)raw)) {   // Ctrl-D h, as in the room picture
+            // Ctrl-D t: tint by class, same as the room picture (draw_overlay) - hurting
+            // tiles red, solid and empty no overlay so it only calls out pass/magnet/slip.
+            if (ged_show_tiles() && raw != 0 && tile_hurts((uint8_t)raw)) {
                 Color c = HURT_COLOUR; c.a = HURT_TINT_ALPHA;
+                DrawRectangle(x0 + x * z, y0 + y * z, z, z, c);
+            } else if (ged_show_tiles() && raw != 0 && (raw >> 6) != 1) {
+                Color c = ATTR_COLOUR[raw >> 6]; c.a = TILE_TINT_ALPHA[raw >> 6];
                 DrawRectangle(x0 + x * z, y0 + y * z, z, z, c);
             }
         }
@@ -2793,6 +2798,8 @@ static void draw_overlay(GuiState *g) {
     // Ctrl-D t: every tile tinted by the class its top two bits give it. Empty (0x00)
     // stays clear; other pass-through tiles are faint blue so scenery and hazards you can
     // walk through read as such next to solid (grey), magnetic (violet) and slippery (cyan).
+    // A hurting tile (tile_hurts, room.h) is red whatever its class - in a room numbered
+    // 7 mod 8 the same tile heals instead.
     if (ged_show_tiles() && !g->text_map) {
         // A TOGGLE_BLOCK chunk's currently-shown tile (on or off - see
         // ged_hot_block_preview) gets tinted by its own class too, not the base
@@ -2803,28 +2810,16 @@ static void draw_overlay(GuiState *g) {
         for (int y = 0; y < HEIGHT_TILES; y++)
             for (int x = 0; x < WIDTH_TILES; x++) {
                 uint8_t t = effective_tile(r, x, y, NULL, hot_switch, hot_chunk, hot_on);
+                if (t == 0) continue;
+                Vector2 p = tile_pt(g, x, y);
+                Color c;
+                if (tile_hurts(t)) { c = HURT_COLOUR; c.a = HURT_TINT_ALPHA; }
                 // Solid gets no overlay at all - it's the common case, so tinting it would
                 // just tint most of the room; showing it as the tile actually looks leaves
                 // the tint for the classes worth calling out (Hugh: "make solid be no
                 // overlay, just the tile as it is defined").
-                if (t == 0 || (t >> 6) == 1) continue;
-                Vector2 p = tile_pt(g, x, y);
-                Color c = ATTR_COLOUR[t >> 6]; c.a = TILE_TINT_ALPHA[t >> 6];
-                DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, c);
-            }
-    }
-
-    // Ctrl-D h: every hurting tile (tile_hurts, room.h) under a red tint, so a hazard reads
-    // as one whatever its picture; the same tile in a room numbered 7 mod 8 heals instead.
-    if (ged_show_hurt() && !g->text_map) {
-        int hot_switch = -1, hot_chunk = -1; bool hot_on = false;
-        ged_hot_block_preview(&hot_switch, &hot_chunk, &hot_on);
-        for (int y = 0; y < HEIGHT_TILES; y++)
-            for (int x = 0; x < WIDTH_TILES; x++) {
-                uint8_t t = effective_tile(r, x, y, NULL, hot_switch, hot_chunk, hot_on);
-                if (t == 0 || !tile_hurts(t)) continue;
-                Vector2 p = tile_pt(g, x, y);
-                Color c = HURT_COLOUR; c.a = HURT_TINT_ALPHA;
+                else if ((t >> 6) == 1) continue;
+                else { c = ATTR_COLOUR[t >> 6]; c.a = TILE_TINT_ALPHA[t >> 6]; }
                 DrawRectangle((int)p.x, (int)p.y, (int)s, (int)s, c);
             }
     }
@@ -3023,7 +3018,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->paint_dirty) {                              // debounced write of paint strokes
             g->save_timer -= dt;
             if (g->save_timer <= 0 && !g->painting) {
-                if (ged_flush()) { g->saved_flash = 1.2f; snprintf(g->saved_what, sizeof g->saved_what, "%s", ROOMS_FILE); }
+                ged_flush();                           // its write shows up through ged_save_count below
                 g->room_dirty = true;                  // a refused write undid the stroke: show the room as saved
                 g->paint_dirty = false;
             }
@@ -3078,6 +3073,12 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->screens_view && render_gfx_available(g->rctx, g->pix_src) && (!g->scr_loaded || g->scr_stale || g->scr_src != g->pix_src))
             screen_tex_build(g);
 
+        {   // any write the editor made this frame (a keyboard edit, a paint stroke's flush, Ctrl-M's
+            // MOVERTAB.DAT save): flash its file name
+            const char *f = NULL;
+            unsigned n = ged_save_count(&f);
+            if (n != g->seen_saves) { g->seen_saves = n; g->saved_flash = 1.2f; snprintf(g->saved_what, sizeof g->saved_what, "%s", f); }
+        }
         if (g->saved_flash > 0) g->saved_flash -= dt;
         if (g->err_flash > 0) g->err_flash -= dt;
         link_hover(g, GetMousePosition());
