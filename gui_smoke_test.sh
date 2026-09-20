@@ -132,6 +132,11 @@ xdotool mousemove $((X + 776 + 46)) $((Y + 544 + 12)) mousedown 1; sleep 0.08; x
 # thick link lines: cursor on switch 4 (o0's toggling switch), snapshot
 xdotool key s; sleep 0.2; xdotool type 4; sleep 0.6; snap s14d-switch-hot
 # switch link: open switch 0 in Midnight (goto switch, Ctrl-S), right-click object O1 (R2D2 at 26,7)
+# Space previews the open switch active (switch 1's trapdoor tiles at (15-16,4) show their on
+# state), Space again idles it; Esc leaves switch editing before the switch-0 steps below
+xdotool key s; sleep 0.2; xdotool type 1; sleep 0.3; xdotool key ctrl+s; sleep 0.5
+xdotool key space; sleep 0.5; snap s14e-switch-preview-on; xdotool key space; sleep 0.5; snap s14f-switch-preview-off
+xdotool key Escape; sleep 0.3
 xdotool key s; sleep 0.2; xdotool type 0; sleep 0.3; xdotool key ctrl+s; sleep 0.5; snap s15-switch-open
 xdotool mousemove $((X + 26*24 + 12)) $((Y + 24 + 7*24 + 12)) mousedown 3; sleep 0.08; xdotool mouseup 3; sleep 0.6; snap s16-linked-object
 xdotool key Escape; sleep 0.2; xdotool key Escape; sleep 0.2; xdotool key Escape; sleep 0.2; xdotool key u; sleep 0.4

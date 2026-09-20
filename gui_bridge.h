@@ -108,7 +108,6 @@ bool  ged_room_move(int src, int dst);
 // listed on a given text row (-1 if none); clicking a row goes through the editor's own click
 // handling.
 int   ged_oob_switch_at_row(int row);
-bool  ged_is_oob_marker(int col, int row);   // text cell holding an out-of-bounds switch's map marker
 // Step the current room's background (+-1, wraps 0..63) and tileset (+-4, 0..28).
 void  ged_adjust_room(int dbackground, int dtileset);
 

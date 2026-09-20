@@ -1452,7 +1452,7 @@ static bool handle_edit_switchdetails(Key key) {
                     editor_save();
                 }; break;
 
-                case 'O':
+                case ' ':
                     // Preview the whole switch as active/idle on the map, same as 'o' one
                     // level down while editing a specific chunk (see editor_hot_block_preview)
                     // - every TOGGLE_BLOCK chunk this switch owns previews together, matching
@@ -1943,7 +1943,7 @@ static void clear_switch_block_tiles(struct DecompressedRoom *room, struct Switc
 }
 
 // Whether (x,y) is on switch `sw`'s own marker, or on a tile any of its TOGGLE_BLOCK chunks
-// covers - "switch under spidey, or chunk of any kind under spidey" (Hugh), used to let 'O'
+// covers - "switch under spidey, or chunk of any kind under spidey" (Hugh), used to let Space
 // preview a switch just by standing near it, without opening it for editing.
 static bool switch_covers_tile(struct SwitchObject *sw, int x, int y) {
     struct SwitchChunk *pre = sw->chunks.data;
@@ -1965,7 +1965,7 @@ static int find_switch_under_cursor(struct DecompressedRoom *room, int x, int y)
     }
     return -1;
 }
-// 'O' outside of switch editing: toggle-preview whatever switch is under the cursor right
+// Space outside of switch editing: toggle-preview whatever switch is under the cursor right
 // now, sticking to it (via hot_preview_switch) even as the cursor moves away afterward, so
 // you can walk over to see the effect elsewhere in the room (Hugh: "toggle it and see the
 // effects in the room map"). No-op with a status message if nothing is there.
@@ -3212,7 +3212,7 @@ static bool handle_normal(Key key) {
                     state->current_chunk = 0;
                     state->partial_byte = 0;
                     break;
-                case 'O':
+                case ' ':
                     toggle_hover_switch_preview();
                     break;
                 case 'g':

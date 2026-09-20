@@ -181,7 +181,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   current mode (`editor_cancel_to_plain()`); in room-choosing states a click on the room list
   or the world map types that room number instead.
 - The out-of-bounds switch list is pinned at the bottom of the panel with S# badges (redraw()
-  records its rows in `panel_oob_*`); the editor's own out-of-bounds map markers are hidden.
+  records its rows in `panel_oob_*`); the editor draws no map marker for an out-of-bounds switch
+  (editor_draw.c skips them), so the GUI hides nothing there - a stale cell-hiding check used to
+  blank the "Sw" of a switch listed at (0,31), whose would-be marker cell was that panel row.
 - Wheel over the picture: background +-1; horizontal or Shift+wheel, or any wheel over the tile picker
   (tiles view only): tileset +-4; nothing but the picture changes the background
   (`ged_adjust_room`). Middle-click on a room tile picks it into the palette.

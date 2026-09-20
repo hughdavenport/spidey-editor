@@ -17,7 +17,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
-        {"O", "preview switch under cursor active/idle on the map"},
+        {"Space", "preview switch under cursor active/idle on the map"},
         {"u/U", "undo/redo"},
         {"mX", "record to slot X; m=stop"},
         {",X", "replay slot X; ,,=repeat; ,.=saved"},
@@ -207,7 +207,7 @@ help_keys help[][100] = {
     [EDIT_SWITCHDETAILS]={
         {"e", "flip on-entry bit (only for non-blank tiles)"},
         {"o", "flip one-time-only bit"},
-        {"O", "preview this switch active/idle on the map"},
+        {"Space", "preview this switch active/idle on the map"},
         {"s/S", "rotate switch side (S backwards)"},
         {"Left/h", "side: left"},
         {"Down/j", "side: bottom"},
@@ -2358,7 +2358,7 @@ bool editor_hot_block_preview(int *switch_idx, int *chunk_idx, bool *on) {
         *on = state->switch_on;
         return true;
     }
-    // 'O' outside of switch editing (see toggle_hover_switch_preview): stays live even after
+    // Space outside of switch editing (see toggle_hover_switch_preview): stays live even after
     // the cursor moves away, but not past the room's own switch count - e.g. after switching
     // to a room with fewer switches, a stale high index must not be treated as valid.
     if (state->hot_preview_switch != 0) {

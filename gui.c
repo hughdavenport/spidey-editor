@@ -1225,7 +1225,6 @@ static void draw_text_screen(GuiState *g) {
         int shift = sw >= 0 ? 3 : 0;        // room for the out-of-bounds switch's S# badge
         for (int x = 0; x < GED_COLS; x++) {
             if (x >= GED_MAP_X + MAP_COLS && help) continue;
-            if (ged_is_oob_marker(x, y)) continue;   // its S# badge is drawn separately below
             draw_cell(&cells[y * stride + x], (x + shift) * pcw(g), py, pcw(g), pch(g), &g->panel_font, g->panel_font_loaded, g->panel_font_px);
         }
         if (sw >= 0) {

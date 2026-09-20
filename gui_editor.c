@@ -316,17 +316,6 @@ int ged_oob_switch_at_row(int row) {
         if (panel_oob_switch_row[i] == row) return panel_oob_switch_id[i];
     return -1;
 }
-bool ged_is_oob_marker(int col, int row) {
-    struct DecompressedRoom *room = cur_room();
-    for (size_t i = 0; i < room->num_switches; i++) {
-        struct SwitchObject *sw = room->switches + i;
-        if (sw->chunks.length == 0) continue;
-        int x = sw->chunks.data[0].x, y = sw->chunks.data[0].y;
-        if ((x >= WIDTH_TILES || y >= HEIGHT_TILES) && row == y + 1 && (col == 2 * x || col == 2 * x + 1)) return true;
-    }
-    return false;
-}
-
 void ged_adjust_room(int dbackground, int dtileset) {
     if (!plain_state() || (dbackground == 0 && dtileset == 0)) return;
     struct DecompressedRoom *room = cur_room();
