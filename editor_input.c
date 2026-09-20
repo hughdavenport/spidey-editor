@@ -4965,6 +4965,7 @@ static void handle_backs_view(Key key) {
             else if (key.ch == '_') state->help = !state->help;
             else if (key.ch == 'P') fork_play();
             else if (key.ch == 'D') { state->previous_state = state->current_state; state->current_state = TOGGLE_DISPLAY; }   // overlays: t b s c
+            else if (key.ch == 'H') { state->debug.hex = !state->debug.hex; state->partial_byte = 0; }   // hex / decimal, as in the room view
             break;
         case KEY_CHAR: {
             if (key.mod != MOD_NONE) break;
@@ -5009,13 +5010,15 @@ static void handle_backs_view(Key key) {
                 else { end(); UNREACHABLE(); }
             }
             else if (key.ch == '?') state->help = !state->help;
-            else if (isxdigit(key.ch)) {
+            else if (state->debug.hex ? isxdigit(key.ch) : isdigit(key.ch)) {   // Ctrl-h: two hex digits, or up to three decimal ones
+                int base = state->debug.hex ? 16 : 10;
                 int b = isdigit(key.ch) ? key.ch - '0' : tolower(key.ch) - 'a' + 10;
-                if (state->partial_byte) {   // second nibble completes the value
-                    backs_set(c->x, c->y, 16 * (state->partial_byte & 0xFF) + b);
-                    state->partial_byte = 0;
-                } else {
-                    state->partial_byte = 0xFF00 | b;
+                int have = state->partial_byte & 0xFF, digits = (state->partial_byte >> 8) & 0x0F;   // digits typed so far (hex: 1 completes on the 2nd)
+                if (!state->partial_byte) { state->partial_byte = 0xF100 | b; }
+                else {
+                    int v = have * base + b;
+                    if (state->debug.hex || digits == 2 || v * 10 > 255) { if (v <= 255) backs_set(c->x, c->y, v); state->partial_byte = 0; }
+                    else state->partial_byte = 0xF200 | v;
                 }
             }
             break;

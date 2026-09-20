@@ -94,6 +94,7 @@ xdotool key ctrl+b; sleep 0.4; xdotool key F2; sleep 0.3; xdotool mousemove $((X
 xdotool key ctrl+h; sleep 0.5; snap s12e2c-picker-hover-dec; xdotool key ctrl+h; xdotool key F2; sleep 0.3; xdotool key ctrl+b; sleep 0.4
 # Ctrl-B swaps the picker tiles <-> background (the panel under the picture follows)
 xdotool key ctrl+b; sleep 0.6; snap s12e3-ctrlb-tiles; xdotool key ctrl+b; sleep 0.6; snap s12e4-ctrlb-backs
+cmp -s $T/s12e3-ctrlb-tiles.png $T/s12e4-ctrlb-backs.png && echo "Ctrl-B did NOT swap the picker (frames identical)!" || echo "Ctrl-B swapped the picker (expected)"
 xdotool mousemove $((X + 776 + 0*24 + 12)) $((Y + 24 + 1*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1
 for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done

@@ -372,7 +372,7 @@ static const char *switchdetails_xy_help(void) {
 
 // Ctrl-B's background view (draw_backs_view, below) has its own key table.
 static help_keys backs_help[] = {
-    {"0-9a-fA-F", "enter a SCENERY tile index (two hex digits)"},
+    {"0-9a-fA-F", "enter a SCENERY tile index (two hex digits; decimal digits after Ctrl-h)"},
     {"Left/h", "Move cursor left"},
     {"Down/j", "Move cursor down"},
     {"Up/k", "Move cursor up"},
@@ -391,6 +391,7 @@ static help_keys backs_help[] = {
     {"Escape", "back to the room"},
     {"Ctrl-b", "toggle background view"},
     {"Ctrl-d[tbsc]", "toggle overlays: the room's tiles / blocks / sprites / chunks over the background"},
+    {"Ctrl-h", "toggle hex / decimal for the numbers here and in the GUI's labels"},
     {"PgUp/PgDn", "scroll the help box"},
     {0},
 };
@@ -788,7 +789,7 @@ static void draw_backs_view(void) {
         }
     }
     GOTO(2 * cx, cy + 1);
-    if (state->partial_byte) scr_printf("\033[47;30;1m%x\033[4;5m_\033[m", state->partial_byte & 0xFF);
+    if (state->partial_byte) scr_printf(state->debug.hex ? "\033[47;30;1m%x\033[4;5m_\033[m" : "\033[47;30;1m%u\033[4;5m_\033[m", state->partial_byte & 0xFF);
     else scr_printf("\033[47;30;1m%02X\033[m", render_backs_tile(state->rctx, bid, cx, cy));
     int bottom = HEIGHT_TILES + 1;
     draw_backs_panel(&bottom);

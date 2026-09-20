@@ -3015,9 +3015,10 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             if (want != g->scale) { g->scale = want; load_fonts(g); }
         }
 
+        bool editor_backs = ged_backs_view_on();           // as told to the editor above, before its keys ran
         if (feed_keys(g)) g->room_dirty = true;
-        if (ged_backs_view_on() != g->backs_view)          // the editor switched mode itself (a macro recorded in the other mode): the picker follows
-            set_view(g, ged_backs_view_on() ? VIEW_BACKS : VIEW_TILES);
+        if (ged_backs_view_on() != editor_backs)           // the editor switched mode itself during those keys (a macro recorded in the
+            set_view(g, ged_backs_view_on() ? VIEW_BACKS : VIEW_TILES);   // other mode): the picker follows; the GUI's own Ctrl-B is not undone
         {   bool t, b, sp, c; ged_backs_show(&t, &b, &sp, &c);
             int mask = t | b << 1 | sp << 2 | c << 3;
             if (mask != g->last_backs_show) { g->last_backs_show = mask; g->room_dirty = true; } }
