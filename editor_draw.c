@@ -9,7 +9,9 @@
  * many chunks used to do (Hugh: Undercroft's switch 0 on a small terminal). */
 #define PANEL_GOTO(_x, _y) do { \
     assert((_x) < state->screen_dimensions.x && "width out of bounds"); \
-    scr_printf("\033[%d;%dH", (_y) + 1, (_x) + 1); \
+    int _r = (_y) - (screen_headless ? 0 : state->panel_scroll); /* PgUp/PgDn: rows scrolled */ \
+    if (_r <= HEIGHT_TILES) _r = SCREEN_MAX_HEIGHT - 1;         /* off the top: park it on a row never shown */ \
+    scr_printf("\033[%d;%dH", _r + 1, (_x) + 1); \
 } while (false)
 
 
@@ -38,6 +40,8 @@ help_keys help[][100] = {
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
         {"Ctrl-d[acdlnopst]", "toggle display"},
+        {"Ctrl-b", "toggle background view"},
+        {"PgUp/PgDn", "scroll the panel under the map (the help box while it is up)"},
         {0},
     },
 
@@ -59,7 +63,7 @@ help_keys help[][100] = {
         {"r[nn]", "goto room"},
         {"Ctrl-r[gtdbcef|-]", "edit room detail (hjkl/arrows = room links)"},
         {"Ctrl-s", "create/edit switch"},
-        {"Ctrl-o", "create/cycle object/sprites (over a switch instead: preview it active/idle on the map)"},
+        {"Ctrl-o", "create/cycle object/sprites"},
         {"Enter", "edit object's MOVERTAB.DAT entry (over an object)"},
         {"s[n]", "goto switch"},
         {"o[n]", "goto object"},
@@ -77,6 +81,8 @@ help_keys help[][100] = {
         {"Ctrl-h", "toggle hex"},
         {"Ctrl-t", "tile edit mode"},
         {"Ctrl-d[acdlnopst]", "toggle display"},
+        {"Ctrl-b", "toggle background view"},
+        {"PgUp/PgDn", "scroll the panel under the map (the help box while it is up)"},
         {0},
     },
 
@@ -361,18 +367,44 @@ static const char *switchdetails_xy_help(void) {
         : "value 0-21 / 0x00-0x15 on grid; 22 / 0x16 is off screen";
 }
 
+// Ctrl-B's background view (draw_backs_view, below) has its own key table.
+static help_keys backs_help[] = {
+    {"0-9a-fA-F", "enter a SCENERY tile index (two hex digits)"},
+    {"Left/h", "Move cursor left"},
+    {"Down/j", "Move cursor down"},
+    {"Up/k", "Move cursor up"},
+    {"Right/l", "Move cursor right (off an edge: the neighbouring room's background)"},
+    {"r[nn]", "goto room"},
+    {"u/U", "undo/redo (background edits)"},
+    {"mX", "record to slot X; m=stop"},
+    {",X", "replay slot X; ,,=repeat; ,.=saved"},
+    {"Delete/Backspace", "remove nibble / clear the tile (00 = black)"},
+    {"x", "cut (yank + clear)"},
+    {"y", "yank the tile index"},
+    {"p", "paste it at the cursor"},
+    {"Ctrl-p", "play (play.sh)"},
+    {"q", "quit"},
+    {"?, Ctrl-?", "help"},
+    {"Escape", "back to the room"},
+    {"Ctrl-b", "toggle background view"},
+    {"PgUp/PgDn", "scroll the help box"},
+    {0},
+};
+
 void show_help()
 {
+    help_keys *table = state->backs_view ? backs_help : help[state->current_state];
+    size_t table_len = state->backs_view ? C_ARRAY_LEN(backs_help) : C_ARRAY_LEN(help[state->current_state]);
     int x = 0, x1 = 0, x2 = 0, y = 0;
-    for (size_t i = 0; i < C_ARRAY_LEN(help[state->current_state]); i ++, y ++) {
-        if (help[state->current_state][i].key == NULL) break;
-        int len = strlen(help[state->current_state][i].key);
+    for (size_t i = 0; i < table_len; i ++, y ++) {
+        if (table[i].key == NULL) break;
+        int len = strlen(table[i].key);
         if (len > x1) x1 = len;
-        if (help[state->current_state][i].action == NULL) {
+        if (table[i].action == NULL) {
             fprintf(stderr, "here\n");
         }
-        const char *action = (state->current_state == EDIT_SWITCHDETAILS_XY && i == 0)
-            ? switchdetails_xy_help() : help[state->current_state][i].action;
+        const char *action = (!state->backs_view && state->current_state == EDIT_SWITCHDETAILS_XY && i == 0)
+            ? switchdetails_xy_help() : table[i].action;
         len = strlen(action);
         if (len > x2) x2 = len;
     }
@@ -380,7 +412,10 @@ void show_help()
     if (x % 2) x++;
     y += 3;
 
-    /* Use sidebar (right of map) when there is room; otherwise centre-overlay */
+    /* Use sidebar (right of map) when there is room; otherwise centre-overlay. A box wider or
+     * taller than the terminal starts at its edge and is clipped: what does not fit is cut off
+     * (the cell buffer drops writes past the screen) and PgUp/PgDn scroll it (help_scroll), so
+     * the help stays readable on a terminal only just big enough for the map. */
     int hx, hy;
     if (MIN_WIDTH + x + 1 <= state->screen_dimensions.x &&
             y <= state->screen_dimensions.y) {
@@ -390,9 +425,18 @@ void show_help()
     } else {
         hx = state->screen_dimensions.x / 2 - x / 2;
         hy = state->screen_dimensions.y / 2 - y / 2;
+        if (hx < 0) hx = 0;
+        if (hy < 0) hy = 0;
     }
+    int visible = state->screen_dimensions.y - hy;          /* box rows the terminal has room for */
+    int max_scroll = y - visible; if (max_scroll < 0) max_scroll = 0;
+    if (state->help_scroll > max_scroll) state->help_scroll = max_scroll;
+    if (state->help_scroll < 0) state->help_scroll = 0;
+    int first = state->help_scroll;                           /* first box row shown */
+#define HELP_ROW(_r) ((_r) - first < 0 || (_r) - first >= visible ? SCREEN_MAX_HEIGHT - 1 : hy + (_r) - first)
+#define HELP_GOTO(_r) scr_printf("\033[%d;%dH", HELP_ROW(_r) + 1, hx + 1)
 
-    GOTO(hx, hy);
+    HELP_GOTO(0);
     scr_printf("\033[47;30;1m");
     scr_printf("+");
     for (int i = 0; i < x / 2 - 3; i ++) scr_printf("-");
@@ -400,26 +444,34 @@ void show_help()
     for (int i = 0; i < x / 2 - 3; i ++) scr_printf("-");
     scr_printf("+\033[m ");
     for (int _y = 1; _y < y - 1; _y ++) {
-        GOTO(hx, hy + _y);
+        HELP_GOTO(_y);
         scr_printf("\033[47;30;1;m|%*s|\033[40;37;1m ", x - 2, "");
     }
-    GOTO(hx, hy + (y - 2));
+    HELP_GOTO(y - 2);
     scr_printf("\033[47;30;1m");
     scr_printf("+");
     for (int i = 0; i < x - 2; i ++) scr_printf("-");
     scr_printf("+\033[40;37;1m ");
-    GOTO(hx, hy + (y - 1));
+    HELP_GOTO(y - 1);
     scr_printf("\033[m \033[40;37;1m%*s", x, "");
     scr_printf("\033[47;30;1m");
 
     int line = 1;
-    for (size_t i = 0; i < C_ARRAY_LEN(help[state->current_state]); i ++) {
-        if (help[state->current_state][i].key == NULL) break;
-        GOTO(hx, hy + line); line ++;
-        const char *action = (state->current_state == EDIT_SWITCHDETAILS_XY && i == 0)
-            ? switchdetails_xy_help() : help[state->current_state][i].action;
-        scr_printf("|%-*s - %-*s|", x1, help[state->current_state][i].key, x - x1 - 5, action);
+    for (size_t i = 0; i < table_len; i ++) {
+        if (table[i].key == NULL) break;
+        HELP_GOTO(line); line ++;
+        const char *action = (!state->backs_view && state->current_state == EDIT_SWITCHDETAILS_XY && i == 0)
+            ? switchdetails_xy_help() : table[i].action;
+        scr_printf("|%-*s - %-*s|", x1, table[i].key, x - x1 - 5, action);
     }
+    if (max_scroll > 0) {   /* clipped: say so on the box's bottom visible row */
+        int r = first + visible - 1; if (r > y - 1) r = y - 1;
+        HELP_GOTO(r);
+        scr_printf("\033[47;30;1m+-- PgUp/PgDn: %d more line%s %s --", first < max_scroll ? max_scroll - first : first,
+                   (first < max_scroll ? max_scroll - first : first) == 1 ? "" : "s", first < max_scroll ? "below" : "above");
+    }
+#undef HELP_GOTO
+#undef HELP_ROW
 }
 
 // A room's name, trimmed of its trailing space padding, for chunk summaries
@@ -642,6 +694,55 @@ int panel_oob_switch_row[16];
 int panel_oob_switch_id[16];
 size_t panel_oob_switch_n = 0;
 
+// Ctrl-B's background view: the room's BACKS.SPL block (its `background` number, shared by
+// every room with that number) as hex SCENERY tile indices where the room map normally is,
+// nothing drawn over it but the cursor; a short panel under it. Edits (editor_input.c,
+// handle_backs_view) write the block and save BACKS.SPL at once.
+
+// The background's panel: which block, which rooms share it (the one thing to know before
+// typing), how to edit. Under the hex view, and in the GUI whenever the backs picker is up.
+static void draw_backs_panel(int *bottom) {
+    int bid = state->rooms.rooms[state->current_level].data.background;
+    PANEL_GOTO(0, *bottom); (*bottom)++;
+    scr_printf("\033[1mBACKGROUND %02X\033[m (BACKS.SPL block %d): SCENERY tile indices, 00 = black", bid, bid);
+    PANEL_GOTO(0, *bottom); (*bottom)++;
+    int col = scr_printf("shown by rooms");
+    int n = 0;
+    for (size_t r = 0; r < C_ARRAY_LEN(state->rooms.rooms); r++) {
+        if (!state->rooms.rooms[r].valid || state->rooms.rooms[r].data.background != bid) continue;
+        char name[25] = {0};
+        memcpy(name, state->rooms.rooms[r].data.name, sizeof state->rooms.rooms[r].data.name);
+        for (int k = 23; k >= 0 && (name[k] == ' ' || name[k] == '\0'); k--) name[k] = '\0';
+        if (col > 90) { PANEL_GOTO(0, *bottom); (*bottom)++; col = scr_printf("              "); }   // wrap under the list
+        col += scr_printf("%s %02zx - \"%s\"", n++ ? "," : "", r, name);
+    }
+    PANEL_GOTO(0, *bottom); (*bottom)++;
+    scr_printf("\033[1;33man edit here changes every one of them\033[m");
+    if (screen_headless) {   // the GUI shows the how-to; the TUI's help box has it (Hugh: no need to print it there)
+        PANEL_GOTO(0, *bottom); (*bottom)++;
+        scr_printf("two hex digits set the tile under the cursor; Ctrl-b / Esc back");
+    }
+}
+
+static void draw_backs_view(void) {
+    struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
+    int bid = room->background;
+    int cx = state->cursors[state->current_level].x, cy = state->cursors[state->current_level].y;
+    for (int y = 0; y < HEIGHT_TILES; y++) {
+        GOTO(0, y + 1);
+        for (int x = 0; x < WIDTH_TILES; x++) {
+            int v = render_backs_tile(state->rctx, bid, x, y);
+            if (v) scr_printf("%02X", v); else scr_printf("  ");
+        }
+    }
+    GOTO(2 * cx, cy + 1);
+    if (state->partial_byte) scr_printf("\033[47;30;1m%x\033[4;5m_\033[m", state->partial_byte & 0xFF);
+    else scr_printf("\033[47;30;1m%02X\033[m", render_backs_tile(state->rctx, bid, cx, cy));
+    int bottom = HEIGHT_TILES + 1;
+    draw_backs_panel(&bottom);
+    state->panel_end = bottom;
+}
+
 void redraw() {
 #define PRINTF_DATA(num) scr_printf(state->debug.hex ? "%02X" : "%d", (num))
     // A long-running hot-reloaded session never re-runs the startup init that first calls
@@ -650,6 +751,12 @@ void redraw() {
     // old or new, is guaranteed to hit this.
     if (!state->movertab_load_attempted) movertab_load();
     panel_oob_switch_n = 0;
+    {   // PgUp/PgDn: never scroll the panel past the point where its last row (as drawn last
+        // frame; the panel's height rarely changes between frames) sits on the bottom line
+        int max_scroll = state->panel_end - state->screen_dimensions.y + 1;
+        if (max_scroll < 0) max_scroll = 0;
+        if (state->panel_scroll > max_scroll) state->panel_scroll = max_scroll;
+    }
 
     /* Guard before any GOTO: terminal must meet the absolute floor.
      * The existing check further down handles the debug-panel overage case. */
@@ -774,28 +881,10 @@ void redraw() {
 
     assert(MIN_WIDTH + offset_x >= 2 * WIDTH_TILES);
     assert(MIN_HEIGHT + offset_y >= HEIGHT_TILES);
-    if (state->screen_dimensions.x < MIN_WIDTH + offset_x || state->screen_dimensions.y < MIN_HEIGHT + offset_y) {
-        char *message = NULL;
-        assert(asprintf(&message,
-                    "Required screen dimension is %dx%d. Currently %s%d\033[mx%s%d",
-                    MIN_WIDTH + offset_x + 1, MIN_HEIGHT + offset_y + 1,
-                    (state->screen_dimensions.x < MIN_WIDTH + offset_x + 1 ? "\033[31;1m" : "\033[32m"),
-                    state->screen_dimensions.x,
-                    (state->screen_dimensions.y < MIN_HEIGHT + offset_y + 1 ? "\033[31;1m" : "\033[32m"),
-                    state->screen_dimensions.y
-        ) >= 0);
-        int x = state->screen_dimensions.x / 2 - (int)(strlen(message) - 7) / 2;
-        int y = state->screen_dimensions.y / 2;
-        if (x < 0) x = 0;
-        if (x >= state->screen_dimensions.x) x = state->screen_dimensions.x - 1;
-        if (y < 0) y = 0;
-        if (y + 1 >= state->screen_dimensions.y) y = state->screen_dimensions.y - 2;
-        GOTO(x, y);
-        scr_printf("%s", message);
-        free(message);
-        screen_flush();
-        return;
-    }
+    // The map needs MIN_WIDTH x MIN_HEIGHT (checked above). The text panel under it used to
+    // demand its own height too (MIN_HEIGHT + offset_y rows, or the whole frame was replaced
+    // by a "required screen dimension" notice); since it scrolls (PANEL_GOTO, PgUp/PgDn) a
+    // terminal just tall enough for the map is enough.
 
     GOTO(6, 0);
     scr_printf("%s", state->debug.hex ? "[HEX]" : "[DEC]");
@@ -1057,7 +1146,28 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
             scr_printf("\033[1m%s\033[m", state->status_message);
         }
     }
+    if (!screen_headless) {   // the GUI has its own "saved" flash and panel scrollbar
+        // Right end of the header: "saved <file>" for a couple of redraws after a write
+        // (the TUI's counterpart of the GUI's green flash), else how far the panel is scrolled.
+        char tail[64] = "";
+        if (state->panel_scroll > 0) snprintf(tail, sizeof tail, "panel +%d (PgUp/PgDn)", state->panel_scroll);
+        int tx = state->screen_dimensions.x - (int)strlen(tail) - 1;
+        if (tail[0] && tx > MIN_WIDTH) { GOTO(tx, 0); scr_printf("\033[36m%s\033[m", tail); }
+        if (state->save_flash > 0) {
+            char saved[32];
+            snprintf(saved, sizeof saved, "saved %s", state->saved_file);
+            int sx = (tail[0] ? tx : state->screen_dimensions.x) - (int)strlen(saved) - 2;
+            if (sx > MIN_WIDTH) { GOTO(sx, 0); scr_printf("\033[32;1m%s\033[m", saved); }
+            state->save_flash--;
+        }
+    }
 
+    if (state->backs_view && state->current_state != GOTO_ROOM) {   // Ctrl-B: the background block's hex instead of the room (the r prompt still shows its room list)
+        draw_backs_view();
+        if (state->help) show_help();
+        screen_flush();
+        return;
+    }
 
     if (state->current_state == GOTO_SWITCH) {
         for (int y = 0; y < HEIGHT_TILES; y ++) {
@@ -2333,6 +2443,8 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
     /* } */
 
 show_help_if_needed:
+    state->panel_end = bottom;   // for next frame's PgUp/PgDn clamp (top of redraw)
+
     if (state->help) show_help();
 
     /* Macro slot overlay: drawn at bottom row while awaiting a slot key */

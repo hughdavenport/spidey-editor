@@ -284,7 +284,7 @@ int editor_main(const char *data_dir) {
             }
             char *build_cmd = NULL;
             assert(asprintf(&build_cmd, "%s %s %s", LIBRARY_BUILD_CMD, library, __FILE__) > 0);
-            fprintf(stderr, "Building editor library: %s\n", build_cmd);
+            fprintf(stderr, "dlopen(%s): %s\nBuilding editor library: %s\n", library, dlerror(), build_cmd);
             assert(system(build_cmd) == 0);
             module = dlopen(library, RTLD_NOW);
             if (!module) {

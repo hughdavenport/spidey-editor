@@ -33,7 +33,7 @@ sleep 1
 export DISPLAY=:97
 $BIN gui --data-dir Spider --scale 3 > $T/gui.log 2>&1 &
 GP=$!
-( sleep 90; kill -9 $GP 2>/dev/null ) &
+( sleep 150; kill -9 $GP 2>/dev/null ) &   # the hot-reload step recompiles gui.so with ASAN inside the sandbox
 WD=$!
 snap() { import -window root "$T/$1.png"; }
 sleep 4; snap s1-start
@@ -86,6 +86,10 @@ xdotool mousemove $((X + 876 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; x
 # backgrounds: "backs" button (4th), pick scenery tile 0x10 (16 across, 24 px cells like the tiles, twice the picker width: row 1, col 0; a solid tile),
 # Shift+drag along room row 3, wait for the BACKS.SPL write, undo, back to tiles
 xdotool mousemove $((X + 876 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s12e-backs-view
+xdotool key ctrl+shift+slash; sleep 0.5; snap s12e1-backs-help; xdotool key ctrl+shift+slash; sleep 0.3   # background mode has its own help table
+xdotool key F2; sleep 0.6; snap s12e2-backs-hex; xdotool key F2; sleep 0.3   # F2 with the backs picker: the background block's hex
+# Ctrl-B swaps the picker tiles <-> background (the panel under the picture follows)
+xdotool key ctrl+b; sleep 0.6; snap s12e3-ctrlb-tiles; xdotool key ctrl+b; sleep 0.6; snap s12e4-ctrlb-backs
 xdotool mousemove $((X + 776 + 0*24 + 12)) $((Y + 24 + 1*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
 xdotool keydown shift; xdotool mousemove $((X + 2*24 + 12)) $((Y + 24 + 3*24 + 12)) mousedown 1; sleep 0.1
 for i in 1 2 3 4; do xdotool mousemove_relative 24 0; sleep 0.1; done

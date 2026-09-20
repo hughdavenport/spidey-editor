@@ -80,7 +80,11 @@ void  ged_clear_selection(void);   // forget the selected switch/chunk (as movin
 bool  ged_show_objects(void);
 bool  ged_show_switches(void);
 bool  ged_show_tiles(void);       /* Ctrl-D t: tint tiles by class, hurting tiles red */
-unsigned ged_save_count(const char **file);   /* bumps on every editor write; *file names it (ROOMS.SPL, MOVERTAB.DAT) */
+unsigned ged_save_count(const char **file);   /* bumps on every editor write; *file names it (ROOMS.SPL, MOVERTAB.DAT, BACKS.SPL) */
+typedef struct RenderCtx RenderCtx;
+void  ged_set_render(RenderCtx *ctx);        /* the GUI's render context: backgrounds for the editor's Ctrl-B / F2 background view */
+void  ged_set_backs_view(bool on);           /* F2 with the backs picker: the editor draws and edits the background block's hex */
+bool  ged_backs_edited(void);                /* a background tile was edited through the editor since the last call (redraw the picture) */
 bool  ged_show_spidey(void);      /* Ctrl-D c: draw Spider-Man at the cursor (default on) */
 bool  ged_show_switch_links(void);  /* Ctrl-D l: every switch chunk's link (default on); off = just the active switch's */
 // switch_side_hidden / switch_entry_effective: declared in room.h (pure room-data logic, no

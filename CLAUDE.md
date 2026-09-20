@@ -70,13 +70,43 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
 - Editor uses ANSI escape codes (`\033[row;colH` cursor movement, color codes)
 - `get_screen_dimensions()`: calls `ioctl(STDOUT_FILENO, TIOCGWINSZ, &w)` — **fails when piped (returns 0)**
 - `GOTO(x, y)` macro asserts `x < screen_dimensions.x && y < screen_dimensions.y`; the text panel
-  under the map uses `PANEL_GOTO` (editor_draw.c) instead, which does not assert on the row: on a
-  terminal shorter than the panel the tail is simply not shown (scr_printf drops writes past the
-  cell buffer, screen_flush shows only the terminal's rows). `python3 tui_smoke_test.py` drives the
-  TUI on a 30-row PTY through Undercroft's 11-chunk switch to keep it that way.
+  under the map uses `PANEL_GOTO` (editor_draw.c) instead, which does not assert on the row and
+  applies `panel_scroll`: PgUp/PgDn scroll the panel (rows scrolled off the top are parked on a cell
+  row never shown; the header's right end says "panel +N"), clamped at the top of redraw by last
+  frame's `panel_end`. The TUI no longer demands `MIN_HEIGHT + offset_y` rows for the panel: a
+  terminal tall enough for the map (23 rows) is enough. The help box likewise clips to the
+  terminal and PgUp/PgDn scroll it while it is up (`help_scroll`, "PgUp/PgDn: N more lines").
+  `python3 tui_smoke_test.py` drives the TUI on a 30-row PTY (a sandbox data dir) through all of
+  this plus Ctrl-B.
+- TUI save flash: "saved <file>" in green at the header's right end for two redraws after a write
+  (`save_flash`, set by editor_save / movertab_save / the background view's save).
+- Ctrl-B "toggle background view" (TUI; in the GUI Ctrl-B swaps the picker tiles <-> background
+  and F2 with the backs picker shows the hex): the room's background block as hex SCENERY
+  tile indices in place of the map (`backs_view`, `draw_backs_view`; `handle_backs_view` in
+  editor_input.c takes the keys: hjkl/arrows, two hex digits set a tile, Delete/Backspace clear it,
+  Esc / Ctrl-B back). Edits go through the render layer (`render_backs_set_tile`) and BACKS.SPL is
+  saved at once; a refused save (size limit) puts the tile back. No undo stack for these edits.
+  The TUI opens its own `RenderCtx` from the data dir on first use (`state->rctx`); the GUI hands
+  its own over with `ged_set_render` and drives the view with `ged_set_backs_view`, redrawing the
+  picture when `ged_backs_edited` reports a change. In the GUI the backs picker being up *is*
+  the editor's background mode (`ged_set_backs_view(g->backs_view)` every frame): its keys
+  (hex digits edit the background, r goes to a room, u/U its own undo stack `backs_undo`, y/x/p
+  yank/cut/paste a tile index, m/, macros, Ctrl-p, q), its panel ("BACKGROUND NN", the rooms
+  sharing it with their names, "an edit here changes every one of them") and its help
+  (`backs_help`, plus the GUI lines; `?` alone opens it too). The picture stays but is rendered
+  without objects, sprites or the tiles any TOGGLE_BLOCK chunk covers (`render_show_objects`:
+  background plus the room's fixed tiles) and without any room overlays; the block panel never
+  comes up in this mode (it would dim the view buttons and snap the picker back to the tiles,
+  which read as Ctrl-B "toggling twice"); F2 shows the block's hex. Esc or Ctrl-B goes back to
+  the tiles picker (the editor's Esc alone would be undone next frame).
 - SIGWINCH handler sets `state->resized = true`; main loop calls `get_screen_dimensions()` on next iteration
 
 ## Hot Reload (editor.c)
+- editor.so is built by `LIBRARY_BUILD_CMD` **plus editor.c itself** (the process hooks `end`,
+  `get_screen_dimensions`, ... live there): `cc ... render.c room.c spl.c editor_actions.c
+  editor_draw.c editor_input.c editor_screen.c -o editor.so editor.c`. A hand-built editor.so
+  without editor.c has undefined symbols, dlopen refuses it and the editor rebuilds it at startup
+  (the message now quotes dlerror()).
 - Editor compiles itself as a shared library (`editor.so`)
 - `hotreload_loop()` is the entry point in the .so
 - When source files change, recompiles and returns from the loop so main can reload

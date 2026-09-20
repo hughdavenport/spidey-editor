@@ -199,6 +199,13 @@ bool ged_show_objects(void) { return state->debug.objects; }
 bool ged_show_switches(void) { return state->debug.switches; }
 bool ged_show_tiles(void)    { return state->debug.tiles; }
 unsigned ged_save_count(const char **file) { *file = state->saved_file; return state->save_count; }
+void ged_set_render(RenderCtx *ctx) { state->rctx = ctx; }
+void ged_set_backs_view(bool on) {
+    if (on && state->rctx == NULL) on = false;
+    if (state->backs_view != on) state->partial_byte = 0;
+    state->backs_view = on;
+}
+bool ged_backs_edited(void) { bool e = state->backs_edited; state->backs_edited = false; return e; }
 bool ged_show_spidey(void)   { return state->debug.spidey; }
 bool ged_show_switch_links(void) { return state->debug.switch_links; }
 RoomFile *ged_rooms(void) { return &state->rooms; }

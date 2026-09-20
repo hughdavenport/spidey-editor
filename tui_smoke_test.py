@@ -5,14 +5,19 @@ panel past the terminal's height - room 9 (Undercroft), its 11-chunk switch 0 op
 Ctrl-S, chunk 1 selected. The editor must still be running afterwards and its output must
 hold no assertion message; then Esc, Esc, q must make it exit cleanly.
 
-Runs the editor against the working directory's ROOMS.SPL read-only (nothing here edits).
-One child process, hard deadline, killed on the way out if it will not quit.
+Runs on a sandbox copy (ROOMS.SPL, MOVERTAB.DAT, BACKS.SPL and the graphics, if present,
+copied to a temp dir handed to the editor with --data-dir), so nothing typed here can touch
+the live files. One child process, hard deadline, killed on the way out if it will not quit.
 
     python3 tui_smoke_test.py            (exit 0 = passed)
 """
 import fcntl
+import glob
 import os
+import shutil
+import tempfile
 import pty
+import re
 import select
 import signal
 import struct
@@ -38,34 +43,146 @@ def drain(fd, seconds):
     return out
 
 
+def drain_until_quiet(fd, timeout, quiet=0.4):
+    """Read until nothing more arrives for `quiet` seconds (or `timeout` in all): a whole frame."""
+    out = b''
+    end = time.time() + timeout
+    last = time.time()
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if r:
+            try:
+                out += os.read(fd, 65536)
+            except OSError:
+                break
+            last = time.time()
+        elif out and time.time() - last > quiet:
+            break
+    return out
+
+
 def exited(pid):
     """(True, status) once the child has exited, else (False, None)."""
     wp, st = os.waitpid(pid, os.WNOHANG)
     return (True, st) if wp else (False, None)
 
 
+class Screen:
+    """A minimal VT parser: enough of CUP / SGR / newline to rebuild what the editor drew."""
+    SEQ = re.compile(r'\x1b\[([0-9;]*)([A-Za-z])|\x1b[^\[]|\x1b\[\?[0-9;]*[a-z]|(.)', re.S)
+
+    def __init__(self, rows, cols):
+        self.rows, self.cols = rows, cols
+        self.cells = [[' '] * cols for _ in range(rows)]
+        self.bg = [[0] * cols for _ in range(rows)]
+        self.x = self.y = 0
+        self.cur_bg = 0
+
+    def feed(self, text):
+        for m in self.SEQ.finditer(text):
+            if m.group(2):
+                params = [int(p) if p else 0 for p in m.group(1).split(';')] if m.group(1) else []
+                if m.group(2) == 'H':
+                    self.y = (params[0] if params else 1) - 1
+                    self.x = (params[1] if len(params) > 1 else 1) - 1
+                elif m.group(2) == 'm':
+                    if not params or params == [0]:
+                        self.cur_bg = 0
+                    for p in params:
+                        if p == 0:
+                            self.cur_bg = 0
+                        elif 40 <= p <= 47:
+                            self.cur_bg = p
+            elif m.group(3):
+                c = m.group(3)
+                if c == '\n':
+                    self.y += 1; self.x = 0
+                elif c == '\r':
+                    self.x = 0
+                elif c >= ' ':
+                    if 0 <= self.y < self.rows and 0 <= self.x < self.cols:
+                        self.cells[self.y][self.x] = c
+                        self.bg[self.y][self.x] = self.cur_bg
+                    self.x += 1
+
+    def row(self, y):
+        return ''.join(self.cells[y])
+
+    def text(self):
+        return '\n'.join(self.row(y) for y in range(self.rows))
+
+
+def backs_block(bid):
+    """Row 0 of BACKS.SPL block `bid` as the hex the editor should show (render_room's decoder)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import render_room
+    render_room._f = lambda name: open(name, 'rb').read()   # the working directory's file, as the editor reads it
+    tiles = render_room.backs_tilemap(bid)
+    return ''.join(f'{v:02X}' if v else '  ' for v in tiles[:32])
+
+
 def main():
+    failures = []
+    sandbox = tempfile.mkdtemp(prefix='spidey-tui-smoke.')
+    for name in ['ROOMS.SPL', 'MOVERTAB.DAT', 'BACKS.SPL'] + glob.glob('*.EGA') + glob.glob('*.CGA'):
+        if os.path.exists(name):
+            shutil.copy(name, os.path.join(sandbox, name))
+    have_backs = os.path.exists(os.path.join(sandbox, 'BACKS.SPL')) and os.path.exists(os.path.join(sandbox, 'BLOCKS.EGA'))
+    if not have_backs:
+        print("SKIP the background view check: no BACKS.SPL and graphics here")
     pid, fd = pty.fork()
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
         os.environ['SPIDEY_NO_HOTRELOAD'] = '1'
-        os.execv('./a.out', ['./a.out', 'editor'])
+        os.execv('./a.out', ['./a.out', '--data-dir', sandbox, 'editor'])
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
     start = time.time()
-    out = drain(fd, 1.0)
+    rooms_before = open(os.path.join(sandbox, 'ROOMS.SPL'), 'rb').read()
+    out = drain_until_quiet(fd, 40.0, quiet=0.8)   # long enough for the editor to build editor.so if it must
+    # The TUI starts with its help box up; on 30 rows the box does not fit, so it must be
+    # clipped with a PgUp/PgDn note rather than drawn off the top. Then hide it (Ctrl-?), so
+    # PgDn below scrolls the panel and not the help.
+    scr = Screen(ROWS, COLS); scr.feed(out.decode('latin1'))
+    if 'help' not in scr.text() or 'PgUp/PgDn:' not in scr.text():
+        failures.append(f"help box on a 30-row terminal is not shown clipped with a PgUp/PgDn note (row 0 {scr.row(0).rstrip()[:40]!r})")
+    os.write(fd, b'\x1f'); more = drain(fd, 0.6); out += more; scr.feed(more.decode('latin1'))
     for key in ['r', '0', '9', 's', '0', '\x13', 'c', '1']:
         os.write(fd, key.encode())
-        out += drain(fd, 0.4)
+        more = drain(fd, 0.4); out += more; scr.feed(more.decode('latin1'))
         if time.time() - start > DEADLINE_S:
             break
     done, status = exited(pid)
     text = out.decode('latin1')
-    failures = []
     if done:
         failures.append(f"editor exited during the key sequence (status {status})")
     if 'Assertion' in text:
         failures.append("an assertion fired: " + next(l for l in text.splitlines() if 'Assertion' in l).strip()[:200])
     if not done:
+        # PgDn scrolls the panel: the header's right end says so and the frame changes
+        before = scr.text()
+        os.write(fd, b'\x1b[6~'); more = drain(fd, 0.6); text += more.decode('latin1')
+        scr.feed(more.decode('latin1'))
+        if 'panel +' not in scr.row(0):
+            failures.append("PgDn did not scroll the panel (no 'panel +N' in the header)")
+        if scr.text() == before:
+            failures.append("PgDn changed nothing on screen")
+        # Ctrl-B: the background block's hex replaces the map; Esc brings the room back
+        if have_backs:
+            os.write(fd, b'\x1b'); drain(fd, 0.3); os.write(fd, b'\x1b'); drain(fd, 0.3)   # leave the chunk edit
+            os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'01'); more = drain(fd, 0.6); scr.feed(more.decode('latin1'))
+            os.write(fd, b'\x02'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
+            expect = backs_block(1)
+            if scr.row(1)[:64] != expect:
+                failures.append(f"Ctrl-B map row 0 is {scr.row(1)[:64]!r}, BACKS.SPL block 1 says {expect!r}")
+            if 'BACKGROUND 01' not in scr.text():
+                failures.append("Ctrl-B panel does not name the background block")
+            # r 09 inside the view: the room prompt works and the view comes back for Undercroft
+            os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'09'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
+            if 'BACKGROUND 08' not in scr.text() or 'Undercroft' not in scr.row(0):
+                failures.append(f"r 09 in the background view did not show Undercroft's background (header {scr.row(0).rstrip()[:60]!r})")
+            os.write(fd, b'\x1b'); more = drain(fd, 0.6); scr.feed(more.decode('latin1'))
+            if 'BACKGROUND 08' in scr.row(23):
+                failures.append("Esc did not leave the background view")
         for key in ['\x1b', '\x1b', 'q']:
             os.write(fd, key.encode())
             out += drain(fd, 0.4)
@@ -80,9 +197,13 @@ def main():
             failures.append("editor did not quit on Esc Esc q")
         elif os.WIFSIGNALED(status):
             failures.append(f"editor died of signal {os.WTERMSIG(status)} on quit")
+    rooms_after = open(os.path.join(sandbox, 'ROOMS.SPL'), 'rb').read()
+    if rooms_after != rooms_before:
+        failures.append("the key sequence (nothing in it edits) rewrote ROOMS.SPL differently")
+    shutil.rmtree(sandbox, ignore_errors=True)
     for f in failures:
         print("FAIL:", f)
-    print("tui: 30-row terminal, Undercroft switch 0 chunk list drawn, quit clean" if not failures else f"{len(failures)} failure(s)")
+    print("tui: 30-row terminal - chunk panel drawn and scrolled, help clipped, background view, quit clean" if not failures else f"{len(failures)} failure(s)")
     return 1 if failures else 0
 
 

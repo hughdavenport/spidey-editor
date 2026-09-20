@@ -436,6 +436,7 @@ static void sync_sprite_sel(GuiState *g) {
 
 // Switch the picker between tiles / sprites / backgrounds.
 static void set_view(GuiState *g, int view) {
+    if ((view == VIEW_BACKS) != g->backs_view) g->room_dirty = true;   // the picture drops / regains its objects
     g->sprites_view = view == VIEW_SPRITES;
     g->backs_view = view == VIEW_BACKS;
     g->font_view = view == VIEW_FONT;
@@ -503,6 +504,10 @@ static int cur_backs(void) { return ged_rooms()->rooms[ged_room()].data.backgrou
 
 // Is the block panel (rather than the pixel editor) showing right now?
 static bool block_panel(GuiState *g, int *bi, int *bx, int *by, int *bw, int *bh) {
+    // Background mode has no blocks (they are not even drawn), so the cursor resting on one
+    // must not bring the block panel up - that would dim the view buttons and snap the picker
+    // back to the tiles, undoing a Ctrl-B the moment it was pressed.
+    if (g->backs_view) return false;
     return ged_block_at_cursor(bi, bx, by, bw, bh) && *bi != g->block_hidden;
 }
 
@@ -666,6 +671,12 @@ static bool feed_keys(GuiState *g) {
         GKey k = { .mod = m };
         bool ok = true;
         if (rk == KEY_F2) { g->text_map = !g->text_map; continue; }   // GUI-only: hex map toggle
+        if (rk == KEY_ESCAPE && g->backs_view) { set_view(g, VIEW_TILES); any = true; continue; }   // background mode: Esc = back to the tiles
+        if (rk == KEY_B && (m & GK_MOD_CTRL)) {                          // GUI-only: Ctrl-B swaps the picker tiles <-> background;
+            if (g->backs_view) set_view(g, VIEW_TILES);                  // the panel follows, and so does the hex map while F2 is on
+            else if (tiles_view(g)) set_view(g, VIEW_BACKS);             // (sprites / font / screens: nothing)
+            any = true; continue;
+        }
         if (rk == KEY_F3) { set_gfx_mode(g, !g->cga); any = true; continue; }   // GUI-only: EGA / CGA files
         if (g->screens_view) {                                          // screen mode: Esc leaves, Tab cycles, arrows / Enter edit, help still works
             if (rk == KEY_ESCAPE) { set_view(g, VIEW_TILES); any = true; continue; }
@@ -1290,7 +1301,9 @@ static void draw_help(GuiState *g) {
     int cols = x1 - x0 + 1, rows = y1 - y0 + 1;
     static const char *gui_help[] = {
         "GUI  (mouse and keys on top of the editor's)",
-        "F2 hex map     F3 switch between the .EGA and .CGA graphics     q quit     wheel over text: scroll",
+        "F2 hex map (with the backs picker: the background block's hex, two hex digits edit a tile)",
+        "Ctrl-B toggle background view (picker and panel; the hex map too while F2 is on; nothing while sprites / font / screens is up)",
+        "F3 switch between the .EGA and .CGA graphics     q quit     wheel over text: scroll",
         "picker: click selects; Shift+drag in the room paints it (a sprite sheet: Shift+click places",
         "        that creature); middle-click on the room picks the tile",
         "backs button: the picker shows the scenery tiles; Shift+drag paints the room's background",
@@ -1905,6 +1918,7 @@ static void set_gfx_mode(GuiState *g, bool cga) {
     if (next == NULL) { gui_error(g, cga ? "no .CGA graphics in the data dir" : "no .EGA graphics in the data dir"); return; }
     render_close(g->rctx);
     g->rctx = next;
+    ged_set_render(g->rctx);
     g->cga = cga;
     render_show_player(g->rctx, false);
     g->pix_undo_n = 0; g->pix_seq = 0;                   // the undo entries belong to the other files
@@ -2956,6 +2970,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
     } else {
         g->es = ged_open(file, g->es, data_dir);   // re-adopt (or reset) the editor state after a reload
     }
+    ged_set_render(g->rctx);                    // the editor's background view reads and writes our backgrounds
     render_show_player(g->rctx, false);  // he is drawn at the cursor instead
     render_set_movertab(g->rctx, ged_movertab());   // mirror sprites per their facing/upside-down bits
     g->data_dir = data_dir;
@@ -3024,6 +3039,8 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             }
         }
 
+        ged_set_backs_view(g->backs_view);                 // the backs picker up = the editor's background mode (its keys, panel, help; F2 shows its hex)
+        if (ged_backs_edited()) { g->room_dirty = true; g->world_pending = true; g->world_stale = true; }
         ged_redraw();                                      // the editor lays out its text screen
 
         RoomFile *rooms = ged_rooms();
@@ -3031,6 +3048,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         if (g->room_dirty || g->drawn_room != room) {
             int hot_switch = -1, hot_chunk = -1; bool hot_on = false;
             ged_hot_block_preview(&hot_switch, &hot_chunk, &hot_on);
+            render_show_objects(g->rctx, !g->backs_view);   // background mode: the room's tiles over its background, no objects or sprites
             render_room_rgb(g->rctx, rooms, room, buf, hot_switch, hot_chunk, hot_on);
             Image img = { .data = buf, .width = ROOM_PX_W, .height = ROOM_PX_H,
                           .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8 };
@@ -3098,10 +3116,12 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             // clip to the picture: out-of-bounds switches (the editor keeps
             // them at y >= 22) would otherwise draw over the text panels
             BeginScissorMode(pic_x(g), pic_y(g), pic_w(g), pic_h(g));
-            draw_overlay(g);
-            draw_hover_preview(g);
-            draw_drag(g);
-            draw_link_drag(g);
+            if (!g->backs_view) {   // the backs picker is about the background: no room overlays over it
+                draw_overlay(g);
+                draw_hover_preview(g);
+                draw_drag(g);
+                draw_link_drag(g);
+            }
             draw_cursor(g);
             EndScissorMode();
         }
@@ -3116,7 +3136,7 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
             draw_source_grid(g, on_block && bi != g->block_hidden);
         }
         draw_world_map(g);
-        if (!g->text_map && !ged_map_is_text()) draw_world_links(g);   // over the map: switch links into other rooms
+        if (!g->text_map && !ged_map_is_text() && !g->backs_view) draw_world_links(g);   // over the map: switch links into other rooms
         if (ged_help_shown()) draw_help(g);
         EndDrawing();
     }

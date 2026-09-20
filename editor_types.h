@@ -12,6 +12,8 @@
 
 #include "room.h"
 
+typedef struct RenderCtx RenderCtx;   // render.h; the editor holds one for the background view
+
 #if __has_attribute(__fallthrough__)
 # define fallthrough                    __attribute__((__fallthrough__))
 #else
@@ -203,6 +205,23 @@ typedef struct {
      * "saved ROOMS.SPL" for a keyboard edit's save as well as for its own paint strokes. */
     unsigned save_count;
     char saved_file[16];
+    int save_flash;            /* TUI: redraws left to show "saved <file>" at the header's right end */
+    /* TUI: PgUp/PgDn scroll the text panel under the map (panel_scroll rows) or, while the
+     * help box is up, the help box (help_scroll); panel_end = one past the panel's last row
+     * as last drawn, for clamping. The GUI keeps both at 0 (it scrolls the panel itself). */
+    int panel_scroll, help_scroll, panel_end;
+    /* Ctrl-B: the room's background block (BACKS.SPL) shown and edited as hex SCENERY tile
+     * indices instead of the room map. rctx is the GUI's own render context
+     * (ged_set_render) or one the TUI opens from the data dir on first use. */
+    bool backs_view;
+    bool backs_edited;         /* set by a background edit; the GUI reads and clears it (ged_backs_edited) to redraw */
+    RenderCtx *rctx;
+    /* The background view's own undo: one tile per entry, [0, backs_undo_n) done and the
+     * next backs_redo_n of them undone; a new edit drops the undone ones. backs_clip is the
+     * yanked tile index + 1 (0 = nothing yanked). */
+    struct BacksEdit { uint8_t bid, x, y, before, after; } backs_undo[256];
+    int backs_undo_n, backs_redo_n;
+    int backs_clip;
     /* Where ROOMS.SPL and MOVERTAB.DAT are read and written: main()'s --data-dir, or "."
      * (room.h data_path). Lives here so it survives hot reloads and reaches editor.so /
      * gui.so, which have their own copy of room.c and no view of main()'s variables. */

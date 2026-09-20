@@ -1791,7 +1791,10 @@ bool writeRooms(RoomFile *file, const char *dir, int *failed_room, char *danglin
                     chunk->bitmask = 0x1;
                     goto next;
                 }
-                fprintf(stderr, "Could not find switch for room %lu switch %lu chunk %lu pointing to room %u switch %u\n", idx, sw, c, chunk->room_idx, chunk->switch_idx);
+                // A caller that takes dangling_msg reports this itself (the editor's status line);
+                // printing it here as well lands on top of the TUI's map.
+                if (!dangling_msg)
+                    fprintf(stderr, "Could not find switch for room %lu switch %lu chunk %lu pointing to room %u switch %u\n", idx, sw, c, chunk->room_idx, chunk->switch_idx);
                 if (failed_room) *failed_room = -2;   // distinct from -1 (whole file over its total limit): not a size problem at all
                 if (dangling_msg) {
                     snprintf(dangling_msg, dangling_msg_size,

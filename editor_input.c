@@ -1,5 +1,7 @@
 #include "editor_types.h"
 #include "render.h"
+
+static void backs_view_enter(void);   /* Ctrl-B (defined with handle_backs_view below) */
 #include <ctype.h>
 #include <errno.h>
 #include <poll.h>
@@ -3362,6 +3364,7 @@ static bool handle_normal(Key key) {
         case KEY_CTRL:
             switch (key.ch) {
                 case '_': state->help = !state->help; break;
+                case 'B': backs_view_enter(); break;
                 case 'D':
                     state->previous_state = state->current_state;
                     state->current_state = TOGGLE_DISPLAY;
@@ -3826,6 +3829,7 @@ static bool handle_tile_edit(Key key) {
         break;
     case KEY_CTRL:
         switch (key.ch) {
+            case 'B': backs_view_enter(); return true;
             case 'R':
                 state->previous_state = state->current_state;
                 state->current_state = EDIT_ROOMDETAILS;
@@ -3892,13 +3896,6 @@ static bool handle_tile_edit(Key key) {
                 struct DecompressedRoom *room = &state->rooms.rooms[state->current_level].data;
                 size_t x = state->cursors[state->current_level].x;
                 size_t y = state->cursors[state->current_level].y;
-                // A switch under the cursor (its own marker, or any tile one of its
-                // TOGGLE_BLOCK chunks covers) takes priority over object create/cycle here -
-                // "switch under spidey, or chunk of any kind under spidey" (Hugh).
-                if (find_switch_under_cursor(room, (int)x, (int)y) >= 0) {
-                    toggle_hover_switch_preview();
-                    return true;
-                }
                 struct RoomObject *found_obj = NULL;
                 for (size_t obj_j = 0; obj_j < room->num_objects; obj_j++) {
                     struct RoomObject *obj = room->objects + obj_j;
@@ -4859,6 +4856,152 @@ bool editor_replay_step(void) {
 /* Run one decoded key through the macro layer (record / slot selection) and
  * then the current state's handler. Shared by the terminal editor and the
  * GUI, which decodes raylib events into the same Key struct. */
+/* --- Ctrl-B: the background block as hex ------------------------------------------------ */
+
+// Show and edit the room's background block (BACKS.SPL block `background`) as hex SCENERY
+// tile indices in place of the room map. The GUI hands over its own render context
+// (ged_set_render); the TUI opens one from the data dir on first use, which needs the game's
+// graphics and BACKS.SPL there (the same files the GUI needs).
+static void backs_view_enter(void) {
+    if (state->rctx == NULL) state->rctx = render_open(state->data_dir, false);
+    if (state->rctx == NULL) {
+        snprintf(state->status_message, sizeof(state->status_message),
+                 "background view needs BACKS.SPL and the graphics in %.20s", state->data_dir);
+        return;
+    }
+    state->backs_view = true;   // the panel under the map says what to do; no title splash
+    state->partial_byte = 0;
+}
+
+static void backs_view_leave(void) {
+    state->backs_view = false;
+    state->partial_byte = 0;
+}
+
+// Write one tile of a block and save BACKS.SPL at once. false (and the old value back) when
+// the save is refused for the file's size limit.
+static bool backs_write(int bid, int x, int y, int v) {
+    int old = render_backs_tile(state->rctx, bid, x, y);
+    render_backs_set_tile(state->rctx, bid, x, y, v);
+    if (render_backs_save(state->rctx)) {
+        state->save_count++;
+        state->save_flash = 2;
+        snprintf(state->saved_file, sizeof state->saved_file, "BACKS.SPL");
+        state->backs_edited = true;
+        return true;
+    }
+    render_backs_set_tile(state->rctx, bid, x, y, old);
+    snprintf(state->status_message, sizeof(state->status_message),
+             "NOT SAVED: BACKS.SPL over its size limit, change undone");
+    return false;
+}
+
+// One tile of the current room's block, as an undoable edit (its own stack, backs_undo: the
+// room undo stack knows nothing about BACKS.SPL). A new edit drops any undone entries; a full
+// stack forgets its oldest entry.
+static void backs_set(int x, int y, int v) {
+    int bid = state->rooms.rooms[state->current_level].data.background;
+    int old = render_backs_tile(state->rctx, bid, x, y);
+    if (old == v) return;
+    if (!backs_write(bid, x, y, v)) return;
+    state->backs_redo_n = 0;
+    if (state->backs_undo_n == (int)C_ARRAY_LEN(state->backs_undo)) {
+        memmove(state->backs_undo, state->backs_undo + 1, sizeof state->backs_undo - sizeof state->backs_undo[0]);
+        state->backs_undo_n--;
+    }
+    state->backs_undo[state->backs_undo_n++] = (struct BacksEdit){ (uint8_t)bid, (uint8_t)x, (uint8_t)y, (uint8_t)old, (uint8_t)v };
+}
+
+static void backs_undo(void) {
+    if (state->backs_undo_n == 0) { snprintf(state->status_message, sizeof(state->status_message), "Nothing to undo"); return; }
+    struct BacksEdit *e = &state->backs_undo[state->backs_undo_n - 1];
+    if (!backs_write(e->bid, e->x, e->y, e->before)) return;
+    state->backs_undo_n--;
+    state->backs_redo_n++;
+}
+
+static void backs_redo(void) {
+    if (state->backs_redo_n == 0) { snprintf(state->status_message, sizeof(state->status_message), "Nothing to redo"); return; }
+    struct BacksEdit *e = &state->backs_undo[state->backs_undo_n];
+    if (!backs_write(e->bid, e->x, e->y, e->after)) return;
+    state->backs_undo_n++;
+    state->backs_redo_n--;
+}
+
+static void handle_backs_view(Key key) {
+    v2 *c = &state->cursors[state->current_level];
+    switch (key.code) {
+        case KEY_LEFT:  move_cursor_plain(-1, 0); state->partial_byte = 0; break;
+        case KEY_RIGHT: move_cursor_plain(1, 0);  state->partial_byte = 0; break;
+        case KEY_UP:    move_cursor_plain(0, -1); state->partial_byte = 0; break;
+        case KEY_DOWN:  move_cursor_plain(0, 1);  state->partial_byte = 0; break;
+        case KEY_ESC:   backs_view_leave(); break;
+        case KEY_BS: case KEY_DELETE:
+            if (state->partial_byte) state->partial_byte = 0;
+            else backs_set(c->x, c->y, 0);
+            break;
+        case KEY_CTRL:
+            if (key.ch == 'B') backs_view_leave();
+            else if (key.ch == '_') state->help = !state->help;
+            else if (key.ch == 'P') fork_play();
+            break;
+        case KEY_CHAR: {
+            if (key.mod != MOD_NONE) break;
+            int bid = state->rooms.rooms[state->current_level].data.background;
+            if (key.ch == 'h') { move_cursor_plain(-1, 0); state->partial_byte = 0; }
+            else if (key.ch == 'l') { move_cursor_plain(1, 0); state->partial_byte = 0; }
+            else if (key.ch == 'k') { move_cursor_plain(0, -1); state->partial_byte = 0; }
+            else if (key.ch == 'j') { move_cursor_plain(0, 1); state->partial_byte = 0; }
+            else if (key.ch == 'r') {   // goto room, as in the room view; the view comes back for the room chosen
+                state->previous_state = state->current_state;
+                state->current_state = GOTO_ROOM;
+                state->current_switch = 0;
+                state->switch_on = false;
+                state->current_chunk = 0;
+                state->partial_byte = 0;
+            }
+            else if (key.ch == 'u') backs_undo();
+            else if (key.ch == 'U') backs_redo();
+            else if (key.ch == 'y') state->backs_clip = render_backs_tile(state->rctx, bid, c->x, c->y) + 1;
+            else if (key.ch == 'x') { state->backs_clip = render_backs_tile(state->rctx, bid, c->x, c->y) + 1; backs_set(c->x, c->y, 0); }
+            else if (key.ch == 'p') {
+                if (state->backs_clip) backs_set(c->x, c->y, state->backs_clip - 1);
+                else snprintf(state->status_message, sizeof(state->status_message), "Nothing yanked");
+            }
+            else if (key.ch == 'm') {   // macros, as in the room view (editor_handle_key takes the slot key)
+                if (state->macro_recording) {
+                    KeyArray *slot = &state->macro_slots[state->macro_slot - 'a'];
+                    ARRAY_FREE(*slot);
+                    *slot = state->macro_buf;
+                    state->macro_buf = (KeyArray){0};
+                    state->macro_recording = false;
+                    state->macro_last_saved = state->macro_slot;
+                } else {
+                    state->macro_meta = true;
+                }
+            }
+            else if (key.ch == ',') { if (!state->macro_recording && state->macro_replay.length == 0) state->macro_replay_pending = true; }
+            else if (key.ch == 'q') {
+                if (state->help) state->help = false;
+                else if (state->partial_byte) state->partial_byte = 0;
+                else { end(); UNREACHABLE(); }
+            }
+            else if (key.ch == '?') state->help = !state->help;
+            else if (isxdigit(key.ch)) {
+                int b = isdigit(key.ch) ? key.ch - '0' : tolower(key.ch) - 'a' + 10;
+                if (state->partial_byte) {   // second nibble completes the value
+                    backs_set(c->x, c->y, 16 * (state->partial_byte & 0xFF) + b);
+                    state->partial_byte = 0;
+                } else {
+                    state->partial_byte = 0xFF00 | b;
+                }
+            }
+            break;
+        }
+        default: break;   // nothing else applies to a background
+    }
+}
+
 void editor_handle_key(Key key) {
     /* Macro meta: awaiting slot key after 'm' — consume key, start or cancel */
     if (state->macro_meta) {
@@ -4900,6 +5043,17 @@ void editor_handle_key(Key key) {
             !(key.code == KEY_CHAR && key.mod == MOD_NONE && key.ch == 'm')) {
         ARRAY_ADD(state->macro_buf, key);
     }
+
+    /* PgUp / PgDn: scroll the help box while it is up, else the text panel under the map
+     * (both clamped when drawn; the GUI scrolls its panel itself and never sends these). */
+    if (key.code == KEY_PAGE_UP || key.code == KEY_PAGE_DOWN) {
+        int *scroll = state->help ? &state->help_scroll : &state->panel_scroll;
+        int step = state->screen_dimensions.y / 3; if (step < 1) step = 1;
+        *scroll += key.code == KEY_PAGE_DOWN ? step : -step;
+        if (*scroll < 0) *scroll = 0;
+        return;
+    }
+    if (state->backs_view && state->current_state != GOTO_ROOM) { handle_backs_view(key); return; }   // (the r prompt keeps its own keys)
 
     /* Plain left click below the map: act on the info line clicked (any state);
      * on the room list: pick that room. */
