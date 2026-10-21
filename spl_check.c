@@ -17,6 +17,33 @@
 static int failures = 0;
 #define CHECK(cond, ...) do { if (!(cond)) { failures++; fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
+// A refusal the code is expected to report on stderr: capture what it prints, so the run's
+// output stays clean and the message itself can be checked.
+static int saved_stderr = -1;
+static FILE *stderr_tmp;
+static void stderr_capture(void) {
+    fflush(stderr);
+    saved_stderr = dup(STDERR_FILENO);
+    stderr_tmp = tmpfile();
+    if (saved_stderr >= 0 && stderr_tmp) dup2(fileno(stderr_tmp), STDERR_FILENO);
+}
+static bool stderr_captured(const char *expect) {   // true when the captured text holds `expect`
+    if (saved_stderr < 0 || stderr_tmp == NULL) return false;
+    fflush(stderr);
+    dup2(saved_stderr, STDERR_FILENO);
+    close(saved_stderr);
+    saved_stderr = -1;
+    char buf[4096] = {0};
+    rewind(stderr_tmp);
+    size_t n = fread(buf, 1, sizeof buf - 1, stderr_tmp);
+    buf[n] = 0;
+    fclose(stderr_tmp);
+    stderr_tmp = NULL;
+    if (strstr(buf, expect) != NULL) return true;
+    fprintf(stderr, "  (expected \"%s\" on stderr; it said: %s)\n", expect, n ? buf : "nothing");
+    return false;
+}
+
 // spl_decompress reads a FILE; feed it the compressed bytes through fmemopen.
 static bool roundtrip(const uint8_t *data, size_t n, uint8_t marker0, const char *what) {
     static uint8_t comp[4 * 1024];
@@ -120,7 +147,8 @@ static void check_backs_store(const char *data_dir) {
     char dir[1024];
     snprintf(dir, sizeof dir, "%s/spl_check.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
     if (mkdtemp(dir) == NULL) { CHECK(false, "mkdtemp failed"); return; }
-    // every graphics file in both modes, plus the backgrounds
+    // every graphics file in both modes, plus the backgrounds: whichever of them the data
+    // dir has (the demo set has no .CGA files; render_open insists on the ones it needs)
     static const char *GFX_FILES[] = { "BLOCKS", "SCENERY", "SPIDS1", "SPIDS2", "CHARSET", "LOADSCRN", "WINSCRN",
                                        "PAGE1", "PAGE2", "PAGE3", "PAGE4", "HISCORE", "SPIDFIGR", "SKELFIGR" };
     static const char *EXTS[] = { "EGA", "CGA" };
@@ -135,6 +163,8 @@ static void check_backs_store(const char *data_dir) {
         char from[1200], to[1200];
         snprintf(from, sizeof from, "%s/%s", data_dir, files[i]);
         snprintf(to, sizeof to, "%s/%s", dir, files[i]);
+        struct stat st;
+        if (stat(from, &st) != 0) continue;
         if (!copy_file(from, to)) { CHECK(false, "cannot copy %s", from); return; }
     }
     RenderCtx *ctx = render_open(dir, false);
@@ -143,7 +173,7 @@ static void check_backs_store(const char *data_dir) {
 
     static uint8_t before[BACKS_BLOCKS][BACKS_TILES];
     for (int b = 0; b < BACKS_BLOCKS; b++) render_backs_get(ctx, b, before[b]);
-    int bid = 8, x = 5, y = 7;                     // the basement background, some cell
+    int bid = 1, x = 5, y = 7;                     // the first room's background, some cell
     int was = render_backs_tile(ctx, bid, x, y), want = was == 0x21 ? 0x22 : 0x21;
     render_backs_set_tile(ctx, bid, x, y, want);
     CHECK(render_backs_tile(ctx, bid, x, y) == want, "set_tile did not take");
@@ -193,7 +223,11 @@ static void check_backs_store(const char *data_dir) {
             for (int i = 0; i < BACKS_TILES; i++) block[i] = (uint8_t)(rand() % 256);
             render_backs_put(ctx, b, block);
         }
-        CHECK(!render_backs_save(ctx), "an oversized BACKS.SPL was written");
+        stderr_capture();
+        bool saved = render_backs_save(ctx);
+        bool said = stderr_captured("would exceed");
+        CHECK(!saved, "an oversized BACKS.SPL was written");
+        CHECK(said, "the BACKS.SPL refusal did not say why");
         size_t after_len = 0;
         uint8_t *after_bytes = read_whole(p, &after_len);
         CHECK(before_bytes && after_bytes && before_len == after_len && memcmp(before_bytes, after_bytes, before_len) == 0,
@@ -211,19 +245,24 @@ static void check_backs_store(const char *data_dir) {
         CHECK(render_gfx_bytes(ctx, GFX_TILES) == 16 && render_gfx_bytes(ctx, GFX_SPIDS1) == 128, "cga record sizes");
         CHECK(render_gfx_key(ctx, GFX_SPIDS1) == 4, "cga sprite key is the mask colour, got %d", render_gfx_key(ctx, GFX_SPIDS1));
         CHECK(render_gfx_available(ctx, GFX_MASKS1) && render_gfx_available(ctx, GFX_MASKS2), "MASKS1/2.CGA loaded");
-        // frame 24 (Spider-Man standing): a corner is masked out, a body pixel is drawn black,
+        // frame 24 (the player standing): a corner is masked out, the figure has drawn pixels,
         // painting "transparent" and back moves the mask, and a record carries both frames
         CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0) == 4, "cga sprite corner not masked: %d", render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0));
-        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8) != 4, "cga sprite body masked out");
+        int bx = -1, by = -1;
+        for (int y = 0; y < 21 && bx < 0; y++)
+            for (int x = 0; x < 24; x++)
+                if (render_gfx_pixel(ctx, GFX_SPIDS1, 24, x, y) != 4) { bx = x; by = y; break; }
+        CHECK(bx >= 0, "cga sprite frame 24 is masked out everywhere");
+        if (bx < 0) { bx = 16; by = 8; }
         uint8_t rec[GFX_MAX_BYTES], rec2[GFX_MAX_BYTES];
         CHECK(render_gfx_get(ctx, GFX_SPIDS1, 24, rec), "cga sprite record");
-        int body = render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8);
-        render_gfx_set_pixel(ctx, GFX_SPIDS1, 24, 16, 8, 4);
-        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8) == 4, "cga sprite pixel not made transparent");
+        int body = render_gfx_pixel(ctx, GFX_SPIDS1, 24, bx, by);
+        render_gfx_set_pixel(ctx, GFX_SPIDS1, 24, bx, by, 4);
+        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, bx, by) == 4, "cga sprite pixel not made transparent");
         render_gfx_set_pixel(ctx, GFX_SPIDS1, 24, 0, 0, 1);
         CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0) == 1, "cga sprite corner not painted over the mask: %d", render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0));
         render_gfx_put(ctx, GFX_SPIDS1, 24, rec);
-        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, 16, 8) == body && render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0) == 4, "cga sprite record did not restore the mask");
+        CHECK(render_gfx_pixel(ctx, GFX_SPIDS1, 24, bx, by) == body && render_gfx_pixel(ctx, GFX_SPIDS1, 24, 0, 0) == 4, "cga sprite record did not restore the mask");
         CHECK(render_gfx_get(ctx, GFX_SPIDS1, 24, rec2) && memcmp(rec, rec2, 256) == 0, "cga sprite record differs after put");
         render_gfx_set_pixel(ctx, GFX_SPIDS1, 24, 0, 0, 1);
         CHECK(render_gfx_save(ctx, GFX_SPIDS1), "cga sprite save");
@@ -335,6 +374,9 @@ static void check_room_values(const char *rooms_path) {
 
     RoomFile before = {0};
     CHECK(readRooms(&before, "."), "%s: readRooms (before) failed", rooms_path);
+    // The index bases are derived, and every write recomputes them (check_written_bases);
+    // a file written by something that left them stale must not count as a codec change.
+    recomputeBases(&before);
 
     char *dumps[C_ARRAY_LEN(before.rooms)] = {0};
     for (size_t r = 0; r < C_ARRAY_LEN(before.rooms); r++) {
@@ -387,7 +429,11 @@ static void check_rooms_limit(const char *rooms_path) {
         for (size_t i = 0; i < sizeof room->data.tiles; i++) room->data.tiles[i] = (uint8_t)(rand() % 256);
         ARRAY_FREE(room->compressed);
     }
-    CHECK(!writeRooms(&file, ".", NULL, NULL, 0), "an oversized ROOMS.SPL was written");
+    stderr_capture();
+    bool written = writeRooms(&file, ".", NULL, NULL, 0);
+    bool said = stderr_captured("byte limit");
+    CHECK(!written, "an oversized ROOMS.SPL was written");
+    CHECK(said, "the ROOMS.SPL refusal did not say why");
     size_t after_len = 0;
     uint8_t *after = read_whole(copy, &after_len);
     CHECK(before && after && before_len == after_len && memcmp(before, after, before_len) == 0,
@@ -400,6 +446,96 @@ static void check_rooms_limit(const char *rooms_path) {
     if (chdir(cwd) != 0) CHECK(false, "chdir back");
     if (failures == 0) { unlink(copy); snprintf(copy, sizeof copy, "%s/%s.tmp", dir, ROOMS_FILE); unlink(copy); rmdir(dir); }
     printf("rooms file: oversized write refused, file untouched\n");
+}
+
+// Every room's object/switch index bases are cumulative counts over the lower-numbered rooms,
+// and every write must store them that way - including writeFile() on its own, which the
+// CLI's patch / delete / recompress use (a.out delete used to leave the old counts behind,
+// so the game read another object's MOVERTAB.DAT entry). Scramble them, write, read back.
+static void check_written_bases(const char *rooms_path) {
+    const char *tmpdir = getenv("TMPDIR");
+    char dir[1024], cwd[1024];
+    snprintf(dir, sizeof dir, "%s/spl_check_bases.XXXXXX", tmpdir && *tmpdir ? tmpdir : "/tmp");
+    if (mkdtemp(dir) == NULL || getcwd(cwd, sizeof cwd) == NULL) { CHECK(false, "scratch dir for the bases check"); return; }
+    char copy[1200];
+    snprintf(copy, sizeof copy, "%s/%s", dir, ROOMS_FILE);
+    if (!copy_file(rooms_path, copy)) { CHECK(false, "cannot copy %s", rooms_path); return; }
+    if (chdir(dir) != 0) { CHECK(false, "chdir %s", dir); return; }
+    RoomFile file = {0};
+    CHECK(readRooms(&file, "."), "readRooms on the copy failed");
+    for (size_t r = 0; r < 64; r++) {
+        Room *room = &file.rooms[r];
+        if (!room->valid) continue;
+        room->data.UNKNOWN_c = 0x55;
+        room->data.UNKNOWN_f = 0x15;
+        room->data._num_switches = (uint8_t)((room->data._num_switches & ~0x3) | 0x3);
+    }
+    FILE *fp = fopen(ROOMS_FILE, "wb");
+    CHECK(fp && writeFile(&file, fp, NULL), "writeFile failed");
+    if (fp) fclose(fp);
+    freeRoomFile(&file);
+    RoomFile back = {0};
+    CHECK(readRooms(&back, "."), "readRooms after writeFile failed");
+    unsigned objects = 0, switches = 0, rooms = 0;
+    for (size_t r = 0; r < 64; r++) {
+        Room *room = &back.rooms[r];
+        if (!room->valid) continue;
+        CHECK(room->data.UNKNOWN_c == objects, "room %zu: object base %u, the rooms before it hold %u objects",
+              r, room->data.UNKNOWN_c, objects);
+        unsigned base = room->data.UNKNOWN_f * 4u + (room->data._num_switches & 0x3u);
+        CHECK(base == switches, "room %zu: switch base %u, the rooms before it hold %u switches", r, base, switches);
+        objects += room->data.num_objects;
+        switches += room->data.num_switches;
+        rooms++;
+    }
+    freeRoomFile(&back);
+    if (chdir(cwd) != 0) CHECK(false, "chdir back");
+    if (failures == 0) { unlink(copy); rmdir(dir); }
+    printf("rooms file: writeFile stores the index bases of %u rooms as cumulative counts\n", rooms);
+}
+
+// `import` text whose "objects (N)" / "switches (N)" promise more than it lists must be refused
+// with a message, not imported: an object never listed was left a zeroed block, a switch never
+// listed had no preamble, and the next write died on writeRoom's assert.
+static bool import_text(const char *text, RoomFile *file) {
+    FILE *fp = fmemopen((void *)text, strlen(text), "r");
+    if (fp == NULL) return false;
+    bool ok = importRooms(fp, file, -1);
+    fclose(fp);
+    return ok;
+}
+static void check_import_counts(void) {
+    static const char head[] = "Room 5: \"Counts\"\nTiles:\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        "bkgrnd: 1, tiles: 0, dmg: 1, gravity (|): 4, gravity (-): 0\n"
+        "left: 0 - \"\"\ndown: 0 - \"\"\nup: 0 - \"\"\nright: 0 - \"\"\n"
+        "UNKNOWN_b: 1, UNKNOWN_c: 0, UNKNOWN_e: 0, UNKNOWN_f: 0\n";
+    static const char sprite[] = "    sprite 0: (x,y)=4,18 RAT dmg:1\n";
+    static const char sw[] = "    switch 0: (x,y)=2,19 (entry)=false (once)=false (side)=TOP\n      chunks:\n"
+        "        (1) type block: (x,y)=6,13 (width)=2 (on/off)=00/45\n";
+    char text[4096];
+    RoomFile file = {0};
+    snprintf(text, sizeof text, "%s  objects (1):\n%s  switches (1):\n%s", head, sprite, sw);
+    CHECK(import_text(text, &file), "a well-formed room was not imported");
+    freeRoomFile(&file);
+
+    RoomFile objs = {0};
+    snprintf(text, sizeof text, "%s  objects (2):\n%s  switches (1):\n%s", head, sprite, sw);
+    stderr_capture();
+    bool imported = import_text(text, &objs);
+    bool said = stderr_captured("object 1");
+    CHECK(!imported, "a room listing 1 of its 2 objects was imported");
+    CHECK(said, "the object-count refusal did not name the missing object");
+    freeRoomFile(&objs);
+
+    RoomFile sws = {0};
+    snprintf(text, sizeof text, "%s  objects (1):\n%s  switches (3):\n%s", head, sprite, sw);
+    stderr_capture();
+    imported = import_text(text, &sws);
+    said = stderr_captured("switch 1");
+    CHECK(!imported, "a room listing 1 of its 3 switches was imported");
+    CHECK(said, "the switch-count refusal did not name the missing switch");
+    freeRoomFile(&sws);
+    printf("import: rooms listing fewer objects / switches than they declare are refused\n");
 }
 
 // readRooms() / writeRooms() take the data directory explicitly; nothing about them may
@@ -455,7 +591,11 @@ static void check_data_dir(const char *rooms_path) {
     for (size_t r = 0; r < 64; r++) if (again.rooms[r].valid) valid_again++;
     CHECK(valid_again == valid, "room count changed across the data-dir round trip (%d -> %d)", valid, valid_again);
     RoomFile wrong = {0};
-    CHECK(!readRooms(&wrong, a), "readRooms accepted the sentinel as a rooms file");
+    stderr_capture();
+    bool read = readRooms(&wrong, a);
+    bool said = stderr_captured("Could not read header");
+    CHECK(!read, "readRooms accepted the sentinel as a rooms file");
+    CHECK(said, "readRooms refused the sentinel without saying why");
     freeRoomFile(&wrong);
 
     free(orig); free(a_after); free(b_after);
@@ -489,10 +629,12 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s DATA_DIR [SPL_FILE...]\n", argv[0]); return 2; }
     check_random();
     check_tile_hurts();
+    check_import_counts();
     for (int i = 2; i < argc; i++) check_spl_file(argv[i]);
     check_backs_store(argv[1]);
     if (argc > 2) check_room_values(argv[2]);
     if (argc > 2) check_rooms_limit(argv[2]);
+    if (argc > 2) check_written_bases(argv[2]);
     if (argc > 2) check_data_dir(argv[2]);
     if (failures) { fprintf(stderr, "%d check(s) failed\n", failures); return 1; }
     printf("all checks passed\n");

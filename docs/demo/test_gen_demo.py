@@ -49,6 +49,32 @@ class GenDemoTest(unittest.TestCase):
         self.assertEqual(frames[24].tolist(), expected)   # render.c's PLAYER_FRAME
         self.assertEqual(frames[24][0][0], gen_demo.SPRITE_KEY)   # padding stays transparent
 
+    def test_font_round_trips_in_both_modes(self):
+        ega = spidey_gfx.decode_tiles(self.read("CHARSET.EGA"))
+        self.assertEqual(ega.shape, (128, 8, 8))
+        self.assertEqual(ega[0x41].tolist(), gen_demo.glyph("A"))
+        cga = spidey_gfx.packed2(self.read("CHARSET.CGA")[0x41 * 16:0x42 * 16], 8, 8)
+        self.assertEqual(cga.tolist(), gen_demo.glyph("A"))   # white (3) on black in both palettes
+
+    def test_screens_round_trip_in_both_modes(self):
+        for name, (grid, w, h) in gen_demo.screens().items():
+            ega = spidey_gfx.decode_screen(self.read(name + ".EGA"), w, h)
+            self.assertEqual(ega.tolist(), grid, name)
+            cga = spidey_gfx.packed2(self.read(name + ".CGA"), w, h)
+            self.assertEqual(cga.tolist(), [[gen_demo.CGA_OF[c] for c in row] for row in grid], name)
+
+    def test_cga_sprites_carry_their_transparency_in_the_masks(self):
+        stride = gen_demo.CGA_SPIDS_STRIDE
+        frame = gen_demo.picture(gen_demo.HERO_STAND, 24, 21)
+        pixels = spidey_gfx.packed2(self.read("SPIDS1.CGA")[24 * stride:25 * stride], 24, 21)
+        mask = spidey_gfx.packed2(self.read("MASKS1.CGA")[24 * stride:25 * stride], 24, 21)
+        for y in range(21):
+            for x in range(24):
+                if frame[y][x] == gen_demo.SPRITE_KEY:
+                    self.assertEqual((mask[y][x], pixels[y][x]), (3, 0), (x, y))
+                else:
+                    self.assertEqual((mask[y][x], pixels[y][x]), (0, gen_demo.CGA_OF[frame[y][x]]), (x, y))
+
     def test_backgrounds_round_trip(self):
         backs = self.read("BACKS.SPL")
         self.assertEqual(spidey_gfx.backs_tilemap(backs, 1), gen_demo.night_sky())

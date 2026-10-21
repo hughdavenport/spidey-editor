@@ -1190,6 +1190,14 @@ bool writeFile(RoomFile *file, FILE *fp, int *failed_room) {
     //   compressed room
     // must fit within 0x3000 bytes
 
+    // Every room's object/switch index base is a cumulative count over lower-numbered
+    // rooms (recomputeBases' own comment), so it only ever depends on the file's current
+    // layout, never on history: recompute it on every write rather than trusting whatever
+    // a room happened to arrive with (e.g. from being built by cloning another room, from
+    // switches/objects added one at a time in the interactive editor, or from the CLI's
+    // patch / delete, which never touch these fields on their own).
+    recomputeBases(file);
+
     Header head = {0};
     long offset = sizeof(Header);
     if (fseek(fp, offset, SEEK_SET) == -1) return false;
@@ -1394,6 +1402,7 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
     typedef struct { struct SwitchChunk *chunk; char room_name[64]; unsigned switch_idx; } DeferredTB;
     DeferredTB deferred[1024];
     int n_deferred = 0;
+    bool imported[C_ARRAY_LEN(file->rooms)] = {0};   // the rooms this text defines
 
     while (fgets(line, sizeof(line), fp)) {
         strip_ansi(line);
@@ -1409,6 +1418,7 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
             room = &file->rooms[room_id];
             room->valid = true;
             room->index = (uint8_t)room_id;
+            imported[room_id] = true;
             // Parse name from header: Room N @ADDR: "NAME"
             memset(room->data.name, ' ', sizeof(room->data.name));
             char *q = strchr(line, '"');
@@ -1695,6 +1705,26 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
         }
     }
 
+    // "objects (N)" / "switches (N)" allocate N entries; every one must then have been listed.
+    // One never listed would be a zeroed block (no tiles) or a switch with no preamble, which
+    // the next write cannot encode.
+    for (size_t r = 0; r < C_ARRAY_LEN(file->rooms); r++) {
+        if (!imported[r]) continue;
+        struct DecompressedRoom *d = &file->rooms[r].data;
+        for (size_t i = 0; i < d->num_objects; i++) {
+            if (d->objects[i].type == BLOCK && d->objects[i].tiles == NULL) {
+                fprintf(stderr, "import: room %zu declares %u objects but object %zu is not listed\n", r, d->num_objects, i);
+                return false;
+            }
+        }
+        for (size_t i = 0; i < d->num_switches; i++) {
+            if (d->switches[i].chunks.length == 0) {
+                fprintf(stderr, "import: room %zu declares %u switches but switch %zu is not listed\n", r, d->num_switches, i);
+                return false;
+            }
+        }
+    }
+
     // Resolve deferred TOGGLE_BIT entries now that all rooms have been imported
     for (int d = 0; d < n_deferred; d++) {
         DeferredTB *dt = &deferred[d];
@@ -1750,12 +1780,8 @@ bool readRooms(RoomFile *file, const char *dir) {
 
 bool writeRooms(RoomFile *file, const char *dir, int *failed_room, char *dangling_msg, size_t dangling_msg_size) {
     if (failed_room) *failed_room = -1;
-    // Every room's object/switch index base is a cumulative count over lower-numbered
-    // rooms (recomputeBases' own comment), so it only ever depends on the file's current
-    // layout, never on history: recompute it on every save rather than trusting whatever
-    // a room happened to arrive with (e.g. from being built by cloning another room, or
-    // from switches/objects added one at a time in the interactive editor, which - unlike
-    // swap/import - never touched these fields on its own).
+    // The TOGGLE_BIT targets below count switches in global order, so they need the
+    // bases writeFile would otherwise only recompute later.
     recomputeBases(file);
     for (size_t idx = 0; idx < C_ARRAY_LEN(file->rooms); idx ++) {
         Room *r = file->rooms + idx;

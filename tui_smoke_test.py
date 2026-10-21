@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """End-to-end check of the text-mode editor: run `./a.out tui` on a small PTY (30 rows,
 the size that used to crash it) and drive it through a key sequence that fills the text
-panel past the terminal's height - room 9 (Undercroft), whose out-of-bounds switch 0 and its
-12 chunks are listed under the map. The editor must still be running afterwards and its output must
+panel past the terminal's height - room 1 (Switch Demo), whose out-of-bounds switch and its
+chunk are listed under the map. The editor must still be running afterwards and its output must
 hold no assertion message; then Esc, Esc, q must make it exit cleanly.
 
-Runs on a sandbox copy (ROOMS.SPL, MOVERTAB.DAT, BACKS.SPL and the graphics, if present,
-copied to a temp dir handed to the editor with --data-dir), so nothing typed here can touch
-the live files. One child process, hard deadline, killed on the way out if it will not quit.
+Runs on the demo data set (docs/demo: gen_demo.py's graphics, rooms.txt imported) built in a
+temp dir handed to the editor with --data-dir, so it needs none of the game's files and
+nothing typed here can touch the live ones. One child process, hard deadline, killed on the
+way out if it will not quit.
 
     python3 tui_smoke_test.py            (exit 0 = passed)
 """
 import fcntl
-import glob
 import os
 import shutil
 import tempfile
@@ -112,29 +112,26 @@ class Screen:
         return '\n'.join(self.row(y) for y in range(self.rows))
 
 
-def backs_block(bid):
-    """Row 0 of BACKS.SPL block `bid` as the hex the editor should show (render_room's decoder)."""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import render_room
-    render_room._f = lambda name: open(name, 'rb').read()   # the working directory's file, as the editor reads it
-    tiles = render_room.backs_tilemap(bid)
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, 'docs', 'demo'))
+import gen_demo  # noqa: E402
+import spidey_gfx  # noqa: E402
+
+
+def backs_block(sandbox, bid):
+    """Row 0 of BACKS.SPL block `bid` as the hex the editor should show (spidey_gfx's decoder)."""
+    tiles = spidey_gfx.backs_tilemap(open(os.path.join(sandbox, 'BACKS.SPL'), 'rb').read(), bid)
     return ''.join(f'{v:02X}' if v else '  ' for v in tiles[:32])
 
 
 def main():
     failures = []
     sandbox = tempfile.mkdtemp(prefix='spidey-tui-smoke.')
-    for name in ['ROOMS.SPL', 'MOVERTAB.DAT', 'BACKS.SPL'] + glob.glob('*.EGA') + glob.glob('*.CGA'):
-        if os.path.exists(name):
-            shutil.copy(name, os.path.join(sandbox, name))
-    # Put the copy in our own compressor's form first: the editor re-encodes the room whose
-    # switch gets selected, and a file written by an older build re-encodes to different bytes
-    # while meaning the same - the check below is about the sequence not editing anything.
+    gen_demo.main(sandbox)
     import subprocess
-    subprocess.run(['./a.out', '--data-dir', sandbox, 'recompress'], check=True, capture_output=True, timeout=60)
-    have_backs = os.path.exists(os.path.join(sandbox, 'BACKS.SPL')) and os.path.exists(os.path.join(sandbox, 'BLOCKS.EGA'))
-    if not have_backs:
-        print("SKIP the background view check: no BACKS.SPL and graphics here")
+    subprocess.run([os.path.abspath('a.out'), 'import', os.path.join(HERE, 'docs', 'demo', 'rooms.txt'), 'ROOMS.SPL'],
+                   cwd=sandbox, check=True, capture_output=True, timeout=60)
     pid, fd = pty.fork()
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
@@ -151,7 +148,7 @@ def main():
     if 'help' not in scr.text() or 'PgUp/PgDn:' not in scr.text():
         failures.append(f"help box on a 30-row terminal is not shown clipped with a PgUp/PgDn note (row 0 {scr.row(0).rstrip()[:40]!r})")
     os.write(fd, b'\x1f'); more = drain(fd, 0.6); out += more; scr.feed(more.decode('latin1'))
-    for key in ['r', '0', '9']:   # Undercroft: its out-of-bounds switch 0 and its 12 chunks are listed under a 30-row screen
+    for key in ['r', '0', '1']:   # Switch Demo: its out-of-bounds switch and chunk are listed under a 30-row screen
         os.write(fd, key.encode())
         more = drain(fd, 0.4); out += more; scr.feed(more.decode('latin1'))
         if time.time() - start > DEADLINE_S:
@@ -174,28 +171,27 @@ def main():
         if 'type block' not in scr.text():
             failures.append("the switch's chunk list did not scroll into view")
         # Ctrl-B: the background block's hex replaces the map; Esc brings the room back
-        if have_backs:
-            os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'01'); more = drain(fd, 0.6); scr.feed(more.decode('latin1'))
-            os.write(fd, b'\x02'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
-            expect = backs_block(1)
-            if scr.row(1)[:64] != expect:
-                failures.append(f"Ctrl-B map row 0 is {scr.row(1)[:64]!r}, BACKS.SPL block 1 says {expect!r}")
-            if 'BACKGROUND 01' not in scr.text():
-                failures.append("Ctrl-B panel does not name the background block")
-            # s 02 inside the view: another sheet, shown with its own room list
-            os.write(fd, b's'); drain(fd, 0.3); os.write(fd, b'02'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
-            if 'BACKGROUND 02' not in scr.text() or 'used by rooms:' not in scr.text():
-                failures.append("s 02 in the background view did not switch to sheet 02")
-            expect2 = backs_block(2)
-            if scr.row(1)[:64] != expect2:
-                failures.append(f"sheet 02 map row 0 is {scr.row(1)[:64]!r}, BACKS.SPL block 2 says {expect2!r}")
-            # r 09 inside the view: the room prompt works and the view comes back for Undercroft (its own block again)
-            os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'09'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
-            if 'BACKGROUND 08' not in scr.text() or 'Undercroft' not in scr.row(0):
-                failures.append(f"r 09 in the background view did not show Undercroft's background (header {scr.row(0).rstrip()[:60]!r})")
-            os.write(fd, b'\x1b'); more = drain(fd, 0.6); scr.feed(more.decode('latin1'))
-            if 'BACKGROUND 08' in scr.row(23):
-                failures.append("Esc did not leave the background view")
+        os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'01'); more = drain(fd, 0.6); scr.feed(more.decode('latin1'))
+        os.write(fd, b'\x02'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
+        expect = backs_block(sandbox, 1)
+        if scr.row(1)[:64] != expect:
+            failures.append(f"Ctrl-B map row 0 is {scr.row(1)[:64]!r}, BACKS.SPL block 1 says {expect!r}")
+        if 'BACKGROUND 01' not in scr.text():
+            failures.append("Ctrl-B panel does not name the background block")
+        # s 02 inside the view: another sheet, shown with its own room list
+        os.write(fd, b's'); drain(fd, 0.3); os.write(fd, b'02'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
+        if 'BACKGROUND 02' not in scr.text() or 'used by rooms:' not in scr.text():
+            failures.append("s 02 in the background view did not switch to sheet 02")
+        expect2 = backs_block(sandbox, 2)
+        if scr.row(1)[:64] != expect2:
+            failures.append(f"sheet 02 map row 0 is {scr.row(1)[:64]!r}, BACKS.SPL block 2 says {expect2!r}")
+        # r 03 inside the view: the room prompt works and the view comes back for Rooftop (its own block again)
+        os.write(fd, b'r'); drain(fd, 0.3); os.write(fd, b'03'); more = drain(fd, 0.8); scr.feed(more.decode('latin1'))
+        if 'BACKGROUND 01' not in scr.text() or 'Rooftop' not in scr.row(0):
+            failures.append(f"r 03 in the background view did not show Rooftop's background (header {scr.row(0).rstrip()[:60]!r})")
+        os.write(fd, b'\x1b'); more = drain(fd, 0.6); scr.feed(more.decode('latin1'))
+        if 'BACKGROUND 01' in scr.row(23):
+            failures.append("Esc did not leave the background view")
         for key in ['\x1b', '\x1b', 'q']:
             os.write(fd, key.encode())
             out += drain(fd, 0.4)
