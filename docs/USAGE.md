@@ -8,7 +8,7 @@ system in depth), and some metadata (background, gravity, room links, name).
 
 There are three ways to work with a `ROOMS.SPL`:
 
-- **`./a.out editor`** - an interactive terminal (TUI) editor.
+- **`./a.out tui`** - an interactive terminal (TUI) editor.
 - **`./a.out gui`** - a graphical (raylib) editor with a picture of the room,
   mouse support, and pixel/sprite/background editors. It runs the *same*
   underlying editor as the TUI (same keys, same state machine) with a
@@ -18,7 +18,13 @@ There are three ways to work with a `ROOMS.SPL`:
   as text, patching raw bytes, deleting things, swapping rooms, rendering
   PNGs.
 
-All three read `ROOMS.SPL` from the current directory by default.
+`./a.out editor` opens the GUI when there is a display (`DISPLAY` or
+`WAYLAND_DISPLAY` set) and the TUI otherwise.
+
+All of them read `ROOMS.SPL` (and `MOVERTAB.DAT`, `BACKS.SPL`, the graphics)
+from one data directory: the current directory, or the one given with
+`--data-dir DIR` anywhere on the command line. Writes go there too, unless a
+command is given an `OUT.SPL` to write instead.
 
 ## Building
 
@@ -29,6 +35,10 @@ make          # ./a.out, ASAN + debug. editor.so / gui.so are built on first
 make release  # ./spidey-editor: one static binary, no hot reload, -O2
 make check    # round-trip tests for the .SPL codec and the background store
 ```
+
+`make check`, `python3 tui_smoke_test.py` and `./gui_smoke_test.sh` need none
+of the game's files: they run on the demo data set `docs/demo/gen_demo.py`
+generates, in scratch directories.
 
 `make` needs nothing beyond a C compiler; raylib 6.0 is vendored in
 `raylib-6.0_linux_amd64/`.
@@ -42,21 +52,25 @@ make check    # round-trip tests for the .SPL codec and the background store
 ```
 
 ```
+Options (any position):
+    --data-dir DIR                       - Directory holding ROOMS.SPL, MOVERTAB.DAT, BACKS.SPL and the graphics (default: the working directory)
 Subcommands:
-    rooms                                 - List rooms
-    display [ROOMID]                      - Defaults to all rooms
+    rooms                                - List rooms
+    display [ROOMID]                     - Defaults to all rooms
     import [FILE|-] [OUT.SPL]             - Import display output (rooms not in file blanked); writes OUT.SPL (default ROOMS.SPL)
     importRoom ROOMID [FILE|-] [OUT.SPL]  - Import one room at ROOMID; writes OUT.SPL (default ROOMS.SPL)
-    recompress                            - No changes to underlying data, just recompress
-    swap A B [--movertab FILE]            - Exchange rooms A and B (links, bases, toggle bits follow); permutes FILE or ./MOVERTAB.DAT into OUT's MOVERTAB.DAT
-    patch ROOMID ADDR VAL [ADDR VAL]...   - Patch room by changing the bytes requested. For multiple rooms provide patch command again
-    delete ROOM_ID thing...               - Delete switch/chunk/object from room
-    find_tile TILE [OFFSET]               - Find a tile/offset pair
-    find_sprite SPRITENAME                - Find a sprite
-    render ROOMID|all|montage OUT|DIR     - Render room(s) to PNG (--debug --scale N --data-dir DIR)
-    gui [--data-dir DIR] [--scale N]      - raylib GUI editor (terminal-editor keys)
-    editor                                - Start the text-mode editor
-    help                                  - Display this message
+    recompress                           - No changes to underlying data, just recompress
+    swap A B [--movertab FILE]           - Exchange rooms A and B (links, bases, toggle bits follow); permutes FILE or the data dir's MOVERTAB.DAT into OUT's MOVERTAB.DAT
+    patch ROOMID ADDR VAL [ADDR VAL]...  - Patch room by changing the bytes requested. For multiple rooms provide patch command again
+    delete ROOM_ID thing...              - Delete switch/chunk/object from room
+    find_tile TILE [OFFSET]              - Find a tile/offset pair
+    find_sprite SPRITENAME               - Find a sprite
+    render ROOMID|all|montage OUT|DIR    - Render room(s) to PNG (--debug --scale N --movertab FILE)
+    editor [--scale N]                   - The GUI when a display is available (DISPLAY / WAYLAND_DISPLAY), else the text-mode editor
+    gui [--scale N]                      - raylib GUI editor (terminal-editor keys)
+    tui                                  - Text-mode editor
+      (SPIDEY_NO_HOTRELOAD=1 turns off source watching in the debug build; `make release` has none)
+    help                                 - Display this message
 ```
 
 ### `rooms` - a one-line-per-room listing
@@ -135,7 +149,7 @@ in either room follow it, and the per-room object/switch index bases
 (`UNKNOWN_c`/`UNKNOWN_f`) are recomputed. `--movertab` also permutes the
 corresponding block of `MOVERTAB.DAT` so a room's objects keep their
 initial movement/flip state after the swap. Without `--movertab`, it reads
-and writes `./MOVERTAB.DAT` if present.
+and writes the data directory's `MOVERTAB.DAT` if present.
 
 ### `render` - room(s) to PNG
 
@@ -154,8 +168,8 @@ files (see [the GUI section](#the-gui-editor) - same requirement there).
 ### `find_tile` / `find_sprite` - search across all rooms
 
 ```sh
-./a.out find_tile 0x5c        # every room/position using tile 0x5c
-./a.out find_tile 0x5c 3      # ...specifically as the 4th byte of a run
+./a.out find_tile 0x1c        # every room using tile 0x1c of a tileset (0-63, attribute bits left off)
+./a.out find_tile 0x1c 4      # ...only in rooms on tileset 4 (0, 4, ... 28)
 ./a.out find_sprite RAT       # every room with a RAT sprite
 ```
 
@@ -167,7 +181,7 @@ tile or enemy type is actually used.
 ## The TUI editor
 
 ```sh
-./a.out editor
+./a.out tui
 ```
 
 Needs a real terminal (`TIOCGWINSZ` fails over a pipe) at least
@@ -179,9 +193,9 @@ The screen is: a one-line header (cursor position, room id/name, hex/dec
 mode, clipboard indicator), the 32x22 room grid (two hex digits per tile,
 foreground tile value; colour overlays for objects/switches when their
 `Ctrl-D` toggle is on), and an info panel below showing whatever is under
-the cursor - room metadata, the switch or object there, and (always) a
-pinned "Out of bounds switches" list for anything placed off the visible
-grid (a common trick for switches that only ever act as *targets*, never
+the cursor - room metadata, the switch or object there, and (always) an
+"Out of bounds switches" list for anything placed off the visible grid, at
+the end of the panel (PgUp/PgDn scroll a panel taller than the terminal) (a common trick for switches that only ever act as *targets*, never
 drawn - see [SWITCHES.md](SWITCHES.md)).
 
 `Ctrl-?` opens a full keybinding help overlay at any time (screenshot
@@ -263,11 +277,13 @@ one capitalised.
 ./a.out gui --data-dir Spider --scale 3
 ```
 
-`--data-dir` must point at a directory with the *actual game's* graphics
+`--data-dir` must point at a directory with the game's graphics
 (`BLOCKS.EGA`, `SPIDS1.EGA`, `SPIDS2.EGA`, `SCENERY.EGA`, `CHARSET.EGA`,
 `BACKS.SPL`, the `.CGA` equivalents, `MASKS1.CGA`/`MASKS2.CGA`) - these are
 Paragon Software's copyrighted 1990 assets and are **not** shipped with this
-repo. `--scale` is the pixel-doubling factor for the room picture (each
+repo. `python3 docs/demo/gen_demo.py DIR` writes an original stand-in set to
+try the editor with (then `a.out import docs/demo/rooms.txt` in `DIR` for
+some rooms); the screenshots here are of it. `--scale` is the pixel-doubling factor for the room picture (each
 8x8 tile becomes `8*scale` px); it defaults to whatever fits the window and
 follows window resizes unless pinned.
 
