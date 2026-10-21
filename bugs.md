@@ -176,7 +176,7 @@ This explains the "section of top wall hurts with no obvious reason"
 Heliport observation — must be hurt tiles in the bottom row of Sky Highway
 (or whichever room sits above Heliport) bleeding through.
 
-## 2026-09-15 — Root causes found while building LEVELSET2 (see levelset2/NOTES.md)
+## 2026-09-15 — Root causes found while building a levelset generator
 
 Verified in headless DOSBox-X with throwaway test rooms:
 
@@ -187,8 +187,8 @@ Verified in headless DOSBox-X with throwaway test rooms:
   every room shares object slots 0..n and switch fields 0..m, and `MOVERTAB.DAT` (3 bytes per
   global object, byte 2 = initial behaviour: b8 walking sprite, 00 static block) is read
   through the same wrong indices. A levelset needs correct bases and its own MOVERTAB.DAT;
-  `levelset2/gen_levelset2.py` computes both, and since 2026-09-19 the editor recomputes them
-  on every save (`recomputeBases` in `writeFile`), as `import` and `swap` already did.
+  since 2026-09-19 the editor recomputes the bases on every save (`recomputeBases` in
+  `writeFile`), as `import` and `swap` already did.
 - `entry=true` switches are contact sensors (player or object overlapping the tile), not
   room-entry triggers.
 - A toggle-block chunk is at most 8 tiles wide/high (3-bit size); width 9 wraps to 1.

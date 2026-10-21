@@ -102,8 +102,8 @@ bool readHeader(Header *head, FILE *fp) {
 // Not yet exposed by the editor (display or edit) - when it is, clamp away from the known-bad
 // 0x7e/0x7f zone per byte/object-type above rather than exposing the full 0x00-0xff range.
 
-// Describe a TOGGLE_OBJECT command byte. Verified in DOSBox-X 2026-09-15 (see
-// levelset2/gen_levelset2.py and project memory): 0x00 stop; 0x10/0x20/0x30 down
+// Describe a TOGGLE_OBJECT command byte. Verified in DOSBox-X 2026-09-15 with throwaway
+// test rooms: 0x00 stop; 0x10/0x20/0x30 down
 // slow/medium/fast; 0x50/0x60 up slow/medium (0x70 up fast is the same pattern but
 // untested); 0x01/0x02 right slow/normal (0x03 right fast untested); 0x05/0x06 left
 // slow/normal (0x07 left fast untested); 0x09-0x0f kills the object's sprite
@@ -1553,9 +1553,8 @@ bool importRooms(FILE *fp, RoomFile *file, int force_room_id) {
             obj->type = SPRITE;
             obj->x = sx; obj->y = sy;
             obj->sprite.damage = sdmg;
-            // A sprite doesn't need a tile under it - one there just blocks the sprite (same
-            // policy as the LEVELSET2 generator's room() helper; Hugh: "the import/export keeps
-            // tiles underneath the sprites... strip [them]").
+            // A sprite doesn't need a tile under it - one there just blocks the sprite (Hugh: "the
+            // import/export keeps tiles underneath the sprites... strip [them]").
             if (sx >= 0 && sx < WIDTH_TILES && sy >= 0 && sy < HEIGHT_TILES) room->data.tiles[TILE_IDX(sx, sy)] = 0;
             _Static_assert(NUM_SPRITE_TYPES == 8, "Unexpected number of sprite types");
             if      (strcmp(stype, "SHARK")        == 0) obj->sprite.type = SHARK;

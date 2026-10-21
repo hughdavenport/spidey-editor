@@ -17,6 +17,12 @@ Spider/
 *.dat
 *.EXE
 *.exe
+# ... and the editor's backups and copies of them
+*.orig
+*.original
+*.mine
+original/
+backup/
+Spider-claude/
 spl_check
 spidey-editor
-levelset2/orig_room*.txt

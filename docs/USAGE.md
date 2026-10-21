@@ -80,8 +80,8 @@ metadata (background, gravity, damage, room links), and every object and
 switch/chunk, in the same textual notation the editors use. This is also
 the format `import`/`importRoom` read back in, so `display > rooms.txt`,
 hand-edit `rooms.txt`, then `import rooms.txt` is a legitimate (if
-old-fashioned) editing workflow - the one the bundled level generators
-(`levelset2/gen_levelset2.py`) actually use.
+old-fashioned) editing workflow - and the natural target for a script
+that generates levels.
 
 `display`'s per-object and per-chunk text is exactly what
 [SWITCHES.md](SWITCHES.md) explains field-by-field, and exactly what you'll
