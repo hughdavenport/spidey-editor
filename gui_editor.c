@@ -210,6 +210,10 @@ void ged_backs_show(bool *tiles, bool *blocks, bool *sprites, bool *chunks) {
 }
 void ged_set_backs_view(bool on) {
     if (on && state->rctx == NULL) on = false;
+    // The background view sits over plain editing only, as the TUI's Ctrl-B does: its own
+    // Ctrl-D and r borrow previous_state, so raised over an open switch or chunk they left
+    // the editor in chunk editing with no switch open (and a later key read switches[-1]).
+    if (on && !state->backs_view) editor_cancel_to_plain();
     if (state->backs_view != on) state->partial_byte = 0;
     if (!on) { state->backs_sheet = -1; state->backs_sheet_prompt = 0; }   // leaving: back to the room's own block
     state->backs_view = on;

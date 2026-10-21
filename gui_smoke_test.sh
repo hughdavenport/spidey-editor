@@ -3,51 +3,50 @@
 # with xdotool through help, movement, goto room/switch/object, room details,
 # the hex map, Ctrl-D display toggles, a mouse click, a Shift+drag paint
 # stroke and a hot reload, screenshotting each step into $T, then quits with
-# q. Everything runs on a sandbox copy, so the paint stroke changes only the
-# sandbox's Spider/ROOMS.SPL. Needs Xvfb, xdotool and ImageMagick's import.
+# q. Everything runs on a sandbox copy with the demo data set (docs/demo: gen_demo.py's
+# graphics, rooms.txt imported) as its data dir, so it needs none of the game's files and the
+# edits change only the sandbox's data/. Needs Xvfb, xdotool and ImageMagick's import.
 #   ASAN_OPTIONS=detect_leaks=0 ./gui_smoke_test.sh     (leaks: run without)
 set -u
 T=${T:-/tmp/spidey-gui-smoke}
 mkdir -p "$T"
 R=$(cd "$(dirname "$0")" && pwd)
-# Run from a sandbox copy so the test never touches the repo's ROOMS.SPL, the
-# game files, or a GUI you have open on them (the hot-reload step rebuilds
-# gui.so inside the sandbox from copied sources).
+# Run from a sandbox copy so the test never touches the repo's files, the game's,
+# or a GUI you have open on them (the hot-reload step rebuilds gui.so inside the
+# sandbox from copied sources).
 SB=$T/sandbox
 rm -rf "$SB"; mkdir -p "$SB"
-cp $R/*.c $R/*.h $R/a.out $R/gui.so $R/play.sh $R/ROOMS.SPL "$SB/"
+# no gui.so: the GUI builds its own from the copied sources, so a stale one in the repo cannot hide a change
+cp $R/*.c $R/*.h $R/a.out $R/play.sh "$SB/"
 [ -x $R/spidey-editor ] && cp $R/spidey-editor "$SB/"
 BIN=${BIN:-./a.out}   # BIN=./spidey-editor tests the release build
-cp -r $R/Spider "$SB/Spider"
-# --data-dir Spider below means the GUI reads and writes Spider/ROOMS.SPL (and MOVERTAB.DAT):
-# give that sandbox data dir the repo's own rooms, not the game's shipped copy.
-cp $R/ROOMS.SPL "$SB/Spider/ROOMS.SPL"
-[ -f $R/MOVERTAB.DAT ] && cp $R/MOVERTAB.DAT "$SB/Spider/MOVERTAB.DAT"
+python3 $R/docs/demo/gen_demo.py "$SB/data"
+(cd "$SB/data" && $R/a.out import $R/docs/demo/rooms.txt ROOMS.SPL >/dev/null 2>&1)
 ln -sfn $R/raylib-6.0_linux_amd64 "$SB/raylib-6.0_linux_amd64"
 cd "$SB"
-rm -f Spider/*.orig
 pkill -f "^Xvfb :97" 2>/dev/null; sleep 0.3
 Xvfb :97 -screen 0 1600x1200x24 -nolisten tcp >/dev/null 2>&1 &
 XV=$!
 sleep 1
 export DISPLAY=:97
-$BIN gui --data-dir Spider --scale 3 > $T/gui.log 2>&1 &
+$BIN gui --data-dir data --scale 3 > $T/gui.log 2>&1 &
 GP=$!
-( sleep 150; kill -9 $GP 2>/dev/null ) &   # the hot-reload step recompiles gui.so with ASAN inside the sandbox
+( sleep 240; kill -9 $GP 2>/dev/null ) &   # gui.so is built at start and again by the hot-reload step, with ASAN, inside the sandbox
 WD=$!
 snap() { import -window root "$T/$1.png"; }
-sleep 4; snap s1-start
+for _ in $(seq 120); do xdotool search --name "Spidey Editor" >/dev/null 2>&1 && break; sleep 1; done   # gui.so builds first
+sleep 2; snap s1-start
 eval $(xdotool search --name "Spidey Editor" getwindowgeometry --shell | head -5)
 echo "window at $X,$Y size ${WIDTH}x${HEIGHT}"
 xdotool key ctrl+shift+slash; sleep 0.5; snap s2-nohelp
 xdotool key l l l j j; sleep 0.5; snap s3-moved
 xdotool key r; sleep 0.4; snap s4a-gotoroom-list; xdotool type 02; sleep 0.6; snap s4-room2
-xdotool key r; sleep 0.3; xdotool type 03; sleep 0.6; snap s4b-lift
-xdotool mousemove $((X + 30)) $((Y + HEIGHT - 60)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s4c-lift-oob-click
-# TAKE 1's floor is a hurting tile (7C): red in the Ctrl-D t tile overlay and red borders in the picker until Ctrl-D t turns it off
+xdotool key r; sleep 0.3; xdotool type 01; sleep 0.6; snap s4b-switch-demo
+xdotool mousemove $((X + 30)) $((Y + HEIGHT - 60)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s4c-oob-switch-click
+# Switch Demo's lava (5C/5D) hurts: red in the Ctrl-D t tile overlay and red borders in the picker until Ctrl-D t turns it off
 # (help is up at this point; hide it for these two frames and put it back)
-xdotool key r; sleep 0.3; xdotool type 07; sleep 0.6; xdotool key ctrl+shift+slash; sleep 0.4; snap s4d-take1-hurt-on
-xdotool key ctrl+d; sleep 0.2; xdotool key t; sleep 0.5; snap s4e-take1-tiles-off
+xdotool key r; sleep 0.3; xdotool type 01; sleep 0.6; xdotool key ctrl+shift+slash; sleep 0.4; snap s4d-lava-hurt-on
+xdotool key ctrl+d; sleep 0.2; xdotool key t; sleep 0.5; snap s4e-lava-tiles-off
 xdotool key ctrl+d; sleep 0.2; xdotool key t; sleep 0.3; xdotool key ctrl+shift+slash; sleep 0.3
 xdotool key r; sleep 0.3; xdotool type 02; sleep 0.6
 xdotool key ctrl+r; sleep 0.5; snap s5-roomdetails
@@ -60,9 +59,10 @@ xdotool key o; sleep 0.5; snap s8b-gotoobject-mode; xdotool key Escape; sleep 0.
 xdotool key ctrl+shift+slash; sleep 0.5; snap s8c-help-overlay; xdotool key ctrl+shift+slash; sleep 0.3
 # picture scale 3: tile = 24 px, picture origin (0,24). left click on tile (10,5)
 xdotool mousemove $((X + 10*24 + 12)) $((Y + 24 + 5*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s9-click
-# drag: room 1, pull the helicopter block (9,15) two tiles right; the cursor must stay put
+# drag: room 1, pull the lift block (19-21,18) two tiles right by its right end (its left end is
+# under switch 1's link line, where a press selects the chunk); the cursor must stay put
 xdotool key r; sleep 0.2; xdotool type 01; sleep 0.5
-xdotool mousemove $((X + 9*24 + 12)) $((Y + 24 + 15*24 + 12)) mousedown 1; sleep 0.1
+xdotool mousemove $((X + 21*24 + 12)) $((Y + 24 + 18*24 + 12)) mousedown 1; sleep 0.1
 xdotool mousemove_relative 24 0; sleep 0.1; xdotool mousemove_relative 24 0; sleep 0.2; snap s9b-dragging
 xdotool mouseup 1; sleep 0.6; snap s9c-dragged
 xdotool key u; sleep 0.5
@@ -121,7 +121,7 @@ xdotool key Escape; sleep 0.5; snap s12m-back-from-screens   # Esc leaves screen
 xdotool mousemove $((X + 876 + 46)) $((Y + 544 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8   # screens again...
 xdotool key q; sleep 0.5; snap s12n-q-leaves-screens   # ...and q leaves it too
 xdotool mousemove $((X + 776 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3  # back to tiles
-# world map (right of picture, under palette labels): click room 1's thumbnail -> Midnight.
+# world map (right of picture, under palette labels): click room 1's thumbnail -> Switch Demo.
 # buttons under the picker in two columns (x 776 / 876, rows of 32 px from y 416, below the tallest picker (sprite sheets / font); attributes level with the swatches at 224 / 256); world map at 584; thumbs ~65x45 + 4 gap (height-limited)
 xdotool mousemove $((X + 776 + 1*72 + 30)) $((Y + 584 + 20)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.6; snap s13-worldmap-click
 # wheel over the picture: background -1 (wheel down), Shift+wheel: tileset +4; then undo both
@@ -132,11 +132,11 @@ xdotool mousemove $((X + 776 + 100)) $((Y + 24 + 100)) click 4; sleep 0.4; snap 
 xdotool key u; sleep 0.3; xdotool key u; sleep 0.3; xdotool key u; sleep 0.3
 # wheel over the text panel scrolls it (room 1 has a short panel: no-op is fine)
 xdotool mousemove $((X + 200)) $((Y + 24 + 528 + 40)) click 5 click 5; sleep 0.3; snap s14-scrolled
-# block editor: cursor onto block O0 (helicopter) with o0; the panel shows its 6x2 tiles.
-# click the "solid" attribute, then paint cell (1,1) of the block (zoom 32 px per tile) and undo
+# block editor: cursor onto block O0 (the lift) with o0; the panel shows its 3x1 tiles.
+# paint cell (1,0) of the block (36 px per tile) and undo
 xdotool key r; sleep 0.2; xdotool type 01; sleep 0.5
 xdotool key o; sleep 0.2; xdotool type 0; sleep 0.6; snap s14b-block-selected
-xdotool mousemove $((X + 984 + 1*36 + 18)) $((Y + 24 + 1*36 + 18)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s14c-block-painted
+xdotool mousemove $((X + 984 + 1*36 + 18)) $((Y + 24 + 0*36 + 18)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.8; snap s14c-block-painted
 xdotool key u; sleep 0.4
 # block export / import (block buttons sit under the picker, two per row from y 224: import = row 2 left, export = row 2 right): the PNG round-trips to the same tiles
 xdotool mousemove $((X + 876 + 46)) $((Y + 288 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5
@@ -146,17 +146,25 @@ xdotool key u; sleep 0.4
 xdotool mousemove $((X + 776 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c3-block-hidden
 xdotool mousemove $((X + 776 + 46)) $((Y + 416 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.5; snap s14c4-block-back
 xdotool key ctrl+b; sleep 0.6; snap s14c5-block-ctrlb; xdotool key ctrl+b; sleep 0.4   # background mode with a block under the cursor: no block panel
-# thick link lines: cursor on switch 4 (o0's toggling switch), snapshot
-xdotool key s; sleep 0.2; xdotool type 4; sleep 0.6; snap s14d-switch-hot
-# switch link: open switch 0 in Midnight (goto switch, Ctrl-S), right-click object O1 (R2D2 at 26,7)
-# Space previews the open switch active (switch 1's trapdoor tiles at (15-16,4) show their on
-# state), Space again idles it; Esc leaves switch editing before the switch-0 steps below
-xdotool key s; sleep 0.2; xdotool type 1; sleep 0.3; xdotool key ctrl+s; sleep 0.5
+# thick link lines: cursor on switch 1 (o0's toggling switch), snapshot
+xdotool key s; sleep 0.2; xdotool type 1; sleep 0.6; snap s14d-switch-hot
+# switch link: open switch 0 in Switch Demo (goto switch, Ctrl-S), right-click object O1 (the rat at 6,18)
+# Space previews the open switch active (its gate at (26,17-19) opens), Space again idles it;
+# Esc leaves switch editing before the switch-0 steps below
+xdotool key s; sleep 0.2; xdotool type 0; sleep 0.3; xdotool key ctrl+s; sleep 0.5
 xdotool key space; sleep 0.5; snap s14e-switch-preview-on; xdotool key space; sleep 0.5; snap s14f-switch-preview-off
 xdotool key Escape; sleep 0.3
 xdotool key s; sleep 0.2; xdotool type 0; sleep 0.3; xdotool key ctrl+s; sleep 0.5; snap s15-switch-open
-xdotool mousemove $((X + 26*24 + 12)) $((Y + 24 + 7*24 + 12)) mousedown 3; sleep 0.08; xdotool mouseup 3; sleep 0.6; snap s16-linked-object
+xdotool mousemove $((X + 6*24 + 12)) $((Y + 24 + 18*24 + 12)) mousedown 3; sleep 0.08; xdotool mouseup 3; sleep 0.6; snap s16-linked-object
 xdotool key Escape; sleep 0.2; xdotool key Escape; sleep 0.2; xdotool key Escape; sleep 0.2; xdotool key u; sleep 0.4
+# the backs picker over an open chunk: the background mode must not leave the editor in chunk
+# editing with no switch open (Ctrl-D there used to overwrite Escape's way back, and the s
+# after Ctrl-S / Escape read switches[-1])
+xdotool key s; sleep 0.2; xdotool type 1; sleep 0.3; xdotool key ctrl+s; sleep 0.3; xdotool key c; xdotool type 1; sleep 0.4
+xdotool mousemove $((X + 876 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4   # backs
+xdotool key ctrl+d; sleep 0.3; xdotool key t; sleep 0.3; xdotool key ctrl+d; sleep 0.3; xdotool key t; sleep 0.3
+xdotool mousemove $((X + 776 + 46)) $((Y + 448 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.4   # tiles
+xdotool key ctrl+s; sleep 0.3; xdotool key Escape; sleep 0.3; xdotool key s; sleep 0.3; xdotool key Escape; sleep 0.3; snap s16b-backs-over-chunk
 xdotool key r; sleep 0.2; xdotool type 02; sleep 0.5
 # palette right of the picture: (768+8, 16); pick tile 0x12 (row 2, col 2)
 xdotool mousemove $((X + 776 + 2*24 + 12)) $((Y + 24 + 2*24 + 12)) mousedown 1; sleep 0.08; xdotool mouseup 1; sleep 0.3
@@ -171,11 +179,12 @@ xdotool key q; sleep 1.5
 if kill -0 $GP 2>/dev/null; then echo "STILL RUNNING after q"; kill $GP; else echo "exited after q"; fi
 wait $GP 2>/dev/null; echo "gui exit=$?"
 kill $WD 2>/dev/null; kill $XV 2>/dev/null
-[ -e Spider/BLOCKS.EGA.orig ] && echo "BLOCKS.EGA was written by the pixel edit (expected)" || echo "BLOCKS.EGA never written (pixel edit did not save!)"
-[ -e Spider/SPIDS1.EGA.orig ] && echo "SPIDS1.EGA was written by the sprite edit (expected)" || echo "SPIDS1.EGA never written (sprite edit did not save!)"
-[ -e Spider/BACKS.SPL.orig ] && echo "BACKS.SPL was written by the background edit (expected)" || echo "BACKS.SPL never written (background edit did not save!)"
-[ -e Spider/CHARSET.EGA.orig ] && echo "CHARSET.EGA was written by the font edit (expected)" || echo "CHARSET.EGA never written (font edit did not save!)"
-[ -e Spider/LOADSCRN.EGA.orig ] && echo "LOADSCRN.EGA was written by the screen edit (expected)" || echo "LOADSCRN.EGA never written (screen edit did not save!)"
-[ -e Spider/LOADSCRN.png ] && echo "LOADSCRN.png was exported (expected)" || echo "LOADSCRN.png never exported!"
-[ -e Spider/BLOCK-01-0.png ] && echo "BLOCK-01-0.png was exported (expected)" || echo "BLOCK-01-0.png never exported!"
+[ -e data/BLOCKS.EGA.orig ] && echo "BLOCKS.EGA was written by the pixel edit (expected)" || echo "BLOCKS.EGA never written (pixel edit did not save!)"
+[ -e data/SPIDS1.EGA.orig ] && echo "SPIDS1.EGA was written by the sprite edit (expected)" || echo "SPIDS1.EGA never written (sprite edit did not save!)"
+[ -e data/BACKS.SPL.orig ] && echo "BACKS.SPL was written by the background edit (expected)" || echo "BACKS.SPL never written (background edit did not save!)"
+[ -e data/CHARSET.EGA.orig ] && echo "CHARSET.EGA was written by the font edit (expected)" || echo "CHARSET.EGA never written (font edit did not save!)"
+[ -e data/LOADSCRN.EGA.orig ] && echo "LOADSCRN.EGA was written by the screen edit (expected)" || echo "LOADSCRN.EGA never written (screen edit did not save!)"
+[ -e data/LOADSCRN.png ] && echo "LOADSCRN.png was exported (expected)" || echo "LOADSCRN.png never exported!"
+[ -e data/BLOCK-01-0.png ] && echo "BLOCK-01-0.png was exported (expected)" || echo "BLOCK-01-0.png never exported!"
 tail -8 $T/gui.log
+if grep -q 'ERROR: AddressSanitizer' $T/gui.log; then echo "FAIL: AddressSanitizer report in $T/gui.log"; exit 1; fi

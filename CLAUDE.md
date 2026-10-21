@@ -7,7 +7,7 @@ A terminal-based map editor for "The Amazing Spider-Man" (1990 DOS game). Reads/
 ```sh
 make             # builds ./a.out with ASAN + debug; editor.so / gui.so are built on first use and hot-reload
 make release     # builds ./spidey-editor: one binary, editor + GUI linked in, static raylib, -O2, no hot reload
-make check       # spl_check: .SPL compressor round trips + background store save/reload (scratch copy of Spider/)
+make check       # spl_check on the generated demo data (docs/demo), then on Spider/ if present; scratch copies only
 ./a.out editor   # the GUI when a display is available (DISPLAY / WAYLAND_DISPLAY), else the text-mode editor
 ./a.out tui      # the text-mode editor; ./a.out gui the GUI, whatever the environment
 ./a.out help     # show all patch commands
@@ -340,8 +340,19 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   imported as ROOMS.SPL), never the game's copyrighted files. Retake them after a GUI layout change;
   the script's clicks assume `--scale 3`. It needs a real X socket, so it cannot run in a sandbox
   without /tmp/.X11-unix. `docs/demo/test_gen_demo.py` checks the encodings via spidey_gfx.py.
-- `gui_smoke_test.sh` runs in a sandbox copy (sources, binaries, Spider/, ROOMS.SPL) so it
-  never touches the live files or a GUI you have open.
+- The tests need none of the game's files: `make check`, `tui_smoke_test.py` and `gui_smoke_test.sh`
+  build the demo data set (`docs/demo/gen_demo.py` + `rooms.txt` imported) in a temp dir / sandbox and
+  run against that (`make check` then repeats its checks on a scratch copy of Spider/ when there is
+  one). Nothing they do writes outside their scratch directories. Expected refusals are captured
+  and asserted (`stderr_capture` / `stderr_captured` in spl_check.c), so a passing run prints no
+  stray errors. `gui_smoke_test.sh` builds its own gui.so in the sandbox (never copies the repo's,
+  which may be stale) and fails on any AddressSanitizer report in its log.
+- Saves recompute the per-room index bases in `writeFile` itself, so the CLI's patch / delete /
+  recompress store them correctly too (they used to keep stale ones). `import` refuses text whose
+  `objects (N)` / `switches (N)` lists fewer entries than it declares.
+- In the GUI the background view is raised over plain editing only: `ged_set_backs_view` cancels
+  to plain first, as the TUI's Ctrl-B requires (its Ctrl-D and `r` borrow `previous_state`; over an
+  open chunk they left chunk editing with no switch, and a later key read `switches[-1]`).
 - Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh run `a.out swap 1 N` on the
   copy the game runs from, so you start in the room being edited. `swap` exchanges two rooms with
   exits, TOGGLE_BIT targets, the per-room index bases (`UNKNOWN_c` = objects before this room,
