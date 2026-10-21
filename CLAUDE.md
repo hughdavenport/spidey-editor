@@ -335,6 +335,11 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   is forwarded to the editor (`r`, `s`, digits, Ctrl-X, ...), returns focus to the room, so
   `r` then `h`/`l` types into the room prompt rather than moving the world-map selection. `u` after a mouse-driven room edit goes to the room undo.
 - The hint text lives in the Ctrl-? overlay (GUI lines appended under the editor's box).
+- docs/screenshots/*.png are taken by `docs/demo/screenshots.sh` against original stand-in data
+  (`docs/demo/gen_demo.py`: tiles, scenery, sprites, BACKS.SPL, MOVERTAB.DAT; `docs/demo/rooms.txt`
+  imported as ROOMS.SPL), never the game's copyrighted files. Retake them after a GUI layout change;
+  the script's clicks assume `--scale 3`. It needs a real X socket, so it cannot run in a sandbox
+  without /tmp/.X11-unix. `docs/demo/test_gen_demo.py` checks the encodings via spidey_gfx.py.
 - `gui_smoke_test.sh` runs in a sandbox copy (sources, binaries, Spider/, ROOMS.SPL) so it
   never touches the live files or a GUI you have open.
 - Ctrl-P / play.sh: `PLAY_ROOM` (set by fork_play) makes play.sh run `a.out swap 1 N` on the

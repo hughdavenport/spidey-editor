@@ -271,6 +271,14 @@ repo. `--scale` is the pixel-doubling factor for the room picture (each
 8x8 tile becomes `8*scale` px); it defaults to whatever fits the window and
 follows window resizes unless pinned.
 
+The screenshots in these docs show the editor on a stand-in data set, not
+the game's: `docs/demo/gen_demo.py` draws its own tiles, backgrounds and
+sprites and `docs/demo/rooms.txt` holds a small demo levelset with every
+kind of switch chunk. `docs/demo/screenshots.sh` retakes them (Xvfb,
+xdotool, ImageMagick); `python3 docs/demo/test_gen_demo.py` checks the
+generated files decode to what was drawn. That data set also works as a
+`--data-dir` for trying the editor without the game.
+
 ![GUI overview](screenshots/gui-overview.png)
 
 The GUI runs the *exact same* editor state machine as the TUI - every key

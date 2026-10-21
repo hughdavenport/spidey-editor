@@ -1,0 +1,127 @@
+Room 1: "Switch Demo             "
+Tiles:
+42                                                            43
+42                                                            43
+42                                                            43
+42  0C                                                        43
+42                                                            43
+42                                    454545                  43
+42                                      16                    43
+42                                      16                    43
+42                                      16                    43
+42                                      16                    43
+42                        0E            16                    43
+42                    4545454545454545  16                    43
+42                      424242424242    16                    43
+42                      424242424242    16                    43
+42                      42420D0D4242    16
+42    444444444444      424242424242    16
+42                      424242424242    16
+42                      42420D0D4242    16
+42  48                  424242424242
+42  48  0E          11  424242424242                      17
+464646464646464646464646464646464646464646465C5C5C46464646464646
+474747474747474747474747474747474747474747475D5D5D47474747474747
+
+bkgrnd: 1, tiles: 0, dmg: 1, gravity (|): 4, gravity (-): 0
+left: 0 - ""
+down: 0 - ""
+up: 3 - "Rooftop"
+right: 2 - "Store Room"
+UNKNOWN_b: 1, UNKNOWN_c: 0, UNKNOWN_e: 0, UNKNOWN_f: 0
+  objects (3):
+    block 0: (x,y)=19,18 (w,h)=3,1
+        545355
+    sprite 1: (x,y)=6,18 RAT dmg:1
+    sprite 2: (x,y)=27,18 DINOSAUR dmg:1
+  switches (4):
+    switch 0: (x,y)=4,19 (entry)=false (once)=false (side)=TOP
+      chunks:
+        (1) type block: (x,y)=26,17 (height)=3 (on/off)=00/50
+        (2) type toggle: (room) Store Room (switch) 0 (on/off)=1/2
+    switch 1: (x,y)=10,19 (entry)=true (once)=false (side)=TOP
+      chunks:
+        (1) type object: idx=0 value=0x50 test=2 (up)
+    switch 2: (x,y)=13,10 (entry)=false (once)=true (side)=TOP
+      chunks:
+        (1) type object: idx=2 value=0x88 test=2
+    switch 3: (x,y)=0,22 (entry)=false (once)=true (side)=TOP
+      chunks:
+        (1) type block: (x,y)=3,8 (width)=4 (on/off)=45/00
+  Left over data (length=1): [0x00]
+
+Room 2: "Store Room              "
+Tiles:
+4242424242424242424242424242424242424242424242424242424242424242
+                                                              42
+                        0C                      0C            42
+                                                              42
+                                                              42
+                                                              42
+                                                              42
+                                                              42
+                                                              42
+                                                              42
+                                                              42
+                                                              42
+                                                              42
+            454545454545454545                                42
+                                                              42
+                                                              42
+                    18                                        42
+                                                  48          42
+                                        48        48          42
+                11                      4848    4848          42
+4343434343434343434343434343434343434343434343434343434343434343
+4343434343434343434343434343434343434343434343434343434343434343
+
+bkgrnd: 2, tiles: 0, dmg: 1, gravity (|): 4, gravity (-): 0
+left: 1 - "Switch Demo"
+down: 0 - ""
+up: 0 - ""
+right: 0 - ""
+UNKNOWN_b: 1, UNKNOWN_c: 0, UNKNOWN_e: 0, UNKNOWN_f: 0
+  objects (1):
+    sprite 0: (x,y)=14,18 MUMMY dmg:1
+  switches (1):
+    switch 0: (x,y)=8,19 (entry)=true (once)=false (side)=TOP
+      chunks:
+        (1) type block: (x,y)=6,13 (width)=8 (on/off)=00/45
+        (2) type toggle: (room) Switch Demo (switch) 0 (on/off)=1/0
+  Left over data (length=1): [0x00]
+
+Room 3: "Rooftop                 "
+Tiles:
+
+
+
+
+
+
+
+
+
+                                    44444444444444444444
+
+
+
+
+        444444444444444444
+
+
+
+
+
+                              1759
+4545454545454545454545454545454545454545454545454545454545454545
+
+bkgrnd: 1, tiles: 0, dmg: 1, gravity (|): 4, gravity (-): 0
+left: 0 - ""
+down: 1 - "Switch Demo"
+up: 0 - ""
+right: 0 - ""
+UNKNOWN_b: 1, UNKNOWN_c: 0, UNKNOWN_e: 0, UNKNOWN_f: 0
+  objects (1):
+    sprite 0: (x,y)=21,7 WOLF dmg:1
+  switches (0):
+  Left over data (length=1): [0x00]

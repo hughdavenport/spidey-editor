@@ -25,4 +25,5 @@ original/
 backup/
 Spider-claude/
 spl_check
+__pycache__/
 spidey-editor
