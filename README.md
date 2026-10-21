@@ -5,6 +5,10 @@
 
 This repo is a hobby project implementing a map editor for [The Amazing Spider Man](https://en.wikipedia.org/wiki/The_Amazing_Spider-Man_\(1990_video_game\)). This game was originally developed for the Commodore 64 and Amiga, and later ported to IBM PC compatibles. I personally knew it from DOS (IBM PC). It was developed in a [YouTube series](https://www.youtube.com/watch?v=LjgvuFc71fo&list=PL5r5Q39GjMDfYcGEZ6O_a0Y1WVbgpv5W-)
 
+Working out the game's file formats got a hand from [Spider-claude](https://github.com/hughdavenport/Spider-claude), an early experiment in using Claude to do the reverse engineering.
+
+Newer work - a graphical editor, editing of the game's graphics and backgrounds, documentation and more - is on the [`new-features`](https://github.com/hughdavenport/spidey-editor/tree/new-features) branch.
+
 The editor should theoretically work with the `ROOMS.SPL` file from any installation on any platform. My testing so far has been on the DOS version.
 
 The editor itself runs on linux, and it may run on other platforms. To build:
