@@ -249,7 +249,7 @@ typedef struct {
     bool goto_coord_move; /* false = move cursor (g), true = warp item (G) */
 
     char room_detail;
-    char room_name[24];
+    char room_name[25];   /* the room name being edited or typed, as a C string (the field is 24 chars) */
     size_t roomname_length;
     size_t roomname_cursor;
     bool room_delete_mode;   /* GOTO_ROOM: Ctrl-D toggles; next room picked is blanked, not entered */

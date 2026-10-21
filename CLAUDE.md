@@ -345,8 +345,9 @@ Makefile compiles `main.c room.c editor.c` with `-fsanitize=address -ggdb -Werro
   run against that (`make check` then repeats its checks on a scratch copy of Spider/ when there is
   one). Nothing they do writes outside their scratch directories. Expected refusals are captured
   and asserted (`stderr_capture` / `stderr_captured` in spl_check.c), so a passing run prints no
-  stray errors. `gui_smoke_test.sh` builds its own gui.so in the sandbox (never copies the repo's,
-  which may be stale) and fails on any AddressSanitizer report in its log.
+  stray errors. `gui_smoke_test.sh` builds its own gui.so in the sandbox and `tui_smoke_test.py` its
+  own editor.so (they never use the repo's, which may be stale); the GUI one fails on any
+  AddressSanitizer report in its log.
 - Saves recompute the per-room index bases in `writeFile` itself, so the CLI's patch / delete /
   recompress store them correctly too (they used to keep stale ones). `import` refuses text whose
   `objects (N)` / `switches (N)` lists fewer entries than it declares.

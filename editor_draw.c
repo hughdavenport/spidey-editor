@@ -819,6 +819,9 @@ void redraw() {
     // before this feature existed), so try once here too - the first redraw of any session,
     // old or new, is guaranteed to hit this.
     if (!state->movertab_load_attempted) movertab_load();
+    // The panel's next row. Declared before the room list's goto show_help_if_needed, which
+    // jumps past the panel; the label stores it as panel_end either way.
+    int bottom = HEIGHT_TILES + 1;
     panel_oob_switch_n = 0;
     {   // PgUp/PgDn: never scroll the panel past the point where its last row (as drawn last
         // frame; the panel's height rarely changes between frames) sits on the bottom line
@@ -1595,8 +1598,6 @@ for (int i = C_ARRAY_LEN(neighbour_name) - 1; i >= 0; i --) { \
         scr_printf(",");
         PRINTF_DATA(state->cursors[state->current_level].y);
     }
-
-    int bottom = HEIGHT_TILES + 1;
 
     if (debugany()) bottom ++;
     if (state->debug.data) {

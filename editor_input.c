@@ -747,7 +747,7 @@ static bool handle_edit_roomname(Key key) {
             if (key.ch == 'J' || key.ch == 'M') {
                 /* ENTER: Ctrl-J (\n) from a terminal, Ctrl-M (\r) from the GUI's KEY_ENTER */
                 struct DecompressedRoom *room = &state->rooms.rooms[*cursorlevel].data;
-                assert(C_ARRAY_LEN(state->room_name) <= C_ARRAY_LEN(room->name));
+                assert(C_ARRAY_LEN(state->room_name) - 1 <= C_ARRAY_LEN(room->name));   /* the name plus its NUL */
                 push_undo((uint8_t)state->current_level, false);
                 /* Every room name shipped with the game is space-padded to the full field
                  * width (e.g. "Foyer                   "), not NUL-padded: strncpy's normal
@@ -2175,19 +2175,20 @@ static bool handle_edit_switchdetails_chunk_switch(Key key) {
     return true;
 }
 
+/* The current room's name into state->room_name as a C string, its padding spaces trimmed. */
+static void load_room_name(void) {
+    const char *name = state->rooms.rooms[state->current_level].data.name;
+    size_t n = C_ARRAY_LEN(state->rooms.rooms[0].data.name);
+    _Static_assert(sizeof(state->room_name) > sizeof(state->rooms.rooms[0].data.name), "room_name holds a full name and its NUL");
+    memset(state->room_name, 0, sizeof(state->room_name));
+    memcpy(state->room_name, name, n);
+    while (n > 0 && (state->room_name[n - 1] == ' ' || state->room_name[n - 1] == '\0')) state->room_name[--n] = '\0';
+}
+
 static bool handle_edit_switchdetails_chunk_switch_room(Key key) {
     size_t *cursorlevel = &state->current_level;
 
-    /* helper: restore room_name to current room's name */
-#define RESTORE_ROOM_NAME() do { \
-    strncpy(state->room_name, state->rooms.rooms[*cursorlevel].data.name, C_ARRAY_LEN(state->room_name)); \
-    for (size_t _i = 0; _i < C_ARRAY_LEN(state->room_name); _i ++) { \
-        if (state->room_name[C_ARRAY_LEN(state->room_name) - _i] == '\0') continue; \
-        if (state->room_name[C_ARRAY_LEN(state->room_name) - _i] == ' ') { \
-            state->room_name[C_ARRAY_LEN(state->room_name) - _i] = '\0'; \
-        } else { break; } \
-    } \
-} while (0)
+#define RESTORE_ROOM_NAME() load_room_name()
 
     switch (key.code) {
         case KEY_CHAR:
@@ -3532,15 +3533,7 @@ static bool handle_tile_edit(Key key) {
             state->switch_on = false;
             state->current_chunk = 0;
             state->roomname_cursor = 0;
-            strncpy(state->room_name, state->rooms.rooms[*cursorlevel].data.name, C_ARRAY_LEN(state->room_name));
-            for (size_t j = 0; j < C_ARRAY_LEN(state->room_name); j ++) {
-                if (state->room_name[C_ARRAY_LEN(state->room_name) - j] == '\0') continue;
-                if (state->room_name[C_ARRAY_LEN(state->room_name) - j] == ' ') {
-                    state->room_name[C_ARRAY_LEN(state->room_name) - j] = '\0';
-                } else {
-                    break;
-                }
-            }
+            load_room_name();
             break;
         case '-': {
             struct RoomObject *object_underneath = NULL;

@@ -13,6 +13,8 @@ way out if it will not quit.
     python3 tui_smoke_test.py            (exit 0 = passed)
 """
 import fcntl
+import glob
+import subprocess
 import os
 import shutil
 import tempfile
@@ -125,17 +127,66 @@ def backs_block(sandbox, bid):
     return ''.join(f'{v:02X}' if v else '  ' for v in tiles[:32])
 
 
-def main():
-    failures = []
+def code_sandbox():
+    """A copy of the sources and a.out to run the editor from: with no editor.so there it builds
+    its own, so a stale editor.so in the repo cannot stand in for the code under test."""
+    code = tempfile.mkdtemp(prefix='spidey-tui-code.')
+    for name in glob.glob(os.path.join(HERE, '*.c')) + glob.glob(os.path.join(HERE, '*.h')) + [os.path.join(HERE, 'a.out')]:
+        shutil.copy(name, code)
+    return code
+
+
+def demo_sandbox():
+    """A temp data dir holding the demo data set: gen_demo.py's files and rooms.txt imported."""
     sandbox = tempfile.mkdtemp(prefix='spidey-tui-smoke.')
     gen_demo.main(sandbox)
-    import subprocess
     subprocess.run([os.path.abspath('a.out'), 'import', os.path.join(HERE, 'docs', 'demo', 'rooms.txt'), 'ROOMS.SPL'],
                    cwd=sandbox, check=True, capture_output=True, timeout=60)
+    return sandbox
+
+
+def check_room_name(code):
+    """R takes a name the full width of the field: 24 characters typed are 24 saved."""
+    failures = []
+    sandbox = demo_sandbox()
+    pid, fd = pty.fork()
+    if pid == 0:
+        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', 50, COLS, 0, 0))
+        os.environ['SPIDEY_NO_HOTRELOAD'] = '1'
+        os.chdir(code)
+        os.execv('./a.out', ['./a.out', '--data-dir', sandbox, 'tui'])
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 50, COLS, 0, 0))
+    drain_until_quiet(fd, 40.0, quiet=0.8)
+    name = 'ABCDEFGHIJKLMNOPQRSTUVWX'
+    for key in ['\x1f', 'R'] + list(name) + ['\r', '\x1b', 'q']:
+        os.write(fd, key.encode())
+        drain(fd, 0.1)
+    for _ in range(30):
+        done, _status = exited(pid)
+        if done:
+            break
+        time.sleep(0.1)
+    if not done:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        failures.append("editor did not quit after renaming a room")
+    shown = subprocess.run(['./a.out', '--data-dir', sandbox, 'display', '1'], capture_output=True, text=True, timeout=30).stdout
+    first = re.sub(r'\x1b\[[0-9;]*m', '', shown).splitlines()[0] if shown else ''
+    if f'"{name}"' not in first:
+        failures.append(f"a 24-character room name was saved as {first!r}")
+    shutil.rmtree(sandbox, ignore_errors=True)
+    return failures
+
+
+def main():
+    code = code_sandbox()
+    failures = check_room_name(code)
+    sandbox = demo_sandbox()
     pid, fd = pty.fork()
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
         os.environ['SPIDEY_NO_HOTRELOAD'] = '1'
+        os.chdir(code)
         os.execv('./a.out', ['./a.out', '--data-dir', sandbox, 'tui'])
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
     start = time.time()
@@ -207,6 +258,7 @@ def main():
         elif os.WIFSIGNALED(status):
             failures.append(f"editor died of signal {os.WTERMSIG(status)} on quit")
     rooms_after = open(os.path.join(sandbox, 'ROOMS.SPL'), 'rb').read()
+    shutil.rmtree(code, ignore_errors=True)
     if rooms_after != rooms_before:
         failures.append("the key sequence (nothing in it edits) rewrote ROOMS.SPL differently")
     shutil.rmtree(sandbox, ignore_errors=True)
