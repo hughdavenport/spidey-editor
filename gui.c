@@ -3039,6 +3039,12 @@ void *gui_loop(const char *library, RoomFile *file, const char *data_dir, int sc
         g->scale = scale > 0 ? scale : DEFAULT_SCALE;
         SetConfigFlags(FLAG_WINDOW_RESIZABLE);
         InitWindow(window_w(g), window_h(g), "Spidey Editor — GUI");
+        if (!IsWindowReady()) {   // no display: every texture and font load after this would call into a GL that is not there
+            fprintf(stderr, "gui: could not open a window (no display?); `tui` is the text-mode editor\n");
+            render_close(g->rctx);
+            free(g);
+            exit(1);
+        }
         SetTargetFPS(60);
         SetExitKey(KEY_NULL);   // ESC is "cancel" in the editor; quit with q or the window button
         g->es = ged_open(file, NULL, data_dir);

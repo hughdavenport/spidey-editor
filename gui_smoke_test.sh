@@ -8,6 +8,7 @@
 # edits change only the sandbox's data/. Needs Xvfb, xdotool and ImageMagick's import.
 #   ASAN_OPTIONS=detect_leaks=0 ./gui_smoke_test.sh     (leaks: run without)
 set -u
+fail=0
 T=${T:-/tmp/spidey-gui-smoke}
 mkdir -p "$T"
 R=$(cd "$(dirname "$0")" && pwd)
@@ -24,6 +25,11 @@ python3 $R/docs/demo/gen_demo.py "$SB/data"
 (cd "$SB/data" && $R/a.out import $R/docs/demo/rooms.txt ROOMS.SPL >/dev/null 2>&1)
 ln -sfn $R/raylib-6.0_linux_amd64 "$SB/raylib-6.0_linux_amd64"
 cd "$SB"
+# no display at all: the GUI must say so and exit 1, not crash (this run also builds gui.so)
+(unset WAYLAND_DISPLAY; DISPLAY=:96 $BIN gui --data-dir data > $T/nodisplay.log 2>&1); rc=$?
+if [ $rc -ne 1 ] || ! grep -q 'could not open a window' $T/nodisplay.log || grep -q AddressSanitizer $T/nodisplay.log; then
+    echo "FAIL: with no display the GUI exited $rc without saying it could not open a window (see $T/nodisplay.log)"; fail=1
+else echo "no display: refused cleanly (expected)"; fi
 pkill -f "^Xvfb :97" 2>/dev/null; sleep 0.3
 Xvfb :97 -screen 0 1600x1200x24 -nolisten tcp >/dev/null 2>&1 &
 XV=$!
@@ -187,4 +193,5 @@ kill $WD 2>/dev/null; kill $XV 2>/dev/null
 [ -e data/LOADSCRN.png ] && echo "LOADSCRN.png was exported (expected)" || echo "LOADSCRN.png never exported!"
 [ -e data/BLOCK-01-0.png ] && echo "BLOCK-01-0.png was exported (expected)" || echo "BLOCK-01-0.png never exported!"
 tail -8 $T/gui.log
-if grep -q 'ERROR: AddressSanitizer' $T/gui.log; then echo "FAIL: AddressSanitizer report in $T/gui.log"; exit 1; fi
+if grep -q 'ERROR: AddressSanitizer' $T/gui.log; then echo "FAIL: AddressSanitizer report in $T/gui.log"; fail=1; fi
+exit $fail
